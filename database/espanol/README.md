@@ -28,3 +28,12 @@
 
 ## InfinityFree
 Para modificar `if0_43460400_rutahyd2`: recuperar el inicio de sesion, obtener un respaldo SQL comprobable, medir registros y restricciones existentes, preparar migracion que conserve datos y adaptar previamente backend. NO ejecutar el DDL local directamente en esa base, pues `CREATE TABLE IF NOT EXISTS` no renombra tablas preexistentes.
+
+## Conversion del servidor existente (sin datos borrados)
+
+Se añaden scripts **PREPARADOS, NO EJECUTADOS**:
+- `06_previa_infinityfree.sql`: inspeccion de tablas y estado.
+- `07_migrar_infinityfree_desde_32_tablas.sql`: parte de las 32 tablas originales y crea `ventas`, `detalles_ventas` faltantes en español.
+- `08_migrar_infinityfree_desde_34_tablas.sql`: solo si existen también `sales` y `sale_details` previamente.
+
+**Importante**: son cambios estructurales NO reversibles automáticamente y NO idempotentes. Revisar backup y compatibilidad antes de usarlos. Una ejecución fallida puede dejar parte del esquema renombrada. Estos SQL de migración cambian nombres de columnas y tablas; no traducen por sí solos los valores de estados, permisos y textos guardados. La adaptación Laravel queda pendiente.

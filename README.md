@@ -4,6 +4,12 @@ Backend independiente de Ruta H&D V1. Código preparado para la base **`if0_4346
 
 **Estado:** código versionado y compilable; no se presupone despliegue en Internet. La aplicación de producción V1 sigue separada. No se incluyen contraseñas ni `.env` real.
 
+## Automatización gratuita sin agentes web de pago
+
+RutaH&D2 usa **GitHub Actions + Playwright** como canal principal de compilación, pruebas en Chromium y despliegue FTP/FTPS aislado. No depende de TinyFish ni de sus créditos. Guía: [docs/AUTOMATIZACION_GRATUITA.md](docs/AUTOMATIZACION_GRATUITA.md).
+
+Desde VS Code: `npm install`, `npx playwright install chromium`, `npm run test:e2e`. Es necesario configurar el backend Laravel local (Composer, `.env` y, para pruebas completas, MySQL).
+
 ## Arquitectura
 
 - 34 modelos Eloquent con tablas, atributos, relaciones y marcas de tiempo **en español**.

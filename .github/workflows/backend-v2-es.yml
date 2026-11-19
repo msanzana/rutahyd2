@@ -63,6 +63,29 @@ jobs:
           grep -q 'disponible' /tmp/health.json
           STATUS=$(curl -s -o /tmp/protegido.json -w '%{http_code}' -H "Accept: application/json" http://127.0.0.1:8000/api/v1/perfil)
           test "$STATUS" = "401"
+      - name: Instalar Node.js para pruebas Playwright
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar Playwright sin servicios externos
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Probar API con navegador Chromium (Playwright)
+        env:
+          CI: 'true'
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:8000
+        run: npm run test:e2e
+      - name: Adjuntar resultados Playwright
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahyd2-playwright-resultados
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Empaquetar backend listo para configurar
         run: |
           mkdir -p paquete

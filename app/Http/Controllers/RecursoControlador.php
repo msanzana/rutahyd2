@@ -53,7 +53,8 @@ final class RecursoControlador extends Controller
                 ->where('permisos.codigo',$definicion[1])->exists();
             abort_unless($autorizado,403);
         }
-        return new $definicion[0]();
+        $clase=$definicion[0];
+        return new $clase();
     }
 
     public function listar(Request $solicitud,string $recurso)

@@ -1,0 +1,94 @@
+name: Preparar backend RutaHD2 V2 por FTPS (staging bloqueado)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  subir-staging:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FTP_DEST: /htdocs/api-v2
+      API_URL: https://rutahyd2.free.nf/api-v2/
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/backend-v2-es
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, intl, xml, dom, curl, pdo_mysql, fileinfo, openssl
+      - name: Exigir secreto FTPS sin mostrarlo
+        run: |
+          test -n "$FTP_PASSWORD" || { echo "::error::Falta configurar INFINITYFREE_FTP_PASSWORD en GitHub Actions Secrets"; exit 1; }
+      - name: Compilar Laravel sin dependencias de desarrollo
+        run: composer install --no-dev --prefer-dist --no-interaction --no-progress
+      - name: Preparar contenido sin .env ni archivos secretos
+        run: |
+          mkdir -p despliegue
+          cp -a app bootstrap config public routes vendor artisan composer.json composer.lock despliegue/
+          mkdir -p despliegue/storage/logs despliegue/storage/app/private despliegue/storage/framework/cache/data despliegue/storage/framework/sessions despliegue/storage/framework/views
+          test -f despliegue/vendor/autoload.php
+          test -f despliegue/public/index.php
+          test "$(find despliegue/app/Models -maxdepth 1 -name '*.php' | wc -l)" -eq 34
+          if test -e despliegue/.env; then echo "::error::No se permite transferir .env desde GitHub"; exit 1; fi
+          printf '%s\n' '<IfModule mod_authz_core.c>' 'Require all denied' '</IfModule>' '<IfModule !mod_authz_core.c>' 'Deny from all' '</IfModule>' > /tmp/htaccess_staging
+      - name: Instalar cliente FTP sobre TLS
+        run: sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Colocar protección antes de subir código
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/ftp_guard.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 30
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          mkdir -p "$FTP_DEST"
+          put /tmp/htaccess_staging -o "$FTP_DEST/.htaccess"
+          bye
+          EOF
+          lftp -f /tmp/ftp_guard.lftp
+          rm -f /tmp/ftp_guard.lftp
+      - name: Comprobar bloqueo HTTP de staging antes de publicar archivos
+        run: |
+          ESTADO=$(curl -sSL -o /dev/null -w '%{http_code}' "$API_URL")
+          echo "Estado del directorio staging: $ESTADO"
+          test "$ESTADO" = "403" || { echo "::error::El directorio no devuelve 403. Se detiene la transferencia por seguridad."; exit 1; }
+      - name: Transferir app y vendor cifrados sin activar API
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/ftp_upload.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 3
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          cd "$FTP_DEST"
+          mirror -R --verbose=0 --continue --parallel=3 --exclude-glob=.env --exclude-glob=.env.* despliegue .
+          bye
+          EOF
+          lftp -f /tmp/ftp_upload.lftp
+          rm -f /tmp/ftp_upload.lftp
+      - name: Confirmar que sigue protegido
+        run: |
+          ESTADO=$(curl -sSL -o /dev/null -w '%{http_code}' "$API_URL")
+          echo "Estado final de staging: $ESTADO"
+          test "$ESTADO" = "403"
+          echo "Código transferido a staging protegido. NO se activó la API ni se subió .env."

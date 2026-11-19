@@ -1,0 +1,44 @@
+name: Backend RutaHD2 V2 español - comprobar y empaquetar
+on:
+  push:
+    branches: [ feature/backend-v2-es ]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validar-y-empaquetar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, intl, xml, dom, curl, pdo_mysql, fileinfo, openssl
+      - name: Validar sintaxis de PHP
+        run: |
+          find app bootstrap config routes public database/migrations -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Validar manifest Composer
+        run: composer validate --no-check-publish
+      - name: Instalar vendor para desplegar en hosting sin Composer
+        run: composer install --no-dev --prefer-dist --no-interaction --no-progress
+      - name: Verificar rutas del backend
+        env:
+          APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          DB_CONNECTION: mysql
+        run: php artisan route:list --path=api
+      - name: Empaquetar backend listo para configurar
+        run: |
+          mkdir -p paquete
+          cp -a app bootstrap config public routes vendor artisan composer.json composer.lock .env.example deployment README.md paquete/
+          mkdir -p paquete/database/migrations paquete/database/espanol
+          cp database/migrations/*.php paquete/database/migrations/
+          cp database/espanol/12_tokens_acceso_opcional.sql paquete/database/espanol/
+          mkdir -p paquete/storage/logs paquete/storage/app/private paquete/storage/framework/cache/data paquete/storage/framework/sessions paquete/storage/framework/views
+          touch paquete/storage/logs/.gitkeep paquete/storage/framework/cache/data/.gitkeep paquete/storage/framework/sessions/.gitkeep paquete/storage/framework/views/.gitkeep
+          cd paquete && zip -q -r ../rutahyd2-v2-backend-con-vendor.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahyd2-v2-backend-con-vendor
+          path: rutahyd2-v2-backend-con-vendor.zip
+          retention-days: 14

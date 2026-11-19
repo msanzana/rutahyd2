@@ -38,6 +38,8 @@ final class AppServiceProvider extends ServiceProvider
         $this->app->bind(\App\Repositories\Contracts\MonthlySalesTargetRepositoryInterface::class, \App\Repositories\Eloquent\MonthlySalesTargetRepository::class);
         $this->app->bind(\App\Repositories\Contracts\ScheduledWorkdayRepositoryInterface::class, \App\Repositories\Eloquent\ScheduledWorkdayRepository::class);
         $this->app->bind(\App\Repositories\Contracts\AuditLogRepositoryInterface::class, \App\Repositories\Eloquent\AuditLogRepository::class);
+        $this->app->bind(\App\Repositories\Contracts\SaleRepositoryInterface::class, \App\Repositories\Eloquent\SaleRepository::class);
+        $this->app->bind(\App\Repositories\Contracts\SaleDetailRepositoryInterface::class, \App\Repositories\Eloquent\SaleDetailRepository::class);
     }
     public function boot(): void {}
 }

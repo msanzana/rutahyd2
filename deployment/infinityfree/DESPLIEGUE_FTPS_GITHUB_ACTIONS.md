@@ -6,7 +6,7 @@
 
 1. Abrir GitHub `msanzana/rutahyd2` → **Settings → Secrets and variables → Actions → New repository secret**.
 2. Crear secreto con nombre EXACTO **`INFINITYFREE_FTP_PASSWORD`**. El valor es la contraseña FTP de tu cuenta de InfinityFree `if0_43460400`. Puedes consultar FTP Details en InfinityFree; nunca colocarla en el código ni en chats.
-3. En GitHub → **Actions** → flujo **Preparar backend RutaHD2 V2 por FTPS (staging bloqueado)** → **Run workflow** → seleccionar rama `feature/backend-v2-es`.
+3. En GitHub → **Actions** → flujo **Preparar backend RutaHD2 V2 por FTPS (staging bloqueado)** → **Run workflow** → seleccionar rama `main`. El flujo de `main` descargará y desplegará el código de `feature/backend-v2-es`.
 4. El flujo compila Laravel, sube primero `/htdocs/api-v2/.htaccess` que bloquea accesos, comprueba HTTP 403 y luego transfiere `app`, `vendor`, `config`, `routes`, `public`, etc. por **FTPS explícito** (TLS).
 5. La API permanece **bloqueada a propósito** hasta configurar la seguridad y activarla. No hay `.env` ni credenciales en el despliegue. Comprobar que el workflow termine con marca verde.
 

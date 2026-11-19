@@ -1,4 +1,17 @@
+/.env
+/.env.*
+!/.env.example
+/vendor/
 /node_modules/
+/storage/*.key
+/storage/logs/*
+!/storage/logs/.gitkeep
+/storage/framework/cache/data/*
+/bootstrap/cache/*.php
+/.phpunit.cache
+/.idea/
+/.vscode/
+/public/storage
 /playwright-report/
 /test-results/
 /playwright/.cache/

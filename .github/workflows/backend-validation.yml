@@ -1,0 +1,29 @@
+name: Validar Laravel backend
+on:
+  push:
+    branches: [ main, feature/laravel-repository-map ]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  syntax-and-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, xml, dom, curl, pdo_mysql, fileinfo
+          tools: composer:v2
+      - name: PHP syntax validation
+        run: |
+          find app bootstrap config routes public database/migrations -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Composer manifest validation
+        run: composer validate --no-check-publish
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+      - name: Route compilation smoke test
+        env:
+          APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          DB_CONNECTION: mysql
+        run: php artisan route:list --path=api

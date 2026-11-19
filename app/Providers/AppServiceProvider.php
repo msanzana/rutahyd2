@@ -6,40 +6,40 @@ final class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->app->bind(\App\Repositories\Contracts\RoleRepositoryInterface::class, \App\Repositories\Eloquent\RoleRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\PermissionRepositoryInterface::class, \App\Repositories\Eloquent\PermissionRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\RolePermissionRepositoryInterface::class, \App\Repositories\Eloquent\RolePermissionRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\UserRepositoryInterface::class, \App\Repositories\Eloquent\UserRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\CustomerRepositoryInterface::class, \App\Repositories\Eloquent\CustomerRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\SupplierRepositoryInterface::class, \App\Repositories\Eloquent\SupplierRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\ProductCategoryRepositoryInterface::class, \App\Repositories\Eloquent\ProductCategoryRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\ProductRepositoryInterface::class, \App\Repositories\Eloquent\ProductRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\ProductPresentationRepositoryInterface::class, \App\Repositories\Eloquent\ProductPresentationRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\ProductImageRepositoryInterface::class, \App\Repositories\Eloquent\ProductImageRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\CustomerPriceRepositoryInterface::class, \App\Repositories\Eloquent\CustomerPriceRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\WarehouseRepositoryInterface::class, \App\Repositories\Eloquent\WarehouseRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\StockBalanceRepositoryInterface::class, \App\Repositories\Eloquent\StockBalanceRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\StockMovementRepositoryInterface::class, \App\Repositories\Eloquent\StockMovementRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\PromotionRepositoryInterface::class, \App\Repositories\Eloquent\PromotionRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\PromotionItemRepositoryInterface::class, \App\Repositories\Eloquent\PromotionItemRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\PurchaseOrderRepositoryInterface::class, \App\Repositories\Eloquent\PurchaseOrderRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\PurchaseOrderItemRepositoryInterface::class, \App\Repositories\Eloquent\PurchaseOrderItemRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\DeliveryRouteRepositoryInterface::class, \App\Repositories\Eloquent\DeliveryRouteRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\QuotationRepositoryInterface::class, \App\Repositories\Eloquent\QuotationRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\QuotationItemRepositoryInterface::class, \App\Repositories\Eloquent\QuotationItemRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\SaleNoteRepositoryInterface::class, \App\Repositories\Eloquent\SaleNoteRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\SaleNoteItemRepositoryInterface::class, \App\Repositories\Eloquent\SaleNoteItemRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\SaleNoteStatusHistoryRepositoryInterface::class, \App\Repositories\Eloquent\SaleNoteStatusHistoryRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\SalePaymentRepositoryInterface::class, \App\Repositories\Eloquent\SalePaymentRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\DispatchGuideRepositoryInterface::class, \App\Repositories\Eloquent\DispatchGuideRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\DispatchGuideItemRepositoryInterface::class, \App\Repositories\Eloquent\DispatchGuideItemRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\IssuedDocumentRepositoryInterface::class, \App\Repositories\Eloquent\IssuedDocumentRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\AgendaEventRepositoryInterface::class, \App\Repositories\Eloquent\AgendaEventRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\MonthlySalesTargetRepositoryInterface::class, \App\Repositories\Eloquent\MonthlySalesTargetRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\ScheduledWorkdayRepositoryInterface::class, \App\Repositories\Eloquent\ScheduledWorkdayRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\AuditLogRepositoryInterface::class, \App\Repositories\Eloquent\AuditLogRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\SaleRepositoryInterface::class, \App\Repositories\Eloquent\SaleRepository::class);
-        $this->app->bind(\App\Repositories\Contracts\SaleDetailRepositoryInterface::class, \App\Repositories\Eloquent\SaleDetailRepository::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioRolInterface::class, \App\Repositories\Eloquent\RepositorioRol::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioPermisoInterface::class, \App\Repositories\Eloquent\RepositorioPermiso::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioRolPermisoInterface::class, \App\Repositories\Eloquent\RepositorioRolPermiso::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioUsuarioInterface::class, \App\Repositories\Eloquent\RepositorioUsuario::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioClienteInterface::class, \App\Repositories\Eloquent\RepositorioCliente::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioProveedorInterface::class, \App\Repositories\Eloquent\RepositorioProveedor::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioCategoriaProductoInterface::class, \App\Repositories\Eloquent\RepositorioCategoriaProducto::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioProductoInterface::class, \App\Repositories\Eloquent\RepositorioProducto::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioPresentacionProductoInterface::class, \App\Repositories\Eloquent\RepositorioPresentacionProducto::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioImagenProductoInterface::class, \App\Repositories\Eloquent\RepositorioImagenProducto::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioPrecioClienteInterface::class, \App\Repositories\Eloquent\RepositorioPrecioCliente::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioBodegaInterface::class, \App\Repositories\Eloquent\RepositorioBodega::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioSaldoInventarioInterface::class, \App\Repositories\Eloquent\RepositorioSaldoInventario::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioMovimientoInventarioInterface::class, \App\Repositories\Eloquent\RepositorioMovimientoInventario::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioPromocionInterface::class, \App\Repositories\Eloquent\RepositorioPromocion::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioDetallePromocionInterface::class, \App\Repositories\Eloquent\RepositorioDetallePromocion::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioOrdenCompraInterface::class, \App\Repositories\Eloquent\RepositorioOrdenCompra::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioDetalleOrdenCompraInterface::class, \App\Repositories\Eloquent\RepositorioDetalleOrdenCompra::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioRutaRepartoInterface::class, \App\Repositories\Eloquent\RepositorioRutaReparto::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioCotizacionInterface::class, \App\Repositories\Eloquent\RepositorioCotizacion::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioDetalleCotizacionInterface::class, \App\Repositories\Eloquent\RepositorioDetalleCotizacion::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioNotaVentaInterface::class, \App\Repositories\Eloquent\RepositorioNotaVenta::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioDetalleNotaVentaInterface::class, \App\Repositories\Eloquent\RepositorioDetalleNotaVenta::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioHistorialEstadoNotaVentaInterface::class, \App\Repositories\Eloquent\RepositorioHistorialEstadoNotaVenta::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioPagoVentaInterface::class, \App\Repositories\Eloquent\RepositorioPagoVenta::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioGuiaDespachoInterface::class, \App\Repositories\Eloquent\RepositorioGuiaDespacho::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioDetalleGuiaDespachoInterface::class, \App\Repositories\Eloquent\RepositorioDetalleGuiaDespacho::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioDocumentoEmitidoInterface::class, \App\Repositories\Eloquent\RepositorioDocumentoEmitido::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioEventoAgendaInterface::class, \App\Repositories\Eloquent\RepositorioEventoAgenda::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioMetaMensualVentaInterface::class, \App\Repositories\Eloquent\RepositorioMetaMensualVenta::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioDiaLaboralProgramadoInterface::class, \App\Repositories\Eloquent\RepositorioDiaLaboralProgramado::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioRegistroAuditoriaInterface::class, \App\Repositories\Eloquent\RepositorioRegistroAuditoria::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioVentaInterface::class, \App\Repositories\Eloquent\RepositorioVenta::class);
+        $this->app->bind(\App\Repositories\Contratos\RepositorioDetalleVentaInterface::class, \App\Repositories\Eloquent\RepositorioDetalleVenta::class);
     }
     public function boot(): void {}
 }

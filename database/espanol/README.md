@@ -37,3 +37,9 @@ Se añaden scripts **PREPARADOS, NO EJECUTADOS**:
 - `08_migrar_infinityfree_desde_34_tablas.sql`: solo si existen también `sales` y `sale_details` previamente.
 
 **Importante**: son cambios estructurales NO reversibles automáticamente y NO idempotentes. Revisar backup y compatibilidad antes de usarlos. Una ejecución fallida puede dejar parte del esquema renombrada. Estos SQL de migración cambian nombres de columnas y tablas; no traducen por sí solos los valores de estados, permisos y textos guardados. La adaptación Laravel queda pendiente.
+
+## Codigos internos y valores por defecto
+
+El DDL local V2 crea estados/valores por defecto en espanol (`borrador`, `recibida`, `pendiente`, etc.). Las semillas opcionales insertan codigos de rol y permiso en espanol. Consulte `09_diccionario_codigos.csv`.
+
+**Advertencia:** la migracion de nombres del servidor solo renombra tablas y columnas; NO cambia datos historicos ni codigos/estados guardados, ya que eso exige adaptar y probar el backend primero.

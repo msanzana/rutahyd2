@@ -35,3 +35,6 @@ La estructura en español de 34 tablas está preparada en esta rama. **No hay ca
 5. Verificar integridad de FK, recuento de registros y auditoría después.
 
 No correr los scripts de migración sobre `rutahyd2_es_local`; allí se usa el DDL fresco.
+
+## Codigos internos
+Los codigos propios de RutaH&D2 también se escribiran en espanol para datos NUEVOS de la V2. Ver `database/espanol/09_diccionario_codigos.csv`. Los valores historicos de la base de InfinityFree no deben modificarse automaticamente hasta probar la compatibilidad del backend.

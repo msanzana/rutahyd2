@@ -2,7 +2,7 @@
 -- Roles, permisos y tipos de bodega de la V2 traducidos a espanol.
 -- REQUIERE un backend Laravel adaptado a estos codigos; no aplicar sobre la V1.
 -- Semillas OPCIONALES para base local RutaH&D2.
--- Ejecutar DESPUES de 01_RutaHD2_DDL_34_tablas.sql.
+-- Ejecutar DESPUES de 01_esquema_completo_34_tablas_es.sql.
 USE rutahyd2_es_local;
 SET NAMES utf8mb4;
 
@@ -18,16 +18,16 @@ INSERT IGNORE INTO bodegas (codigo,nombre,tipo) VALUES
  ('CASA','Bodega 2 · Casa','almacen'),
  ('VEHICULO','Bodega 1 · Vehículo','vehiculo');
 INSERT IGNORE INTO permisos (codigo,descripcion) VALUES
- ('ventas.view','Consultar notas de venta'),
- ('ventas.manage','Crear y actualizar notas de venta'),
+ ('ventas.ver','Consultar notas de venta'),
+ ('ventas.gestionar','Crear y actualizar notas de venta'),
  ('cotizaciones.gestionar','Gestionar cotizaciones'),
  ('inventario.ver','Consultar existencias'),
  ('inventario.gestionar','Gestionar stock y guias'),
  ('clientes.gestionar','Gestionar clientes'),
- ('productos.manage','Gestionar catalogo'),
+ ('productos.gestionar','Gestionar catalogo'),
  ('compras.gestionar','Gestionar compras'),
  ('ofertas.gestionar','Gestionar promociones'),
  ('rutas.gestionar','Gestionar rutas'),
  ('informes.ver','Consultar informes'),
- ('usuarios.manage','Administrar usuarios y roles');
+ ('usuarios.gestionar','Administrar usuarios y roles');
 -- Las asignaciones de permisos requieren una matriz de roles aprobada.

@@ -61,12 +61,8 @@ return new class extends Migration {
                 $table->id();
                 $table->foreignId('sale_id')->constrained('sales')->cascadeOnDelete();
                 $table->foreignId('sale_note_item_id')->nullable()->constrained('sale_note_items')->nullOnDelete();
-                $table->foreignId('presentation_id')->nullable()->constrained('product_presentations')->restrictOnDelete();
+                $table->foreignId('product_id')->constrained('products')->restrictOnDelete();
                 $table->unsignedInteger('line_number');
-                $table->string('item_code_type',20)->nullable();
-                $table->string('item_code',50)->nullable();
-                $table->string('name',120);
-                $table->text('description')->nullable();
                 $table->decimal('quantity',18,4)->default(1);
                 $table->decimal('unit_price',18,4)->default(0);
                 $table->decimal('discount_percent',8,4)->default(0);
@@ -76,7 +72,7 @@ return new class extends Migration {
                 $table->json('extra_payload')->nullable();
                 $table->timestamps();
                 $table->unique(['sale_id','line_number']);
-                $table->index('presentation_id');
+                $table->index('product_id');
             });
         }
     }

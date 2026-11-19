@@ -1,6 +1,9 @@
 -- RutaH&D2: cabecera de venta DTE + detalle de venta DTE.
 -- Basado en msanzana/sii-dte-backend @ develop, StoreDteDocumentRequest (2026-11-19).
 -- SOLO dos tablas nuevas; no modifica las 32 existentes. Ejecutar en DB existente.
+-- sale_details usa product_id como UNICA referencia al catalogo.
+-- Nombre, SKU y descripcion se obtienen de products al preparar el DTE.
+-- Conservar el JSON enviado en sales.dte_request_payload para auditoria.
 -- IMPORTANTE: El servidor DTE recibe company_id desde JWT técnico,
 -- no desde el JSON de /api/internal/dte/document.
 SET NAMES utf8mb4;
@@ -66,12 +69,8 @@ CREATE TABLE IF NOT EXISTS sale_details (
  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
  sale_id BIGINT UNSIGNED NOT NULL,
  sale_note_item_id BIGINT UNSIGNED NULL,
- presentation_id BIGINT UNSIGNED NULL,
+ product_id BIGINT UNSIGNED NOT NULL,
  line_number INT UNSIGNED NOT NULL,
- item_code_type VARCHAR(20) NULL,
- item_code VARCHAR(50) NULL,
- name VARCHAR(120) NOT NULL,
- description TEXT NULL,
  quantity DECIMAL(18,4) NOT NULL DEFAULT 1,
  unit_price DECIMAL(18,4) NOT NULL DEFAULT 0,
  discount_percent DECIMAL(8,4) NOT NULL DEFAULT 0,
@@ -82,8 +81,8 @@ CREATE TABLE IF NOT EXISTS sale_details (
  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
  UNIQUE KEY uq_sale_details_line(sale_id,line_number),
- KEY idx_sale_detail_presentation(presentation_id),
+ KEY idx_sale_detail_product(product_id),
  CONSTRAINT fk_sale_detail_sale FOREIGN KEY(sale_id) REFERENCES sales(id) ON DELETE CASCADE,
  CONSTRAINT fk_sale_detail_note_item FOREIGN KEY(sale_note_item_id) REFERENCES sale_note_items(id) ON DELETE SET NULL,
- CONSTRAINT fk_sale_detail_presentation FOREIGN KEY(presentation_id) REFERENCES product_presentations(id) ON DELETE RESTRICT
+ CONSTRAINT fk_sale_detail_product FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

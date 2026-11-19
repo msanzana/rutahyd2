@@ -17,9 +17,9 @@ GitHub: `msanzana/sii-dte-backend`, rama `develop`
 ## Modelo local: 34 tablas
 - 32 tablas previas **sin modificaciones**.
 - `sales` nueva: cabecera de la venta, receptor, totales, referencia a `sale_notes`, y estado de emisión DTE.
-- `sale_details` nueva: líneas de venta y contrato `items[*]` con 1..60 líneas.
+- `sale_details` nueva: líneas de venta y contrato `items[*]` con 1..60 líneas; **único identificador de producto = `product_id`**. No persiste SKU, nombre ni descripción duplicados.
 - `sales.customer_id` -> `customers.id`, `sales.sale_note_id` -> `sale_notes.id`, `sales.created_by` -> `users.id`.
-- `sale_details.sale_id` -> `sales.id`, `sale_details.presentation_id` -> `product_presentations.id`, `sale_details.sale_note_item_id` -> `sale_note_items.id`.
+- `sale_details.sale_id` -> `sales.id`, `sale_details.product_id` -> `products.id`, `sale_details.sale_note_item_id` -> `sale_note_items.id`.
 - `sales.references_payload` es un array JSON de referencias DTE para respetar el requisito de **solo dos nuevas tablas**; validar su estructura en la capa Laravel.
 - `sales.header_payload` JSON cubre encabezados adicionales (p.ej. ind_servicio).
 - `sales.dte_company_id` = ID de empresa en el servidor DTE, NO un FK local. `receiver_city_id` = ID de ciudad en el servidor DTE, NO un FK local.
@@ -70,6 +70,13 @@ GitHub: `msanzana/sii-dte-backend`, rama `develop`
 - `header_payload.ind_servicio` obligatorio y uno de 1,2,3,4 para DTE 39/41.
 - Referencias permitidas: referenced_dte_type, referenced_folio, referenced_issue_date, referenced_code, reason y extra_payload.
 - El source request presenta el campo `referenced.*.extra_payload`, singular, pero su controlador trabaja con `references`: revisar este detalle con pruebas de contrato antes de enviar extra_payload de referencias.
+
+## Regla de producto (2026-11-19)
+- `sale_details.product_id` es FK obligatoria a `products.id`. No existe `sale_details.presentation_id`.
+- `products.name`, `products.sku` y `products.description` se consultan mediante el repositorio/modelo `Product` cuando se prepara el DTE.
+- Cantidad, precio, porcentaje y monto de descuento, impuesto/exención y total de línea se conservan en el detalle por ser datos históricos de la transacción.
+- `SaleDtePayloadService::buildAndFreeze($saleId)` persiste el JSON del primer intento en `sales.dte_request_payload`, para que cambios posteriores en el catálogo no alteren reintentos. La integración HTTP todavía no implementada debe usar ese método.
+- Una migración complementaria maneja esquemas anteriores: primero crea `product_id` y migra su valor desde `product_presentations.product_id`; respalda campos históricos en `extra_payload.legacy_product_snapshot` y solo entonces retira columnas redundantes.
 
 ## Trabajo pendiente
 1. Generar/validar JWT técnico, ámbito empresa+sistema externo, y catálogo remoto de ciudades; no guardar tokens en SQL ni GitHub.

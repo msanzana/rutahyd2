@@ -1,7 +1,9 @@
 # RutaH&D2 — ampliación del ERD con DTE (2026-11-19)
 
 Las **32 tablas existentes** de RutaH&D2 se mantienen sin cambios. Se proponen dos tablas nuevas, `sales` y `sale_details` (34 tablas al aplicar la migración).
-**Estado de despliegue:** SQL versionado, todavía sin confirmar ejecución en InfinityFree.
+**Estado de despliegue:** SQL y migraciones versionados, sin confirmar ejecución en InfinityFree.
+
+**Cambio de diseño:** sale_details guarda solo `product_id` como referencia al catálogo; no duplica SKU/nombre/descripción. Conserva los atributos propios de la venta (cantidad, precio, descuentos, exención). El servicio Laravel hace JOIN vía relación con products y congela el payload DTE en sales.dte_request_payload antes de enviarlo.
 
 ```mermaid
 erDiagram
@@ -9,7 +11,7 @@ erDiagram
     sale_notes o|--o| sales : "origina opcional"
     users o|--o{ sales : "registra"
     sales ||--|{ sale_details : "incluye"
-    product_presentations o|--o{ sale_details : "presentacion"
+    products ||--o{ sale_details : "producto"
     sale_note_items o|--o{ sale_details : "origen"
     sale_notes ||--o{ sale_note_items : "lineas"
     customers ||--o{ sale_notes : "pedido"
@@ -61,12 +63,8 @@ erDiagram
         bigint id PK
         bigint sale_id FK
         bigint sale_note_item_id FK
-        bigint presentation_id FK
+        bigint product_id FK
         int line_number
-        varchar item_code_type
-        varchar item_code
-        varchar name
-        text description
         decimal quantity
         decimal unit_price
         decimal discount_percent
@@ -92,9 +90,11 @@ erDiagram
     users {
         bigint id PK
     }
-    product_presentations {
+    products {
         bigint id PK
-        bigint product_id FK
+        varchar name
+        varchar sku
+        text description
     }
 ```
 

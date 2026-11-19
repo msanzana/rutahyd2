@@ -10,12 +10,8 @@ class SaleDetail extends Model
     protected $fillable = [
         'sale_id',
         'sale_note_item_id',
-        'presentation_id',
+        'product_id',
         'line_number',
-        'item_code_type',
-        'item_code',
-        'name',
-        'description',
         'quantity',
         'unit_price',
         'discount_percent',
@@ -37,6 +33,6 @@ class SaleDetail extends Model
         ];
     }
     public function sale(): BelongsTo { return $this->belongsTo(Sale::class); }
-    public function presentation(): BelongsTo { return $this->belongsTo(ProductPresentation::class); }
+    public function product(): BelongsTo { return $this->belongsTo(Product::class); }
     public function saleNoteItem(): BelongsTo { return $this->belongsTo(SaleNoteItem::class); }
 }

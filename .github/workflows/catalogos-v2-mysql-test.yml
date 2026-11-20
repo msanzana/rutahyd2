@@ -29,6 +29,7 @@ jobs:
           mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/12_tokens_acceso_opcional.sql
           mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/13_catalogos_comerciales_aditivos.sql
           mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/14_productos_clasificacion_campos.sql
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/16_permisos_modulos_producto.sql
       - name: Confirmar estructura y conservación de categoría heredada
         run: |
           cat >/tmp/check.sql <<'SQL'

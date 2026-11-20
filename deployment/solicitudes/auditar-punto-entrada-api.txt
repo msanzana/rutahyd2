@@ -3,3 +3,4 @@ fecha=2026-11-20
 sin_php=true
 sin_sql=true
 ftp_solo_lectura=true
+reintento=2026-11-20_comprobar_ausencia_de_htaccess_root

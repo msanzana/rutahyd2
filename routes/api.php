@@ -8,17 +8,20 @@ use App\Http\Controllers\NotaVentaControlador;
 use App\Http\Controllers\InventarioControlador;
 use App\Http\Controllers\CatalogoComercialControlador;
 use App\Http\Controllers\ClasificacionProductoControlador;
+use App\Http\Controllers\PerfilesCatalogosControlador;
 
 Route::get('/estado',fn()=>response()->json(['servicio'=>'RutaH&D2 API','estado'=>'disponible','version'=>'v2-es']));
 Route::post('/v1/sesion',[SesionControlador::class,'iniciar'])->middleware('throttle:5,1');
 
 Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
-    Route::get('/catalogos/{catalogo}',[CatalogoComercialControlador::class,'listar'])->middleware('permiso.rutahd:productos.gestionar');
-    Route::post('/catalogos/{catalogo}',[CatalogoComercialControlador::class,'crear'])->middleware('permiso.rutahd:productos.gestionar');
-    Route::put('/catalogos/{catalogo}/{id}',[CatalogoComercialControlador::class,'actualizar'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
-    Route::delete('/catalogos/{catalogo}/{id}',[CatalogoComercialControlador::class,'eliminar'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
+    Route::get('/catalogos/{catalogo}',[CatalogoComercialControlador::class,'listar']);
+    Route::post('/catalogos/{catalogo}',[CatalogoComercialControlador::class,'crear']);
+    Route::put('/catalogos/{catalogo}/{id}',[CatalogoComercialControlador::class,'actualizar'])->whereNumber('id');
+    Route::delete('/catalogos/{catalogo}/{id}',[CatalogoComercialControlador::class,'eliminar'])->whereNumber('id');
     Route::get('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'ver'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
     Route::patch('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'guardar'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
+    Route::get('/perfiles/catalogos',[PerfilesCatalogosControlador::class,'listar']);
+    Route::put('/perfiles/{id}/catalogos',[PerfilesCatalogosControlador::class,'actualizar'])->whereNumber('id');
     Route::get('/perfil',[SesionControlador::class,'perfil']);
     Route::delete('/sesion',[SesionControlador::class,'salir']);
     // Consultas paginadas solo de recursos admitidos y con permiso por rol.

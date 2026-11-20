@@ -1,0 +1,5 @@
+AUDITORIA_ACTIVACION_RUTAHD2
+fecha=2026-11-20
+solo_nombres_de_archivos=true
+no_sql=true
+no_escritura_en_hosting=true

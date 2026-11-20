@@ -32,3 +32,26 @@ AND TABLE_NAME IN ('productos','departamentos','familias','lineas','modelos')
 AND REFERENCED_TABLE_NAME IS NOT NULL
 ORDER BY TABLE_NAME, CONSTRAINT_NAME;
 -- Este informe NO demuestra backup, datos conciliados ni autorización de despliegue.
+
+-- DIAGNÓSTICO RESUMIDO SIN CONSULTAR DATOS COMERCIALES
+-- 34 tablas: estructura V2 original; +1 tokens; +10 catálogos; =45.
+-- No ejecutar migraciones si base_seleccionada no coincide con la V2 española.
+SELECT CASE WHEN DATABASE()='if0_43460400_rutahyd2_es'
+  THEN 'OK_BASE_V2_ES' ELSE 'DETENER_BASE_INCORRECTA' END AS control_base,
+ (SELECT COUNT(*) FROM information_schema.tables
+   WHERE table_schema=DATABASE() AND table_type='BASE TABLE') AS total_tablas,
+ (SELECT COUNT(*) FROM information_schema.tables
+   WHERE table_schema=DATABASE() AND table_name='tokens_acceso') AS tokens_instalados,
+ (SELECT COUNT(*) FROM information_schema.tables
+   WHERE table_schema=DATABASE() AND table_name IN
+    ('rubros','departamentos','familias','lineas','marcas','modelos',
+     'tipos_unidad','gramajes','tipos_envasado','condiciones_tributarias')) AS catalogos_instalados,
+ (SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema=DATABASE() AND table_name='productos'
+     AND column_name IN
+      ('rubro_id','departamento_id','familia_id','linea_id','marca_id',
+       'modelo_id','tipo_unidad_id','gramaje_id','tipo_envasado_id',
+       'condicion_tributaria_id')) AS columnas_nuevas_producto;
+-- 0/10 columnas: falta SQL 14. 10/10: SQL 14 probablemente aplicado;
+-- nunca ejecutarlo de nuevo solo por encontrar parte de la estructura.
+-- Si aparecen entre 1 y 9 columnas, PARAR y auditar cambios parciales.

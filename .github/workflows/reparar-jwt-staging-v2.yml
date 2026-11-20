@@ -1,0 +1,129 @@
+name: Reparar instalación JWT mínima en staging protegido
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/solicitudes/reparar-jwt-staging-v2.txt']
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 17
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FTP_DEST: /htdocs/api-v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a39a11f8237df05fd8c7f10d3229e47947b7bfbd
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo_mysql, openssl, intl, xml, dom, fileinfo
+          tools: composer:v2
+      - name: Verificar commit y construir biblioteca PHP
+        run: |
+          set -e
+          test "$(git rev-parse HEAD)" = 'a39a11f8237df05fd8c7f10d3229e47947b7bfbd'
+          composer install --no-dev --prefer-dist --no-interaction --no-progress --optimize-autoloader
+          php -l app/Http/Controllers/SesionControlador.php
+          php -l app/Http/Middleware/AutenticarToken.php
+          php -l config/rutahd.php
+          test -s vendor/firebase/php-jwt/src/JWT.php
+          test -s vendor/composer/installed.php
+          test -s vendor/autoload.php
+      - name: Configurar acceso FTPS protegido
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+          set +x
+          umask 077
+          cat >/tmp/guard.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/.htaccess" -o /tmp/guard_before
+          cls -1 -a "$FTP_DEST" > /tmp/root_listing
+          bye
+          EOF
+          lftp -f /tmp/guard.lftp
+          grep -Fq 'Require all denied' /tmp/guard_before
+          if grep -Eq '^\.env($|\.)' /tmp/root_listing; then
+            echo "::error::Configuración privada ya instalada; detener y revisar antes de actualizar"
+            exit 1
+          fi
+      - name: Instalar solo JWT y cargador Composer
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/install.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          mirror -R --overwrite --verbose=0 vendor/firebase "$FTP_DEST/vendor/firebase"
+          mirror -R --overwrite --verbose=0 vendor/composer "$FTP_DEST/vendor/composer"
+          put vendor/autoload.php -o "$FTP_DEST/vendor/autoload.php"
+          put app/Http/Controllers/SesionControlador.php -o "$FTP_DEST/app/Http/Controllers/SesionControlador.php"
+          put app/Http/Middleware/AutenticarToken.php -o "$FTP_DEST/app/Http/Middleware/AutenticarToken.php"
+          put config/rutahd.php -o "$FTP_DEST/config/rutahd.php"
+          put composer.json -o "$FTP_DEST/composer.json"
+          bye
+          EOF
+          lftp -f /tmp/install.lftp
+          rm -f /tmp/install.lftp
+      - name: Verificar por FTPS todos los archivos de autenticación
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/check.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/app/Http/Controllers/SesionControlador.php" -o /tmp/r_session
+          get "$FTP_DEST/app/Http/Middleware/AutenticarToken.php" -o /tmp/r_middleware
+          get "$FTP_DEST/config/rutahd.php" -o /tmp/r_config
+          get "$FTP_DEST/composer.json" -o /tmp/r_composer
+          get "$FTP_DEST/vendor/autoload.php" -o /tmp/r_autoload
+          get "$FTP_DEST/vendor/firebase/php-jwt/src/JWT.php" -o /tmp/r_jwt
+          get "$FTP_DEST/vendor/composer/autoload_real.php" -o /tmp/r_real
+          get "$FTP_DEST/vendor/composer/autoload_static.php" -o /tmp/r_static
+          get "$FTP_DEST/vendor/composer/installed.php" -o /tmp/r_installed
+          get "$FTP_DEST/.htaccess" -o /tmp/guard_after
+          bye
+          EOF
+          lftp -f /tmp/check.lftp
+          cmp -s app/Http/Controllers/SesionControlador.php /tmp/r_session
+          cmp -s app/Http/Middleware/AutenticarToken.php /tmp/r_middleware
+          cmp -s config/rutahd.php /tmp/r_config
+          cmp -s composer.json /tmp/r_composer
+          cmp -s vendor/autoload.php /tmp/r_autoload
+          cmp -s vendor/firebase/php-jwt/src/JWT.php /tmp/r_jwt
+          cmp -s vendor/composer/autoload_real.php /tmp/r_real
+          cmp -s vendor/composer/autoload_static.php /tmp/r_static
+          cmp -s vendor/composer/installed.php /tmp/r_installed
+          cmp -s /tmp/guard_before /tmp/guard_after
+          echo 'OK: JWT, autoload Composer, configuración y middleware verificados en staging protegido.'
+          echo 'Sin MySQL, sin .env, sin contraseña y sin marcador de activación.'
+          {
+            echo '### Reparación de JWT en staging'
+            echo '- Nueve archivos críticos comparados por FTPS'
+            echo '- Bootstrap privado protegido por .htaccess'
+            echo '- No ejecutó SQL ni activó cuentas o API'
+          } >> "$GITHUB_STEP_SUMMARY"

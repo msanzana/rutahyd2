@@ -1,0 +1,8 @@
+RUTAHD2_GATEWAY_CERRADO
+fecha=2026-11-20
+source_sha=db712f579da25796ac4c1946a056a5fc7ce1c36b
+path=/htdocs/api
+requiere_env=true
+requiere_marcador=true
+modifica_sql=false
+no_activar_api=true

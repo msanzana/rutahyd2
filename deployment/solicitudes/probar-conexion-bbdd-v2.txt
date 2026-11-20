@@ -1,0 +1,6 @@
+RUTAHD2_PRUEBA_SQL_PDO
+modo=solo_lectura
+origen=feature/backend-v2-es
+db=MySQL_8_efimero
+pruebas=conexion,select,conteo_34_tablas,desconexion
+no_conectar_infintyfree=true

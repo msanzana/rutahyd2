@@ -1,0 +1,6 @@
+AUDITORIA_PRODUCTIVA_JWT_V2
+fecha=2026-11-20
+tipo=solo_lectura
+sin_sql=true
+sin_cambios_remotos=true
+probar_http_sin_sesion=true

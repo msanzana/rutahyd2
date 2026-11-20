@@ -1,0 +1,5 @@
+RUTAHD2_VERIFICAR_SQL_FTPS_DIRECTO
+fecha=2026-11-20
+sha=bbd5d38bb5ce7ed45fced6012582dfc109a6360d
+solo_lectura=true
+sin_sql_mysql=true

@@ -1,0 +1,114 @@
+name: Preparar migraciones verificables en staging bloqueado
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deployment/solicitudes/stage-sql-productos-v2.txt'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  sql-staging:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FTP_DEST: /htdocs/api-v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ba43b8c222d35c09fd890ad90522e61aeff02f4e
+      - name: Confirmar origen y archivos SQL
+        run: |
+          test "$(git rev-parse HEAD)" = ba43b8c222d35c09fd890ad90522e61aeff02f4e
+          for f in 12_tokens_acceso_opcional 13_catalogos_comerciales_aditivos 14_productos_clasificacion_campos 15_preflight_catalogos_remoto_solo_lectura 16_permisos_modulos_producto 17_verificar_clasificacion_y_perfiles_lectura; do
+            test -s "database/espanol/$f.sql"
+          done
+          # Evitar scripts SQL con DROP sobre datos reales.
+          if grep -iE '^\s*(DROP|TRUNCATE)\s+' database/espanol/{12_*,13_*,14_*,15_*,16_*,17_*}.sql; then
+            echo '::error::DDL destructivo detectado, se cancela staging'; exit 1
+          fi
+      - name: Configurar FTPS
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Verificar denegación HTTP antes de subir SQL
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/guard.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/.htaccess" -o /tmp/guard_antes
+          bye
+          EOF
+          lftp -f /tmp/guard.lftp
+          grep -Fq 'Require all denied' /tmp/guard_antes || { echo '::error::Área SQL no está protegida';exit 1; }
+      - name: Guardar scripts para futura habilitación SIN EJECUTAR MySQL
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/upload.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          set cmd:fail-exit no
+          mkdir "$FTP_DEST/database"
+          mkdir "$FTP_DEST/database/espanol"
+          set cmd:fail-exit yes
+          put database/espanol/12_tokens_acceso_opcional.sql -o "$FTP_DEST/database/espanol/12_tokens_acceso_opcional.sql"
+          put database/espanol/13_catalogos_comerciales_aditivos.sql -o "$FTP_DEST/database/espanol/13_catalogos_comerciales_aditivos.sql"
+          put database/espanol/14_productos_clasificacion_campos.sql -o "$FTP_DEST/database/espanol/14_productos_clasificacion_campos.sql"
+          put database/espanol/15_preflight_catalogos_remoto_solo_lectura.sql -o "$FTP_DEST/database/espanol/15_preflight_catalogos_remoto_solo_lectura.sql"
+          put database/espanol/16_permisos_modulos_producto.sql -o "$FTP_DEST/database/espanol/16_permisos_modulos_producto.sql"
+          put database/espanol/17_verificar_clasificacion_y_perfiles_lectura.sql -o "$FTP_DEST/database/espanol/17_verificar_clasificacion_y_perfiles_lectura.sql"
+          bye
+          EOF
+          lftp -f /tmp/upload.lftp
+          rm -f /tmp/upload.lftp
+      - name: Comparación FTPS byte a byte sin ejecutar SQL
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/database/espanol/12_tokens_acceso_opcional.sql" -o /tmp/s12
+          get "$FTP_DEST/database/espanol/13_catalogos_comerciales_aditivos.sql" -o /tmp/s13
+          get "$FTP_DEST/database/espanol/14_productos_clasificacion_campos.sql" -o /tmp/s14
+          get "$FTP_DEST/database/espanol/15_preflight_catalogos_remoto_solo_lectura.sql" -o /tmp/s15
+          get "$FTP_DEST/database/espanol/16_permisos_modulos_producto.sql" -o /tmp/s16
+          get "$FTP_DEST/database/espanol/17_verificar_clasificacion_y_perfiles_lectura.sql" -o /tmp/s17
+          get "$FTP_DEST/.htaccess" -o /tmp/guard_despues
+          bye
+          EOF
+          lftp -f /tmp/verify.lftp
+          for n in 12 13 14 15 16 17; do
+            file=$(find database/espanol -maxdepth 1 -type f -name "$n"'_*.sql' -print -quit)
+            cmp -s "$file" "/tmp/s$n"
+          done
+          cmp -s /tmp/guard_antes /tmp/guard_despues
+          echo 'OK: seis scripts SQL listos y verificados por FTPS en área protegida; NINGUNO ejecutado.'
+          {
+            echo '### Paquete de habilitación de catálogos listo'
+            echo '- 6 archivos SQL verificados byte a byte en /htdocs/api-v2/database/espanol'
+            echo '- Protección HTTP del staging conservada'
+            echo '- MySQL de InfinityFree: **SIN MODIFICAR**'
+            echo '- Paso bloqueado: backup y comprobación actual en phpMyAdmin'
+          } >> "$GITHUB_STEP_SUMMARY"

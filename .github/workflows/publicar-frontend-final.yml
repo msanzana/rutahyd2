@@ -72,30 +72,31 @@ jobs:
             fi
           fi
           echo "Preflight de la web principal verificado."
-      - name: Subir y comprobar logo con una conexión FTPS independiente
+      - name: Verificar logo oficial publicado sin sobrescribirlo
         run: |
           set +x
           umask 077
           for destination in /htdocs/assets/img /htdocs/violeta-demo/assets/img; do
             rm -f /tmp/logo_verificado.webp
-            cat >/tmp/upload_logo.lftp <<EOF
+            cat >/tmp/verify_logo.lftp <<EOF
           set cmd:fail-exit yes
           set net:timeout 45
-          set net:max-retries 3
+          set net:max-retries 2
           set ftp:ssl-allow yes
           set ftp:ssl-force yes
           set ftp:ssl-protect-data yes
           set ssl:verify-certificate yes
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
-          put /tmp/rutahyd2front/assets/img/prueba-rutahd2.webp -o "$destination/prueba-rutahd2.webp"
           get "$destination/prueba-rutahd2.webp" -o /tmp/logo_verificado.webp
           bye
           EOF
-            lftp -f /tmp/upload_logo.lftp
-            cmp -s /tmp/rutahyd2front/assets/img/prueba-rutahd2.webp /tmp/logo_verificado.webp
-            echo "Logo verificado por FTPS en $destination"
+            lftp -f /tmp/verify_logo.lftp
+            cmp -s /tmp/rutahyd2front/assets/img/prueba-rutahd2.webp /tmp/logo_verificado.webp || {
+              echo "::error::Logo remoto no coincide, no se permite sobrescribir sin auditoría"; exit 1;
+            }
+            echo "Logo original verificado sin cambios: $destination"
           done
-          rm -f /tmp/upload_logo.lftp /tmp/logo_verificado.webp
+          rm -f /tmp/verify_logo.lftp /tmp/logo_verificado.webp
       - name: Transferir frontend al dominio y vista previa sin tocar api-v2
         run: |
           set +x

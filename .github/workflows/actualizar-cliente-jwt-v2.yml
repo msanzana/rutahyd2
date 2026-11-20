@@ -1,0 +1,94 @@
+name: Actualizar cliente frontend JWT sin tocar menú
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/solicitudes/actualizar-cliente-jwt-v2.txt']
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-frontend-deploy
+  cancel-in-progress: false
+jobs:
+  client:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 17
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Obtener cliente JWT aprobado
+        run: |
+          git clone --depth 1 --branch feature/catalogos-api-adapter-v2-20261120 https://github.com/msanzana/rutahyd2front.git /tmp/client
+          cd /tmp/client
+          test "$(git rev-parse HEAD)" = "4ba426048b5968d7c5dc9fa17f509ff5c9e5c31e"
+          node --check assets/js/catalogos-api.js
+          grep -Fq 'token_type' assets/js/catalogos-api.js
+          grep -Fq 'Bearer JWT' assets/js/catalogos-api.js
+          test -s index.html
+      - name: Instalar cliente FTPS
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Comprobar destinos existentes y API protegida
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/preflight.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/assets/js/catalogos-api.js -o /tmp/old_root
+          get /htdocs/violeta-demo/assets/js/catalogos-api.js -o /tmp/old_violeta
+          get /htdocs/catalogos-v2-preview/assets/js/catalogos-api.js -o /tmp/old_preview
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_old
+          bye
+          EOF
+          lftp -f /tmp/preflight.lftp
+          grep -Fq 'Require all denied' /tmp/guard_old || exit 1
+      - name: Publicar solo cliente JWT, sin reemplazar el menú
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/upload.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/client/assets/js/catalogos-api.js -o /htdocs/assets/js/catalogos-api.js
+          put /tmp/client/assets/js/catalogos-api.js -o /htdocs/violeta-demo/assets/js/catalogos-api.js
+          put /tmp/client/assets/js/catalogos-api.js -o /htdocs/catalogos-v2-preview/assets/js/catalogos-api.js
+          bye
+          EOF
+          lftp -f /tmp/upload.lftp
+          rm -f /tmp/upload.lftp
+      - name: Verificar tres destinos remotos por bytes
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/assets/js/catalogos-api.js -o /tmp/new_root
+          get /htdocs/violeta-demo/assets/js/catalogos-api.js -o /tmp/new_violeta
+          get /htdocs/catalogos-v2-preview/assets/js/catalogos-api.js -o /tmp/new_preview
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_new
+          bye
+          EOF
+          lftp -f /tmp/verify.lftp
+          for target in root violeta preview; do cmp -s /tmp/client/assets/js/catalogos-api.js "/tmp/new_$target"; done
+          cmp -s /tmp/guard_old /tmp/guard_new
+          echo 'OK: cliente JWT verificado en tres frontends, menú histórico intacto y backend protegido.'
+          echo 'No se ejecutó SQL ni se instalaron credenciales o llaves de producción.'

@@ -1,0 +1,9 @@
+RUTAHD2_STAGING_PARCHE_CATALOGOS
+fecha=2026-11-20
+commit_validado=27cc2e351fd1a6d1cb6d09e0660a252177d6344a
+destino=/htdocs/api-v2
+proteccion_htaccess_obligatoria=true
+verificar_bytes=true
+sin_sql=true
+sin_env=true
+sin_activar_api=true

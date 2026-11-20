@@ -22,6 +22,10 @@ jobs:
           php -l app/Http/Controllers/CatalogoComercialControlador.php
           php -l app/Http/Controllers/ClasificacionProductoControlador.php
           php -l routes/api.php
+          php -l app/Http/Controllers/SesionControlador.php
+          php -l app/Http/Middleware/AutenticarToken.php
+          php -l config/rutahd.php
+          php -l tools/generar_admin_sql.php
       - name: Verificar compuerta de seguridad y SQL previos
         run: |
           grep -Fq "token.rutahd" routes/api.php

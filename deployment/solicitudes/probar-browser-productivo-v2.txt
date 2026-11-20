@@ -1,0 +1,5 @@
+RUTAHD2_SMOKE_CHROMIUM
+fecha=2026-11-20
+sin_autenticar=true
+solo_get=true
+no_mysql=true

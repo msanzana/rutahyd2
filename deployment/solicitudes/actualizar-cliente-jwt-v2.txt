@@ -1,0 +1,7 @@
+RUTA_HYD_FRONT_JWT
+commit=4ba426048b5968d7c5dc9fa17f509ff5c9e5c31e
+tests_php_mysql=44749018315
+tests_e2e=44749026047
+solo_js=true
+sin_sql=true
+sin_activar_api=true

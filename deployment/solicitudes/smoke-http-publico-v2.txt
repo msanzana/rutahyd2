@@ -1,0 +1,5 @@
+SMOKE_HTTP_RUTAHD2
+fecha=2026-11-20
+solo_get_anonimo=true
+sin_sql=true
+sin_datos_productivos=true

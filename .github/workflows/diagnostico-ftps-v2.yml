@@ -15,13 +15,13 @@ jobs:
       FTP_HOST: ftpupload.net
       FTP_USER: if0_43460400
       FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
-      FTP_DEST: /rutahyd2-backend-v2-privado
+      FTP_DEST: /htdocs/api-v2
     steps:
       - name: Confirmar credencial sin mostrar valor
         run: test -n "$FTP_PASSWORD"
       - name: Instalar cliente FTPS
         run: sudo apt-get -qq update && sudo apt-get -qq install -y lftp
-      - name: Probar permiso de escritura y lectura de archivo inocuo fuera de htdocs
+      - name: Probar permiso de escritura y lectura de archivo inocuo dentro de api-v2 en htdocs
         run: |
           set +x
           umask 077
@@ -44,6 +44,6 @@ jobs:
           EOF
           lftp -f /tmp/sonda.lftp
           cmp -s /tmp/sonda_local.txt /tmp/sonda_recuperada.txt
-          echo "FTPS comprobado: subir y descargar archivo fuera de htdocs."
+          echo "FTPS comprobado: subir y descargar archivo dentro de api-v2 en htdocs."
       - name: Resultado
         run: echo "No se subió backend, no se modificó htdocs ni la base de datos."

@@ -1,0 +1,9 @@
+RUTAHD2_FRONT_CATALOGOS_PREVIEW
+fecha=2026-11-20
+origen=msanzana/rutahyd2front/feature/catalogos-api-adapter-v2-20261120
+destino=/htdocs/catalogos-v2-preview
+no_sobrescribir_root=true
+no_sobrescribir_violeta_demo=true
+no_modificar_api_v2=true
+no_sql=true
+verificar_bytes=true

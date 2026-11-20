@@ -1,0 +1,5 @@
+auditoria_definitiva=2026-11-20
+solo_lectura_ftps=true
+no_sql=true
+no_publicacion=true
+comparar_versiones=true

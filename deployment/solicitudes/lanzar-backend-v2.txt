@@ -8,6 +8,6 @@ base_de_datos=no_modificar
 regla=probar_403_antes_de_transferir
 solicitado_por=usuario_RutaHD2
 
-intento=3
+intento=4
 confirmacion=secreto_FTP_configurado_por_usuario
-objetivo=transferencia_privada_fuera_htdocs_con_verificacion_FTPS
+objetivo=transferencia_staging_web_protegido_con_verificacion_FTPS

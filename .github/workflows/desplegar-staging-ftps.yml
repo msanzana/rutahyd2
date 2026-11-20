@@ -1,4 +1,4 @@
-name: Desplegar backend RutaHD2 V2 a staging privado por FTPS
+name: Desplegar backend RutaHD2 V2 a staging protegido FTPS
 on:
   push:
     branches: [ main ]
@@ -19,7 +19,7 @@ jobs:
       FTP_HOST: ftpupload.net
       FTP_USER: if0_43460400
       FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
-      FTP_DEST: /rutahyd2-backend-v2-privado
+      FTP_DEST: /htdocs/api-v2
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,12 +71,11 @@ jobs:
           EOF
           lftp -f /tmp/ftp_guard.lftp
           rm -f /tmp/ftp_guard.lftp
-      - name: Verificar staging privado y protección por FTP sin exponerlo en la web
+      - name: Verificar la protección remota en staging web por FTPS
         run: |
           set +x
           case "$FTP_DEST" in
-            /htdocs/*|/htdocs|/) echo "::error::Destino inseguro, se detiene"; exit 1 ;;
-            /rutahyd2-backend-v2-privado) ;;
+            /htdocs/api-v2) ;;
             *) echo "::error::Destino no autorizado"; exit 1 ;;
           esac
           umask 077
@@ -95,7 +94,7 @@ jobs:
           lftp -f /tmp/ftp_verify.lftp
           cmp -s /tmp/htaccess_staging /tmp/htaccess_remote || { echo "::error::.htaccess remoto difiere"; exit 1; }
           rm -f /tmp/ftp_verify.lftp /tmp/htaccess_remote
-          echo "Destino privado fuera de htdocs y .htaccess remoto verificado."
+          echo "Protección .htaccess verificada por FTPS. No se sube .env; API aun no se activa."
       - name: Transferir app y vendor cifrados sin activar API
         run: |
           set +x
@@ -110,7 +109,7 @@ jobs:
           set ssl:verify-certificate yes
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
           cd "$FTP_DEST"
-          mirror -R --verbose=0 --continue --parallel=3 --exclude-glob=.env --exclude-glob=.env.* despliegue .
+          mirror -R --verbose=0 --continue --parallel=2 --exclude-glob=.env --exclude-glob=.env.* despliegue .
           bye
           EOF
           lftp -f /tmp/ftp_upload.lftp
@@ -138,4 +137,4 @@ jobs:
           cmp -s despliegue/vendor/autoload.php /tmp/remoto_autoload.php
           cmp -s /tmp/htaccess_staging /tmp/remoto_proteccion
           rm -f /tmp/ftp_final.lftp /tmp/remoto_DetalleVenta.php /tmp/remoto_autoload.php /tmp/remoto_proteccion
-          echo "OK: backend y vendor recibidos por FTPS, staging fuera de htdocs, API no activada."
+          echo "OK: backend y vendor recibidos por FTPS en /htdocs/api-v2, con .htaccess de denegación; sin .env, API no habilitada."

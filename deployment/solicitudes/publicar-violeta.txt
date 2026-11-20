@@ -1,0 +1,5 @@
+RUTAHD2_FRONT_VIOLETA
+origen=msanzana/rutahyd2front/main
+destino=/htdocs/violeta-demo
+archivos=index.html,assets/css/theme-violet.css
+no_modificar=/htdocs/api-v2,/htdocs/index2.html,/htdocs/.htaccess

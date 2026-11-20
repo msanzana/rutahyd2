@@ -75,20 +75,37 @@ $sesion = esperar(200, api('POST', '/api/v1/sesion',
     ['correo_electronico' => 'integracion@ejemplo.invalid', 'contrasena' => $clave]),
     'Inicio de sesión de prueba');
 $token = $sesion['token'] ?? null;
-verificar(is_string($token) && preg_match('/^[a-f0-9]{64}$/', $token) === 1,
-    'El token debe generarse aleatoriamente');
+verificar(is_string($token) &&
+    preg_match('/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/D', $token) === 1,
+    'El servidor debe retornar un JWT Bearer de tres segmentos');
+verificar(($sesion['token_type'] ?? null) === 'Bearer', 'Tipo de token Bearer');
+$partes=explode('.', $token);
+$encabezado=json_decode(base64_decode(strtr($partes[0], '-_', '+/')),true);
+verificar(($encabezado['alg'] ?? null)==='HS256','Algoritmo JWT HS256 obligatorio');
+esperar(401,api('GET','/api/v1/catalogos/rubros',[],'a'.str_repeat('f',63)),
+    'Tokens heredados no sirven como JWT');
+$falso=$partes;
+$falso[2] = $falso[2][0] === 'A' ? 'B'.substr($falso[2],1) : 'A'.substr($falso[2],1);
+esperar(401,api('GET','/api/v1/catalogos/rubros',[],implode('.',$falso)),
+    'Firma JWT manipulada rechazada');
+$pasado=\Firebase\JWT\JWT::encode([
+    'iss'=>'rutahd2-api','aud'=>'rutahd2-web','sub'=>(string)$usuarioId,
+    'iat'=>time()-7200,'nbf'=>time()-7200,'exp'=>time()-3600,
+    'jti'=>bin2hex(random_bytes(32)),
+],(string)config('rutahd.jwt_secret'),'HS256');
+esperar(401,api('GET','/api/v1/catalogos/rubros',[],$pasado),
+    'JWT expirado rechazado');
 
 $lectorId = DB::table('usuarios')->insertGetId([
     'rol_id' => $rolLector, 'nombre' => 'Lector sin permisos',
     'correo_electronico' => 'lector@ejemplo.invalid',
     'hash_contrasena' => Hash::make('NoUsarEnProduccion-2026'), 'activo' => 1
 ]);
-$tokenLector = bin2hex(random_bytes(32));
-DB::table('tokens_acceso')->insert([
-    'usuario_id' => $lectorId, 'hash_token' => hash('sha256', $tokenLector),
-    'nombre' => 'ci_lector', 'expira_en' => now()->addHour(),
-    'creado_en' => now(),
-]);
+$sesionLector=esperar(200,api('POST','/api/v1/sesion',[
+    'correo_electronico'=>'lector@ejemplo.invalid',
+    'contrasena'=>'NoUsarEnProduccion-2026',
+]),'Login JWT de perfil lector');
+$tokenLector=$sesionLector['token'];
 esperar(403, api('GET', '/api/v1/catalogos/rubros', [], $tokenLector),
     'Permiso separado rubros.ver');
 esperar(403, api('GET', '/api/v1/perfiles/catalogos', [], $tokenLector),

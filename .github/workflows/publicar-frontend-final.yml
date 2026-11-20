@@ -74,6 +74,7 @@ jobs:
           set +x
           umask 077
           for destination in /htdocs/assets/img /htdocs/violeta-demo/assets/img; do
+            rm -f /tmp/logo_verificado.webp
             cat >/tmp/upload_logo.lftp <<EOF
           set cmd:fail-exit yes
           set net:timeout 45

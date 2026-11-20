@@ -1,0 +1,127 @@
+name: Instalar JWT Bearer en backend staging protegido
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'deployment/solicitudes/actualizar-jwt-staging-v2.txt'
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  jwt-staging:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 26
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FTP_DEST: /htdocs/api-v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a2d0ba9dc48d6e8559aa5985a8deaa10f7f74e1b
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, intl, xml, dom, curl, pdo_mysql, openssl, fileinfo
+      - name: Revisar código y firma JWT
+        run: |
+          test "$(git rev-parse HEAD)" = "a2d0ba9dc48d6e8559aa5985a8deaa10f7f74e1b"
+          php -l app/Http/Controllers/SesionControlador.php
+          php -l app/Http/Middleware/AutenticarToken.php
+          php -l config/rutahd.php
+          grep -Fq 'firebase/php-jwt' composer.json
+          grep -Fq 'JWT::encode' app/Http/Controllers/SesionControlador.php
+          grep -Fq 'JWT::decode' app/Http/Middleware/AutenticarToken.php
+          grep -Fq "hash('sha256',\$jti)" app/Http/Controllers/SesionControlador.php
+      - name: Construir dependencias PHP de producción sin credenciales
+        run: |
+          composer install --no-dev --no-interaction --prefer-dist --no-progress --optimize-autoloader
+          test -s vendor/autoload.php
+          test -s vendor/firebase/php-jwt/src/JWT.php
+          test -s vendor/firebase/php-jwt/src/Key.php
+      - name: Instalar cliente FTPS
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Auditar bloqueo remoto antes de modificar archivos
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/preflight.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 50
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/.htaccess" -o /tmp/guard_antes
+          cls -1 -a "$FTP_DEST" > /tmp/lista_raiz
+          bye
+          EOF
+          lftp -f /tmp/preflight.lftp
+          grep -Fq 'Require all denied' /tmp/guard_antes || { echo '::error::Backend sin protección HTTP'; exit 1; }
+          if grep -Eq '^\.env($|\.)' /tmp/lista_raiz; then echo '::error::Configuración de producción detectada: detener reemplazo'; exit 1; fi
+      - name: Instalar controladores JWT, configuración y biblioteca
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/subir.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 60
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          mirror -R --overwrite --verbose=0 vendor "$FTP_DEST/vendor"
+          put app/Http/Controllers/SesionControlador.php -o "$FTP_DEST/app/Http/Controllers/SesionControlador.php"
+          put app/Http/Middleware/AutenticarToken.php -o "$FTP_DEST/app/Http/Middleware/AutenticarToken.php"
+          put config/rutahd.php -o "$FTP_DEST/config/rutahd.php"
+          put composer.json -o "$FTP_DEST/composer.json"
+          bye
+          EOF
+          lftp -f /tmp/subir.lftp
+          rm -f /tmp/subir.lftp
+      - name: Verificar por FTPS todos los archivos críticos y guardia
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/verificar.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 60
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/app/Http/Controllers/SesionControlador.php" -o /tmp/check_sesion
+          get "$FTP_DEST/app/Http/Middleware/AutenticarToken.php" -o /tmp/check_middleware
+          get "$FTP_DEST/config/rutahd.php" -o /tmp/check_config
+          get "$FTP_DEST/composer.json" -o /tmp/check_composer
+          get "$FTP_DEST/vendor/firebase/php-jwt/src/JWT.php" -o /tmp/check_jwt
+          get "$FTP_DEST/vendor/firebase/php-jwt/src/Key.php" -o /tmp/check_key
+          get "$FTP_DEST/vendor/autoload.php" -o /tmp/check_autoload
+          get "$FTP_DEST/vendor/composer/installed.php" -o /tmp/check_installed
+          get "$FTP_DEST/.htaccess" -o /tmp/guard_despues
+          bye
+          EOF
+          lftp -f /tmp/verificar.lftp
+          cmp -s app/Http/Controllers/SesionControlador.php /tmp/check_sesion
+          cmp -s app/Http/Middleware/AutenticarToken.php /tmp/check_middleware
+          cmp -s config/rutahd.php /tmp/check_config
+          cmp -s composer.json /tmp/check_composer
+          cmp -s vendor/firebase/php-jwt/src/JWT.php /tmp/check_jwt
+          cmp -s vendor/firebase/php-jwt/src/Key.php /tmp/check_key
+          cmp -s vendor/autoload.php /tmp/check_autoload
+          cmp -s vendor/composer/installed.php /tmp/check_installed
+          cmp -s /tmp/guard_antes /tmp/guard_despues
+          echo 'OK: JWT HS256, middleware, configuración y vendor verificados byte a byte en staging protegido.'
+          echo 'Sin migraciones MySQL, sin clave de firma productiva y sin contraseña de administrador.'

@@ -1,0 +1,11 @@
+RUTAHD2_DESPLIEGUE_FRONTEND_FINAL
+fecha_local=2026-11-19
+origen=msanzana/rutahyd2front/main
+destinos=/htdocs/index.html;/htdocs/violeta-demo/index.html
+componentes=index.html;app.css;app.js;logo-hd-transparente.webp
+playwright_run_validado=44662741490
+playwright_resultado=7_de_7_aprobadas
+modo=demostracion_local
+base_datos_real=no_modificar
+backend_api_v2=no_modificar
+subida=FTPS_cifrado_y_verificacion_byte_por_byte

@@ -9,3 +9,11 @@ conservar_logo_oficial=true
 respetar_backend_protegido=true
 sin_sql=true
 verificacion_byte_a_byte=true
+
+revision=conservar_siete_padres_originales
+frontend_commit=9ac1299eda7aa6b763e63354c67e25c5f3104f72
+prueba_ui=44688949662
+prueba_laravel_mysql_real_ci=44688949770
+perfiles_dentro_de_administracion=true
+backend_con_gateway_cerrado=true
+sin_sql=true

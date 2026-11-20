@@ -1,0 +1,70 @@
+name: Prueba navegador real de sitio en InfinityFree
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/solicitudes/probar-browser-productivo-v2.txt']
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar Chromium de Playwright
+        run: |
+          mkdir -p /tmp/smoke-rutahd && cd /tmp/smoke-rutahd
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Probar interfaz y HTTP API desde navegador sin credenciales
+        working-directory: /tmp/smoke-rutahd
+        run: |
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try {
+            const page=await browser.newPage({locale:'es-CL'});
+            const endpoint='https://rutahyd2.free.nf/';
+            let navigation;
+            try { navigation=await page.goto(endpoint,{waitUntil:'domcontentloaded',timeout:45000}); }
+            catch(e) { console.log('ERROR_NAVEGACION:', e.name); process.exitCode=1; }
+            if(navigation) {
+              await page.waitForTimeout(12000);
+              const title=await page.title();
+              const parents=await page.locator('.sidebar .nav > .nav-link, .sidebar .nav > .nav-group')
+                .evaluateAll(elements=>elements.map(el=>el.dataset.nav||el.querySelector('.nav-link')?.dataset.nav));
+              const expected=['inicio','pedidos','clientes','productos','inventario','informes','administracion'];
+              const correct=JSON.stringify(parents)===JSON.stringify(expected);
+              console.log('HTTP_FRONT:',navigation.status());
+              console.log('TITULO_PRESENTE:',title.includes('Ruta')?'SI':'NO');
+              console.log('SIETE_PADRES_ORIGINALES:',correct?'SI':'NO');
+              console.log('PADRES_ENCONTRADOS:',parents.length);
+              if(!correct)process.exitCode=1;
+              try {
+                const api=await page.evaluate(async()=>{
+                  const controller=new AbortController();
+                  const timeout=setTimeout(()=>controller.abort(),12000);
+                  try {
+                    const result=await fetch('/api/v1/estado',{signal:controller.signal,headers:{Accept:'application/json'}});
+                    return {status:result.status,content_type:result.headers.get('content-type')||''};
+                  } finally{clearTimeout(timeout);}
+                });
+                console.log('API_HTTP:',api.status);
+                console.log('API_JSON:',api.content_type.includes('json')?'SI':'NO');
+                if(api.status===503 && api.content_type.includes('json')){
+                  console.log('API_CERRADA_CON_SEGURIDAD=SI');
+                } else {
+                  console.log('API_CERRADA_CON_SEGURIDAD=NO_O_NO_VERIFICABLE');
+                  process.exitCode=1;
+                }
+              } catch(e) {
+                console.log('API_ERROR_BROWSER:',e.name);
+                process.exitCode=1;
+              }
+            }
+            await page.close();
+          } finally {await browser.close();}
+          JS

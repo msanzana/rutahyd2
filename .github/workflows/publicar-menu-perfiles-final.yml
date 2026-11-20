@@ -1,0 +1,193 @@
+name: Publicar menu Productos y perfiles V2 por FTPS
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'deployment/solicitudes/publicar-menu-perfiles-final.txt'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-frontend-deploy
+  cancel-in-progress: false
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Exigir secreto FTPS
+        run: test -n "$FTP_PASSWORD" || { echo "::error::Falta contraseña FTP en Actions Secrets"; exit 1; }
+      - name: Obtener frontend publicado en GitHub
+        run: |
+          git clone --depth 1 --branch feature/catalogos-api-adapter-v2-20261120 https://github.com/msanzana/rutahyd2front.git /tmp/rutahyd2front
+          test "$(git -C /tmp/rutahyd2front rev-parse HEAD)" = "3dec4efc3bd3b76475f5e461d86bda136f6f4b57"
+          cd /tmp/rutahyd2front
+          test -f index.html
+          test -f assets/css/app.css
+          test -f assets/js/app.js
+          test -f assets/js/catalogos.js
+          test -f assets/js/accesos.js
+          test -f assets/js/catalogos-api.js
+          test -f assets/js/admin-remoto.js
+          test -f assets/js/perfiles.js
+          test -f assets/img/prueba-rutahd2.webp
+          node --check assets/js/catalogos.js
+          node --check assets/js/app.js
+          node --check assets/js/accesos.js
+          node --check assets/js/catalogos-api.js
+          node --check assets/js/admin-remoto.js
+          node --check assets/js/perfiles.js
+          grep -Fq 'id="productSubnav"' index.html
+          grep -Fq 'perfiles.js' index.html
+          grep -Fq 'Demo' README.md || grep -Fq 'demostración' README.md
+          grep -Fq 'assets/img/prueba-rutahd2.webp' index.html
+          grep -Fq 'assets/css/app.css' index.html
+          python3 - <<'PY'
+          from pathlib import Path
+          html=Path('index.html')
+          source=html.read_text(encoding='utf-8')
+          old='assets/img/prueba-rutahd2.webp'
+          if source.count(old)<2 or not Path(old).is_file():
+              raise SystemExit('No se encontró el logo oficial en los archivos fuente')
+          url='https://raw.githubusercontent.com/msanzana/rutahyd2front/main/'+old
+          html.write_text(source.replace(old,url),encoding='utf-8')
+          print('Logo original: referencia estática GitHub raw, sin cambio de píxeles')
+          PY
+          echo "Frontend: $(git rev-parse HEAD)"
+      - name: Instalar FTPS
+        run: sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Preflight para no reemplazar otros sitios
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/ftp_preflight.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 35
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          cls -1 -a /htdocs > /tmp/htdocs_lista
+          bye
+          EOF
+          lftp -f /tmp/ftp_preflight.lftp
+          if grep -Eq '(^|/)index\.html$' /tmp/htdocs_lista; then
+            cat >/tmp/read_root.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/root_index_existente.html
+          bye
+          EOF
+            lftp -f /tmp/read_root.lftp
+            if ! grep -Fq 'Ruta H&D2' /tmp/root_index_existente.html; then
+              echo "::error::index.html pertenece a otro proyecto, no sobrescribir"; exit 1
+            fi
+          fi
+          echo "Preflight de la web principal verificado."
+      - name: Transferir frontend al dominio y vista previa sin tocar api-v2
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/publish.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 3
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          set cmd:fail-exit no
+          mkdir /htdocs/assets
+          mkdir /htdocs/assets/css
+          mkdir /htdocs/assets/js
+          mkdir /htdocs/assets/img
+          mkdir /htdocs/violeta-demo
+          mkdir /htdocs/violeta-demo/assets
+          mkdir /htdocs/violeta-demo/assets/css
+          mkdir /htdocs/violeta-demo/assets/js
+          mkdir /htdocs/violeta-demo/assets/img
+          set cmd:fail-exit yes
+          cd /htdocs
+          put /tmp/rutahyd2front/assets/css/app.css -o assets/css/app.css
+          put /tmp/rutahyd2front/assets/js/app.js -o assets/js/app.js
+          put /tmp/rutahyd2front/assets/js/catalogos.js -o assets/js/catalogos.js
+          put /tmp/rutahyd2front/assets/js/accesos.js -o assets/js/accesos.js
+          put /tmp/rutahyd2front/assets/js/catalogos-api.js -o assets/js/catalogos-api.js
+          put /tmp/rutahyd2front/assets/js/admin-remoto.js -o assets/js/admin-remoto.js
+          put /tmp/rutahyd2front/assets/js/perfiles.js -o assets/js/perfiles.js
+          put /tmp/rutahyd2front/index.html -o index.html
+          cd /htdocs/violeta-demo
+          put /tmp/rutahyd2front/assets/css/app.css -o assets/css/app.css
+          put /tmp/rutahyd2front/assets/js/app.js -o assets/js/app.js
+          put /tmp/rutahyd2front/assets/js/catalogos.js -o assets/js/catalogos.js
+          put /tmp/rutahyd2front/assets/js/accesos.js -o assets/js/accesos.js
+          put /tmp/rutahyd2front/assets/js/catalogos-api.js -o assets/js/catalogos-api.js
+          put /tmp/rutahyd2front/assets/js/admin-remoto.js -o assets/js/admin-remoto.js
+          put /tmp/rutahyd2front/assets/js/perfiles.js -o assets/js/perfiles.js
+          put /tmp/rutahyd2front/index.html -o index.html
+          bye
+          EOF
+          lftp -f /tmp/publish.lftp
+          rm -f /tmp/publish.lftp
+      - name: Verificar 16 archivos remotos en InfinityFree
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/check_root_html
+          get /htdocs/assets/css/app.css -o /tmp/check_root_css
+          get /htdocs/assets/js/app.js -o /tmp/check_root_js
+          get /htdocs/assets/js/catalogos.js -o /tmp/check_root_catalogos
+          get /htdocs/assets/js/accesos.js -o /tmp/check_root_accesos
+          get /htdocs/assets/js/catalogos-api.js -o /tmp/check_root_catalogos_api
+          get /htdocs/assets/js/admin-remoto.js -o /tmp/check_root_admin_remoto
+          get /htdocs/assets/js/perfiles.js -o /tmp/check_root_perfiles
+          get /htdocs/violeta-demo/index.html -o /tmp/check_preview_html
+          get /htdocs/violeta-demo/assets/css/app.css -o /tmp/check_preview_css
+          get /htdocs/violeta-demo/assets/js/app.js -o /tmp/check_preview_js
+          get /htdocs/violeta-demo/assets/js/catalogos.js -o /tmp/check_preview_catalogos
+          get /htdocs/violeta-demo/assets/js/accesos.js -o /tmp/check_preview_accesos
+          get /htdocs/violeta-demo/assets/js/catalogos-api.js -o /tmp/check_preview_catalogos_api
+          get /htdocs/violeta-demo/assets/js/admin-remoto.js -o /tmp/check_preview_admin_remoto
+          get /htdocs/violeta-demo/assets/js/perfiles.js -o /tmp/check_preview_perfiles
+          bye
+          EOF
+          lftp -f /tmp/verify.lftp
+          for target in root preview; do
+            cmp -s /tmp/rutahyd2front/index.html /tmp/check_${target}_html
+            cmp -s /tmp/rutahyd2front/assets/css/app.css /tmp/check_${target}_css
+            cmp -s /tmp/rutahyd2front/assets/js/app.js /tmp/check_${target}_js
+            cmp -s /tmp/rutahyd2front/assets/js/catalogos.js /tmp/check_${target}_catalogos
+            cmp -s /tmp/rutahyd2front/assets/js/accesos.js /tmp/check_${target}_accesos
+            cmp -s /tmp/rutahyd2front/assets/js/catalogos-api.js /tmp/check_${target}_catalogos_api
+            cmp -s /tmp/rutahyd2front/assets/js/admin-remoto.js /tmp/check_${target}_admin_remoto
+            cmp -s /tmp/rutahyd2front/assets/js/perfiles.js /tmp/check_${target}_perfiles
+            echo "Verificado: $target (HTML (logo oficial desde GitHub) + CSS + 2 JS)"
+          done
+          echo "Los 16 archivos coinciden por bytes con el repositorio."
+          {
+            echo "### Frontend H&D2 publicado"
+            echo "- [Sitio principal](https://rutahyd2.free.nf/)"
+            echo "- [Vista previa](https://rutahyd2.free.nf/violeta-demo/)"
+            echo "- 16 archivos verificados por FTPS: HTML, CSS, menu y perfiles JS en ambos destinos."
+            echo "- /htdocs/api-v2 y la base de datos NO se modificaron."
+            echo "- Modo demostración local; los perfiles reales requieren la API y MySQL habilitados."
+          } >> "$GITHUB_STEP_SUMMARY"

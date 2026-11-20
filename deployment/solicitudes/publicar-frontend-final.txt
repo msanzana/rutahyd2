@@ -9,3 +9,4 @@ modo=demostracion_local
 base_datos_real=no_modificar
 backend_api_v2=no_modificar
 subida=FTPS_cifrado_y_verificacion_byte_por_byte
+reintento=2_workflow_yaml_corregido

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 namespace App\Http\Controllers;
 use App\Models\Usuario;
+use App\Services\PermisosCatalogos;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -33,7 +34,8 @@ final class SesionControlador extends Controller
         });
         return response()->json([
             'token'=>$token,'vence_en'=>$vence->toIso8601String(),
-            'usuario'=>['id'=>$usuario->id,'nombre'=>$usuario->nombre,'rol'=>$usuario->rol?->codigo],
+            'usuario'=>['id'=>$usuario->id,'nombre'=>$usuario->nombre,'rol'=>$usuario->rol?->codigo,
+                'permisos'=>PermisosCatalogos::concedidos($usuario)],
         ]);
     }
     public function salir(Request $solicitud)
@@ -45,6 +47,7 @@ final class SesionControlador extends Controller
     {
         $u=$solicitud->user();
         return response()->json(['id'=>$u->id,'nombre'=>$u->nombre,
-            'correo_electronico'=>$u->correo_electronico,'rol'=>$u->rol?->codigo]);
+            'correo_electronico'=>$u->correo_electronico,'rol'=>$u->rol?->codigo,
+            'permisos'=>PermisosCatalogos::concedidos($u)]);
     }
 }

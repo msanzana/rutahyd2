@@ -90,7 +90,45 @@ DB::table('tokens_acceso')->insert([
     'creado_en' => now(),
 ]);
 esperar(403, api('GET', '/api/v1/catalogos/rubros', [], $tokenLector),
-    'Permiso productos.gestionar');
+    'Permiso separado rubros.ver');
+esperar(403, api('GET', '/api/v1/perfiles/catalogos', [], $tokenLector),
+    'Solo admin puede configurar perfiles');
+
+$perfiles = esperar(200, api('GET', '/api/v1/perfiles/catalogos', [], $token),
+    'Leer perfiles');
+verificar(count($perfiles['catalogos']) === 10, 'Deben existir diez submódulos');
+$modulos = [];
+foreach (array_keys($perfiles['catalogos']) as $key) {
+    $modulos[$key] = ['ver'=>false, 'gestionar'=>false];
+}
+$mal = $modulos;
+$mal['rubros'] = ['ver'=>false,'gestionar'=>true];
+esperar(422, api('PUT', '/api/v1/perfiles/' . $rolLector . '/catalogos',
+    ['modulos'=>$mal], $token), 'Gestión implica visibilidad');
+
+$modulos['rubros']['ver'] = true;
+esperar(200, api('PUT', '/api/v1/perfiles/' . $rolLector . '/catalogos',
+    ['modulos'=>$modulos], $token), 'Conceder ver solo Rubros');
+esperar(200, api('GET', '/api/v1/catalogos/rubros', [], $tokenLector),
+    'Rol supervisor puede ver rubros');
+esperar(403, api('POST', '/api/v1/catalogos/rubros',
+    ['nombre'=>'No escribir','activo'=>true,'parentId'=>null], $tokenLector),
+    'Rol supervisor no puede crear rubros');
+esperar(403, api('GET', '/api/v1/catalogos/marcas', [], $tokenLector),
+    'Otros catálogos siguen ocultos');
+
+$modulos['rubros']['gestionar'] = true;
+esperar(200, api('PUT', '/api/v1/perfiles/' . $rolLector . '/catalogos',
+    ['modulos'=>$modulos], $token), 'Conceder gestionar Rubros');
+$otroRubro = crear('rubros','Catalogo autorizado',null,$tokenLector);
+verificar($otroRubro > 0,'Rol autorizado puede crear rubro');
+$modulos['rubros'] = ['ver'=>false,'gestionar'=>false];
+esperar(200, api('PUT', '/api/v1/perfiles/' . $rolLector . '/catalogos',
+    ['modulos'=>$modulos], $token), 'Revocar permisos de Rubros');
+esperar(403, api('GET', '/api/v1/catalogos/rubros', [], $tokenLector),
+    'Revocación efectiva sin nuevo login');
+esperar(403, api('PUT', '/api/v1/perfiles/' . $rolAdmin . '/catalogos',
+    ['modulos'=>$modulos], $token), 'No alterar rol admin');
 esperar(404, api('GET', '/api/v1/catalogos/desconocido', [], $token),
     'Lista blanca de catálogos');
 
@@ -167,7 +205,7 @@ esperar(204, api('DELETE', '/api/v1/sesion', [], $token),
 esperar(401, api('GET', '/api/v1/catalogos/rubros', [], $token),
     'Token revocado');
 
-echo "OK: login real, 401/403, CRUD, reserva tributaria, relaciones, producto, legado y cierre de sesión en MySQL efímero.\n";
+echo "OK: login real, 401/403, matriz de perfiles, permisos por módulo, CRUD, taxonomía y legado en MySQL efímero.\n";
 } catch (\Throwable $e) {
     fwrite(STDERR, "ERROR INTEGRACIÓN: " . $e->getMessage() . "\n");
     exit(1);

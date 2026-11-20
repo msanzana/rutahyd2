@@ -1,0 +1,143 @@
+name: Publicar vista previa de catalogos V2 en ruta aislada
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'deployment/solicitudes/publicar-catalogos-preview-v2.txt'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-frontend-catalogos-preview
+  cancel-in-progress: false
+jobs:
+  preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FTP_DEST: /htdocs/catalogos-v2-preview
+    steps:
+      - name: Exigir FTPS
+        run: test -n "$FTP_PASSWORD"
+      - name: Obtener frontend aislado de clasificaciones
+        run: |
+          git clone --depth 1 --branch feature/catalogos-api-adapter-v2-20261120 https://github.com/msanzana/rutahyd2front.git /tmp/rutahd-preview
+          cd /tmp/rutahd-preview
+          for f in index.html assets/css/app.css assets/js/app.js assets/js/catalogos.js assets/js/catalogos-api.js assets/js/admin-remoto.js; do
+            test -s "$f"
+          done
+          node --check assets/js/app.js
+          node --check assets/js/catalogos.js
+          node --check assets/js/catalogos-api.js
+          node --check assets/js/admin-remoto.js
+          grep -Fq 'admin-remoto.js' index.html
+          grep -Fq 'catalogos-api.js' index.html
+          python3 - <<'PY'
+          from pathlib import Path
+          html=Path('index.html')
+          source=html.read_text(encoding='utf-8')
+          asset='assets/img/prueba-rutahd2.webp'
+          if not Path(asset).is_file() or source.count(asset)<2:
+              raise SystemExit('Falta referencia al logo oficial V1')
+          url='https://raw.githubusercontent.com/msanzana/rutahyd2front/main/'+asset
+          html.write_text(source.replace(asset,url),encoding='utf-8')
+          print('Se usa logo oficial alojado en GitHub, sin alteración de píxeles')
+          PY
+      - name: Instalar FTPS
+        run: sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Proteger contra reemplazo de otros sitios
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/probe.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          cls -1 -a /htdocs > /tmp/htdocs_listado
+          bye
+          EOF
+          lftp -f /tmp/probe.lftp
+          if grep -Fxq catalogos-v2-preview /tmp/htdocs_listado; then
+            cat >/tmp/probe_existing.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/index.html" -o /tmp/existing_catalogos_preview.html
+          bye
+          EOF
+            lftp -f /tmp/probe_existing.lftp
+            grep -Fq 'Ruta H&amp;D2' /tmp/existing_catalogos_preview.html || { echo "::error::Destino de otro proyecto"; exit 1; }
+            grep -Fq 'admin-remoto.js' /tmp/existing_catalogos_preview.html || { echo "::error::La vista existente no corresponde a catalogos V2"; exit 1; }
+          fi
+      - name: Copiar solamente seis archivos estáticos a vista previa aislada
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/subir.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          set cmd:fail-exit no
+          mkdir "$FTP_DEST"
+          mkdir "$FTP_DEST/assets"
+          mkdir "$FTP_DEST/assets/js"
+          mkdir "$FTP_DEST/assets/css"
+          set cmd:fail-exit yes
+          cd "$FTP_DEST"
+          put /tmp/rutahd-preview/assets/css/app.css -o assets/css/app.css
+          put /tmp/rutahd-preview/assets/js/catalogos.js -o assets/js/catalogos.js
+          put /tmp/rutahd-preview/assets/js/catalogos-api.js -o assets/js/catalogos-api.js
+          put /tmp/rutahd-preview/assets/js/admin-remoto.js -o assets/js/admin-remoto.js
+          put /tmp/rutahd-preview/assets/js/app.js -o assets/js/app.js
+          put /tmp/rutahd-preview/index.html -o index.html
+          bye
+          EOF
+          lftp -f /tmp/subir.lftp
+          rm -f /tmp/subir.lftp
+      - name: Verificar seis archivos por FTPS byte a byte
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/index.html" -o /tmp/re_index
+          get "$FTP_DEST/assets/css/app.css" -o /tmp/re_css
+          get "$FTP_DEST/assets/js/app.js" -o /tmp/re_app
+          get "$FTP_DEST/assets/js/catalogos.js" -o /tmp/re_catalogos
+          get "$FTP_DEST/assets/js/catalogos-api.js" -o /tmp/re_catalogos_api
+          get "$FTP_DEST/assets/js/admin-remoto.js" -o /tmp/re_admin
+          bye
+          EOF
+          lftp -f /tmp/verify.lftp
+          cmp -s /tmp/rutahd-preview/index.html /tmp/re_index
+          cmp -s /tmp/rutahd-preview/assets/css/app.css /tmp/re_css
+          cmp -s /tmp/rutahd-preview/assets/js/app.js /tmp/re_app
+          cmp -s /tmp/rutahd-preview/assets/js/catalogos.js /tmp/re_catalogos
+          cmp -s /tmp/rutahd-preview/assets/js/catalogos-api.js /tmp/re_catalogos_api
+          cmp -s /tmp/rutahd-preview/assets/js/admin-remoto.js /tmp/re_admin
+          echo "OK: seis archivos del frontend de vista previa verificados."
+          echo "La API, el frontend principal, la vista violeta y MySQL NO fueron modificados."
+          {
+            echo "### Vista previa de catálogos H&D2"
+            echo "- Ruta aislada: /catalogos-v2-preview"
+            echo "- Seis archivos verificados por FTPS"
+            echo "- Base MySQL y API productiva no modificadas"
+            echo "- Modo de demostración local y panel MySQL con login explícito"
+          } >> "$GITHUB_STEP_SUMMARY"

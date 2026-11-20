@@ -26,12 +26,15 @@ jobs:
           git clone --depth 1 https://github.com/msanzana/rutahyd2front.git /tmp/rutahyd2front
           test -f /tmp/rutahyd2front/index.html
           test -f /tmp/rutahyd2front/assets/css/theme-violet.css
+          test -f /tmp/rutahyd2front/assets/img/logo-hd-oficial-v1.jpg
+          test "$(file --mime-type -b /tmp/rutahyd2front/assets/img/logo-hd-oficial-v1.jpg)" = image/jpeg
+          grep -Fq 'assets/img/logo-hd-oficial-v1.jpg' /tmp/rutahyd2front/index.html
           grep -Fq 'assets/css/theme-violet.css' /tmp/rutahyd2front/index.html
           grep -Fq -- '--brand: #6d28d9;' /tmp/rutahyd2front/assets/css/theme-violet.css
           echo "Archivos violeta listos para publicar como vista previa"
       - name: Instalar cliente FTPS
         run: sudo apt-get -qq update && sudo apt-get -qq install -y lftp
-      - name: Publicar solo dos archivos en carpeta aislada
+      - name: Publicar frontend y logo V1 en carpeta aislada
         run: |
           set +x
           umask 077
@@ -48,10 +51,12 @@ jobs:
           mkdir "$FTP_DEST"
           mkdir "$FTP_DEST/assets"
           mkdir "$FTP_DEST/assets/css"
+          mkdir "$FTP_DEST/assets/img"
           set cmd:fail-exit yes
           cd "$FTP_DEST"
           put /tmp/rutahyd2front/index.html -o index.html
           put /tmp/rutahyd2front/assets/css/theme-violet.css -o assets/css/theme-violet.css
+          put /tmp/rutahyd2front/assets/img/logo-hd-oficial-v1.jpg -o assets/img/logo-hd-oficial-v1.jpg
           bye
           EOF
           lftp -f /tmp/front_upload.lftp
@@ -71,11 +76,13 @@ jobs:
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
           get "$FTP_DEST/index.html" -o /tmp/frontend_verificado.html
           get "$FTP_DEST/assets/css/theme-violet.css" -o /tmp/tema_verificado.css
+          get "$FTP_DEST/assets/img/logo-hd-oficial-v1.jpg" -o /tmp/logo_v1_verificado.jpg
           bye
           EOF
           lftp -f /tmp/front_verify.lftp
           cmp -s /tmp/rutahyd2front/index.html /tmp/frontend_verificado.html
           cmp -s /tmp/rutahyd2front/assets/css/theme-violet.css /tmp/tema_verificado.css
-          echo "Vista previa violeta: 2 archivos verificados por FTPS"
+          cmp -s /tmp/rutahyd2front/assets/img/logo-hd-oficial-v1.jpg /tmp/logo_v1_verificado.jpg
+          echo "Vista previa violeta y logo original H&D V1: 3 archivos verificados por FTPS"
           echo "No se modifico index2.html ni /htdocs/api-v2"
           printf '[Ver vista previa violeta](https://rutahyd2.free.nf/violeta-demo/index.html)\n' >> "$GITHUB_STEP_SUMMARY"

@@ -21,6 +21,8 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::get('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'ver'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
     Route::patch('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'guardar'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
     Route::get('/perfiles/catalogos',[PerfilesCatalogosControlador::class,'listar']);
+    Route::get('/perfiles/usuarios',[PerfilesCatalogosControlador::class,'usuarios']);
+    Route::put('/perfiles/usuarios/{id}/rol',[PerfilesCatalogosControlador::class,'asignarPerfil'])->whereNumber('id');
     Route::put('/perfiles/{id}/catalogos',[PerfilesCatalogosControlador::class,'actualizar'])->whereNumber('id');
     Route::get('/perfil',[SesionControlador::class,'perfil']);
     Route::delete('/sesion',[SesionControlador::class,'salir']);

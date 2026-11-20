@@ -11,3 +11,4 @@ backend_api_v2=no_modificar
 subida=FTPS_cifrado_y_verificacion_byte_por_byte
 reintento=2_workflow_yaml_corregido
 reintento=3_diagnostico_webp_jpg_ok
+reintento=4_limpieza_logo_parcial_permiso_000

@@ -1,0 +1,75 @@
+name: Auditoria definitiva de archivos remotos Ruta H&D2
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'deployment/solicitudes/auditoria-definitiva-v2.txt'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  auditar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Verificar credencial y preparar FTPS
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Obtener referencias inmutables de backend y front publicados
+        run: |
+          git clone --quiet --depth 1 https://github.com/msanzana/rutahyd2front.git /tmp/frontraiz
+          git clone --quiet --depth 1 --branch feature/catalogos-api-adapter-v2-20261120 https://github.com/msanzana/rutahyd2front.git /tmp/frontpreview
+          git clone --quiet --depth 1 --branch feature/catalogos-api-productos-v2-20261120 https://github.com/msanzana/rutahyd2.git /tmp/backendnuevo
+          cd /tmp/backendnuevo
+          # La última actualización FTPS comprobada usó el commit fijado aquí.
+          git fetch -q --depth 1 origin 27cc2e351fd1a6d1cb6d09e0660a252177d6344a
+          git checkout -q 27cc2e351fd1a6d1cb6d09e0660a252177d6344a
+      - name: Leer remoto sin escribir ni ejecutar SQL
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/audit.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/root_index
+          get /htdocs/assets/js/app.js -o /tmp/root_app
+          get /htdocs/assets/js/catalogos.js -o /tmp/root_catalogos
+          get /htdocs/catalogos-v2-preview/index.html -o /tmp/preview_index
+          get /htdocs/catalogos-v2-preview/assets/js/catalogos-api.js -o /tmp/preview_api
+          get /htdocs/catalogos-v2-preview/assets/js/admin-remoto.js -o /tmp/preview_admin
+          get /htdocs/api-v2/.htaccess -o /tmp/backend_guard
+          get /htdocs/api-v2/routes/api.php -o /tmp/backend_routes
+          get /htdocs/api-v2/app/Http/Controllers/CatalogoComercialControlador.php -o /tmp/backend_catalogos
+          get /htdocs/api-v2/app/Http/Controllers/ClasificacionProductoControlador.php -o /tmp/backend_productos
+          cls -1 -a /htdocs/api-v2 > /tmp/backend_root_list
+          bye
+          EOF
+          lftp -f /tmp/audit.lftp
+      - name: Acreditar versión real y seguridad
+        run: |
+          cmp -s /tmp/root_app /tmp/frontraiz/assets/js/app.js
+          cmp -s /tmp/root_catalogos /tmp/frontraiz/assets/js/catalogos.js
+          grep -Fq 'Ruta H&D2' /tmp/root_index
+          grep -Fq 'admin-remoto.js' /tmp/preview_index
+          cmp -s /tmp/preview_api /tmp/frontpreview/assets/js/catalogos-api.js
+          cmp -s /tmp/preview_admin /tmp/frontpreview/assets/js/admin-remoto.js
+          cmp -s /tmp/backend_routes /tmp/backendnuevo/routes/api.php
+          cmp -s /tmp/backend_catalogos /tmp/backendnuevo/app/Http/Controllers/CatalogoComercialControlador.php
+          cmp -s /tmp/backend_productos /tmp/backendnuevo/app/Http/Controllers/ClasificacionProductoControlador.php
+          grep -Fq 'Require all denied' /tmp/backend_guard
+          if grep -Eq '^\.env($|\.)' /tmp/backend_root_list; then
+            echo "::error::Hay .env en raíz de staging"; exit 1
+          fi
+          echo "OK: frontend principal, vista previa y backend protegido verificados contra commits publicados."
+          echo "NOTA: La API sigue bloqueada; esta auditoría no prueba migraciones MySQL ni navegador HTTP."

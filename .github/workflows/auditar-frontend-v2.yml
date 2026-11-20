@@ -1,0 +1,62 @@
+name: Auditar frontend actual de RutaHD2
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'deployment/solicitudes/leer-frontend.txt'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  examinar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Preparar lector FTPS
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y lftp
+      - name: Enumerar archivos y recuperar solo HTML publico
+        run: |
+          set +x
+          umask 077
+          mkdir -p /tmp/frontruta
+          cat >/tmp/listar.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 35
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          cls -l /htdocs
+          get /htdocs/index2.html -o /tmp/frontruta/index2.html
+          bye
+          EOF
+          lftp -f /tmp/listar.lftp
+          echo "HTML recuperado:"
+          wc -c /tmp/frontruta/index2.html
+          python3 - <<'PY'
+          import pathlib,re
+          p=pathlib.Path("/tmp/frontruta/index2.html")
+          s=p.read_text(errors="replace")
+          print("titulo:",re.findall(r"<title[^>]*>(.*?)</title>",s,re.I|re.S)[:2])
+          print("etiquetas_style:",len(re.findall(r"<style\b",s,re.I)))
+          print("etiquetas_link_css:",re.findall(r'<link[^>]+href=[\x22\x27]([^\x22\x27]+\.css[^\x22\x27]*)',s,re.I)[:15])
+          print("etiquetas_script:",len(re.findall(r"<script\b",s,re.I)))
+          print("colores_hex:",sorted(set(re.findall(r"#[0-9a-fA-F]{3,8}\b",s)))[:100])
+          print("variables_css:", sorted(set(re.findall(r"--[a-zA-Z][\w-]+\s*:",s)))[:50])
+          if len(s)>100000: raise SystemExit("HTML demasiado grande para auditoria")
+          PY
+      - name: Guardar HTML como artefacto de solo lectura
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahyd2-frontend-actual-snapshot
+          path: /tmp/frontruta/index2.html
+          retention-days: 5
+          if-no-files-found: error

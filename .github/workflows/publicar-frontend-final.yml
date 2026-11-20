@@ -35,6 +35,18 @@ jobs:
           grep -Fq 'Demo' README.md || grep -Fq 'demostración' README.md
           grep -Fq 'assets/img/prueba-rutahd2.webp' index.html
           grep -Fq 'assets/css/app.css' index.html
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64
+          html=Path('index.html')
+          source=html.read_text(encoding='utf-8')
+          logo=Path('assets/img/prueba-rutahd2.webp').read_bytes()
+          if len(logo)<5000 or source.count('assets/img/prueba-rutahd2.webp')<2:
+              raise SystemExit('Logo original o rutas esperadas no disponibles')
+          uri='data:image/webp;base64,'+base64.b64encode(logo).decode('ascii')
+          html.write_text(source.replace('assets/img/prueba-rutahd2.webp',uri),encoding='utf-8')
+          print('Logo WebP transparente incrustado en HTML: '+str(len(logo))+' bytes')
+          PY
           grep -Fq 'assets/js/catalogos.js' index.html
           echo "Frontend: $(git rev-parse HEAD)"
       - name: Instalar FTPS
@@ -72,31 +84,6 @@ jobs:
             fi
           fi
           echo "Preflight de la web principal verificado."
-      - name: Verificar logo oficial publicado sin sobrescribirlo
-        run: |
-          set +x
-          umask 077
-          for destination in /htdocs/assets/img /htdocs/violeta-demo/assets/img; do
-            rm -f /tmp/logo_verificado.webp
-            cat >/tmp/verify_logo.lftp <<EOF
-          set cmd:fail-exit yes
-          set net:timeout 45
-          set net:max-retries 2
-          set ftp:ssl-allow yes
-          set ftp:ssl-force yes
-          set ftp:ssl-protect-data yes
-          set ssl:verify-certificate yes
-          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
-          get "$destination/prueba-rutahd2.webp" -o /tmp/logo_verificado.webp
-          bye
-          EOF
-            lftp -f /tmp/verify_logo.lftp
-            cmp -s /tmp/rutahyd2front/assets/img/prueba-rutahd2.webp /tmp/logo_verificado.webp || {
-              echo "::error::Logo remoto no coincide, no se permite sobrescribir sin auditoría"; exit 1;
-            }
-            echo "Logo original verificado sin cambios: $destination"
-          done
-          rm -f /tmp/verify_logo.lftp /tmp/logo_verificado.webp
       - name: Transferir frontend al dominio y vista previa sin tocar api-v2
         run: |
           set +x
@@ -135,7 +122,7 @@ jobs:
           EOF
           lftp -f /tmp/publish.lftp
           rm -f /tmp/publish.lftp
-      - name: Verificar de vuelta los diez archivos en InfinityFree
+      - name: Verificar de vuelta los ocho archivos en InfinityFree
         run: |
           set +x
           umask 077
@@ -152,12 +139,10 @@ jobs:
           get /htdocs/assets/css/app.css -o /tmp/check_root_css
           get /htdocs/assets/js/app.js -o /tmp/check_root_js
           get /htdocs/assets/js/catalogos.js -o /tmp/check_root_catalogos
-          get /htdocs/assets/img/prueba-rutahd2.webp -o /tmp/check_root_logo
           get /htdocs/violeta-demo/index.html -o /tmp/check_preview_html
           get /htdocs/violeta-demo/assets/css/app.css -o /tmp/check_preview_css
           get /htdocs/violeta-demo/assets/js/app.js -o /tmp/check_preview_js
           get /htdocs/violeta-demo/assets/js/catalogos.js -o /tmp/check_preview_catalogos
-          get /htdocs/violeta-demo/assets/img/prueba-rutahd2.webp -o /tmp/check_preview_logo
           bye
           EOF
           lftp -f /tmp/verify.lftp
@@ -166,15 +151,14 @@ jobs:
             cmp -s /tmp/rutahyd2front/assets/css/app.css /tmp/check_${target}_css
             cmp -s /tmp/rutahyd2front/assets/js/app.js /tmp/check_${target}_js
             cmp -s /tmp/rutahyd2front/assets/js/catalogos.js /tmp/check_${target}_catalogos
-            cmp -s /tmp/rutahyd2front/assets/img/prueba-rutahd2.webp /tmp/check_${target}_logo
-            echo "Verificado: $target (HTML + CSS + 2 JS + logo original con transparencia)"
+            echo "Verificado: $target (HTML (logo incrustado) + CSS + 2 JS)"
           done
-          echo "Los 10 archivos coinciden por bytes con el repositorio."
+          echo "Los 8 archivos coinciden por bytes con el repositorio."
           {
             echo "### Frontend H&D2 publicado"
             echo "- [Sitio principal](https://rutahyd2.free.nf/)"
             echo "- [Vista previa](https://rutahyd2.free.nf/violeta-demo/)"
-            echo "- 10 archivos verificados por FTPS: HTML, CSS, app.js, catalogos.js y logo en dos destinos."
+            echo "- 8 archivos verificados por FTPS: HTML con logo incrustado, CSS, app.js y catalogos.js en dos destinos."
             echo "- /htdocs/api-v2 y la base de datos NO se modificaron."
             echo "- Modo demostración local: sin conexión a API de producción."
           } >> "$GITHUB_STEP_SUMMARY"

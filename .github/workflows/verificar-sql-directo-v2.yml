@@ -1,0 +1,58 @@
+name: Comprobar seis SQL protegidos por FTPS directo
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/solicitudes/verificar-sql-directo-v2.txt']
+permissions:
+  contents: read
+jobs:
+  sql:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bbd5d38bb5ce7ed45fced6012582dfc109a6360d
+      - name: Verificar origen e instalar FTPS
+        run: |
+          test "$(git rev-parse HEAD)" = 'bbd5d38bb5ce7ed45fced6012582dfc109a6360d'
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Obtener cada archivo protegido sin modificar servidor
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/get.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/database/espanol/12_tokens_acceso_opcional.sql -o /tmp/sql12
+          get /htdocs/api-v2/database/espanol/13_catalogos_comerciales_aditivos.sql -o /tmp/sql13
+          get /htdocs/api-v2/database/espanol/14_productos_clasificacion_campos.sql -o /tmp/sql14
+          get /htdocs/api-v2/database/espanol/15_preflight_catalogos_remoto_solo_lectura.sql -o /tmp/sql15
+          get /htdocs/api-v2/database/espanol/16_permisos_modulos_producto.sql -o /tmp/sql16
+          get /htdocs/api-v2/database/espanol/17_verificar_clasificacion_y_perfiles_lectura.sql -o /tmp/sql17
+          get /htdocs/api-v2/.htaccess -o /tmp/guard
+          bye
+          EOF
+          lftp -f /tmp/get.lftp
+      - name: Confirmar identidad exacta por bytes
+        run: |
+          set -e
+          cmp -s database/espanol/12_tokens_acceso_opcional.sql /tmp/sql12
+          cmp -s database/espanol/13_catalogos_comerciales_aditivos.sql /tmp/sql13
+          cmp -s database/espanol/14_productos_clasificacion_campos.sql /tmp/sql14
+          cmp -s database/espanol/15_preflight_catalogos_remoto_solo_lectura.sql /tmp/sql15
+          cmp -s database/espanol/16_permisos_modulos_producto.sql /tmp/sql16
+          cmp -s database/espanol/17_verificar_clasificacion_y_perfiles_lectura.sql /tmp/sql17
+          grep -Fq 'Require all denied' /tmp/guard
+          echo "OK: seis scripts SQL coinciden byte a byte, staging protegido. Nada ejecutado en MySQL."
+          echo "Seis scripts cotejados byte a byte y .htaccess conservado. Sin cambios en MySQL." >> "$GITHUB_STEP_SUMMARY"

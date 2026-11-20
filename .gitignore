@@ -12,3 +12,6 @@
 /.idea/
 /.vscode/
 /public/storage
+/playwright-report/
+/test-results/
+/playwright/.cache/

@@ -1,0 +1,103 @@
+name: Backend RutaHD2 V2 español - comprobar y empaquetar
+on:
+  push:
+    branches: [ feature/backend-v2-es ]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validar-y-empaquetar:
+    runs-on: ubuntu-24.04
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: temporal_ci_solamente
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: rutahyd2_es_local
+      DB_USERNAME: root
+      DB_PASSWORD: temporal_ci_solamente
+      APP_ENV: testing
+      APP_DEBUG: 'false'
+      CACHE_STORE: file
+      SESSION_DRIVER: file
+      QUEUE_CONNECTION: sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, intl, xml, dom, curl, pdo_mysql, fileinfo, openssl
+      - name: Validar sintaxis de PHP
+        run: |
+          find app bootstrap config routes public database/migrations -name '*.php' -print0 | xargs -0 -n1 php -l
+          php -l tests/integracion_bd.php
+      - name: Validar manifest Composer
+        run: composer validate --no-check-publish
+      - name: Instalar vendor para desplegar en hosting sin Composer
+        run: composer install --no-dev --prefer-dist --no-interaction --no-progress
+      - name: Importar esquema MySQL V2 en español en base efímera
+        run: |
+          docker exec -i ${{ job.services.mysql.id }} mysql -uroot -ptemporal_ci_solamente < database/espanol/01_esquema_completo_34_tablas_es.sql
+          docker exec -i ${{ job.services.mysql.id }} mysql -uroot -ptemporal_ci_solamente < database/espanol/05_semillas_es.sql
+      - name: Migrar tokens y registrar migración en español
+        run: php artisan migrate --force
+      - name: Comprobar tablas, modelos, campos y FK sobre MySQL real
+        run: php tests/integracion_bd.php
+      - name: Verificar rutas del backend
+        run: php artisan route:list --path=api
+      - name: Probar API de salud y bloqueo sin token
+        run: |
+          php artisan serve --host=127.0.0.1 --port=8000 > /tmp/rutahd2-laravel-test.log 2>&1 &
+          for i in $(seq 1 20); do if curl -fsS http://127.0.0.1:8000/api/estado > /tmp/health.json; then break; fi; sleep 1; done
+          grep -q 'disponible' /tmp/health.json
+          STATUS=$(curl -s -o /tmp/protegido.json -w '%{http_code}' -H "Accept: application/json" http://127.0.0.1:8000/api/v1/perfil)
+          test "$STATUS" = "401"
+      - name: Instalar Node.js para pruebas Playwright
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar Playwright sin servicios externos
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Probar API con navegador Chromium (Playwright)
+        env:
+          CI: 'true'
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:8000
+        run: npm run test:e2e
+      - name: Adjuntar resultados Playwright
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahyd2-playwright-resultados
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Empaquetar backend listo para configurar
+        run: |
+          mkdir -p paquete
+          cp -a app bootstrap config public routes vendor artisan composer.json composer.lock .env.example deployment README.md paquete/
+          mkdir -p paquete/database/migrations paquete/database/espanol
+          cp database/migrations/*.php paquete/database/migrations/
+          cp database/espanol/12_tokens_acceso_opcional.sql paquete/database/espanol/
+          mkdir -p paquete/storage/logs paquete/storage/app/private paquete/storage/framework/cache/data paquete/storage/framework/sessions paquete/storage/framework/views
+          touch paquete/storage/logs/.gitkeep paquete/storage/framework/cache/data/.gitkeep paquete/storage/framework/sessions/.gitkeep paquete/storage/framework/views/.gitkeep
+          cd paquete && zip -q -r ../rutahyd2-v2-backend-con-vendor.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahyd2-v2-backend-con-vendor
+          path: rutahyd2-v2-backend-con-vendor.zip
+          retention-days: 14

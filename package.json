@@ -1,0 +1,14 @@
+{
+  "name": "rutahyd2-pruebas-automatizadas",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pruebas del backend RutaH&D2 V2 con Playwright y GitHub Actions",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

@@ -1,0 +1,10 @@
+# Colocar como /htdocs/api-v2/.htaccess
+# Todas las peticiones a ficheros internos se reescriben a /public.
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteRule ^public/ - [L]
+RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+<FilesMatch "^(\.env|composer\.(json|lock)|artisan)$">
+Require all denied
+</FilesMatch>

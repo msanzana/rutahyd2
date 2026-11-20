@@ -1,23 +1,29 @@
 <?php
 declare(strict_types=1);
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\AuthController;
-use App\Http\Controllers\CustomerController;
-use App\Http\Controllers\ProductController;
-use App\Http\Controllers\SaleNoteController;
-use App\Http\Controllers\TransferController;
-Route::get('/health',fn()=>response()->json(['status'=>'ok','service'=>'rutahyd2-api']));
-Route::post('/v1/auth/login',[AuthController::class,'login'])->middleware('throttle:5,1');
-Route::middleware('auth:sanctum')->prefix('v1')->group(function() {
-    Route::post('/auth/logout',[AuthController::class,'logout']);
-    Route::get('/customers',[CustomerController::class,'index'])->middleware('permission:clients.manage');
-    Route::get('/customers/{id}',[CustomerController::class,'show'])->middleware('permission:clients.manage')->whereNumber('id');
-    Route::get('/products',[ProductController::class,'index'])->middleware('permission:products.manage');
-    Route::get('/products/{id}',[ProductController::class,'show'])->middleware('permission:products.manage')->whereNumber('id');
-    Route::get('/sale-notes',[SaleNoteController::class,'index'])->middleware('permission:sales.view');
-    Route::get('/sale-notes/{id}',[SaleNoteController::class,'show'])->middleware('permission:sales.view')->whereNumber('id');
-    Route::post('/sale-notes',[SaleNoteController::class,'store'])->middleware('permission:sales.manage');
-    Route::post('/sale-notes/{id}/transition',[SaleNoteController::class,'transition'])->middleware('permission:sales.manage')->whereNumber('id');
-    Route::post('/sale-notes/{id}/payments',[SaleNoteController::class,'pay'])->middleware('permission:sales.manage')->whereNumber('id');
-    Route::post('/stock-transfers',[TransferController::class,'store'])->middleware('permission:inventory.manage');
+use App\Http\Controllers\SesionControlador;
+use App\Http\Controllers\RecursoControlador;
+use App\Http\Controllers\VentaControlador;
+use App\Http\Controllers\NotaVentaControlador;
+use App\Http\Controllers\InventarioControlador;
+
+Route::get('/estado',fn()=>response()->json(['servicio'=>'RutaH&D2 API','estado'=>'disponible','version'=>'v2-es']));
+Route::post('/v1/sesion',[SesionControlador::class,'iniciar'])->middleware('throttle:5,1');
+
+Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
+    Route::get('/perfil',[SesionControlador::class,'perfil']);
+    Route::delete('/sesion',[SesionControlador::class,'salir']);
+    // Consultas paginadas solo de recursos admitidos y con permiso por rol.
+    Route::get('/recursos/{recurso}',[RecursoControlador::class,'listar']);
+    Route::get('/recursos/{recurso}/{id}',[RecursoControlador::class,'ver'])->whereNumber('id');
+
+    Route::get('/ventas/{id}/detalles',[VentaControlador::class,'detalles'])->middleware('permiso.rutahd:ventas.ver')->whereNumber('id');
+    Route::post('/ventas',[VentaControlador::class,'guardar'])->middleware('permiso.rutahd:ventas.gestionar');
+    Route::post('/ventas/{id}/preparar-dte',[VentaControlador::class,'prepararDte'])->middleware('permiso.rutahd:ventas.gestionar')->whereNumber('id');
+
+    Route::post('/notas-venta',[NotaVentaControlador::class,'guardar'])->middleware('permiso.rutahd:ventas.gestionar');
+    Route::post('/notas-venta/{id}/estado',[NotaVentaControlador::class,'cambiarEstado'])->middleware('permiso.rutahd:ventas.gestionar')->whereNumber('id');
+    Route::post('/notas-venta/{id}/pagos',[NotaVentaControlador::class,'abonar'])->middleware('permiso.rutahd:ventas.gestionar')->whereNumber('id');
+
+    Route::post('/inventario/traslados',[InventarioControlador::class,'trasladar'])->middleware('permiso.rutahd:inventario.gestionar');
 });

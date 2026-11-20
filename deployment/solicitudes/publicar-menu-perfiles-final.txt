@@ -1,0 +1,11 @@
+RUTAHD2_PUBLICAR_MENU_PRODUCTOS_PERFILES
+fecha=2026-11-20
+frontend_commit=3dec4efc3bd3b76475f5e461d86bda136f6f4b57
+frontend_tests_sha=1497cdaffcbbe4af87d7c1281d9407dbd5450ccd
+frontend_tests_run=44685352752
+publicar_root=true
+publicar_violeta_demo=true
+conservar_logo_oficial=true
+respetar_backend_protegido=true
+sin_sql=true
+verificacion_byte_a_byte=true

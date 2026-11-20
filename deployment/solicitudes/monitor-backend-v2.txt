@@ -1,0 +1,7 @@
+RUTAHD2_MONITOREO_FTP
+run_id=44646889205
+intervalo=5_minutos
+consultas_maximas=12
+solo_lectura=true
+sin_tinyfish=true
+sin_mutaciones_SQL_ni_FTP=true

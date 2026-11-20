@@ -1,0 +1,50 @@
+name: Monitor RutaHD2 V2 cada 5 minutos
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'deployment/solicitudes/monitor-backend-v2.txt'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  seguimiento:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - name: Consultar cada 5 minutos hasta que termine el despliegue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: '44646889205'
+        run: |
+          set -euo pipefail
+          URL="https://github.com/$REPO/actions/runs/$RUN_ID"
+          echo "## Seguimiento del backend RutaH&D2 V2" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "[Abrir despliegue]($URL)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Consulta UTC | Estado | Resultado |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          for intento in $(seq 1 12); do
+            json=$(curl --fail --silent --show-error --location --retry 2 \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$REPO/actions/runs/$RUN_ID")
+            read -r estado resultado < <(printf '%s' "$json" | python3 -c \
+              'import json,sys; r=json.load(sys.stdin); print(r["status"],r.get("conclusion") or "pendiente")')
+            momento=$(date -u +'%Y-%m-%d %H:%M:%S')
+            printf '| %s | %s | %s |\n' "$momento" "$estado" "$resultado" >> "$GITHUB_STEP_SUMMARY"
+            echo "Consulta $intento/12 ($momento UTC): estado=$estado, resultado=$resultado; $URL"
+            if [ "$estado" = "completed" ]; then
+              echo "El despliegue terminó con resultado: $resultado"
+              if [ "$resultado" != "success" ]; then
+                echo "::warning::El backend no se ha confirmado como instalado. Ver los registros del despliegue."
+              fi
+              exit 0
+            fi
+            if [ "$intento" -lt 12 ]; then sleep 300; fi
+          done
+          echo "::notice::La transferencia sigue ejecutándose después de 12 consultas. El monitor terminó sin modificar InfinityFree."
+          echo "Se alcanzó el máximo de consultas; revisar el enlace del despliegue." >> "$GITHUB_STEP_SUMMARY"

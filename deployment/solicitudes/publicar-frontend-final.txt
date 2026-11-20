@@ -23,3 +23,4 @@ modulo_admin=rubros_departamentos_familias_lineas_marcas_modelos_tipos_unidad_gr
 archivos_nuevos=assets/js/catalogos.js
 migracion_BBDD=no_ejecutar
 reintento=catalogos_verificar_logo_existente_sin_sobrescritura
+reintento=catalogos_logo_webp_incrustado_HTML

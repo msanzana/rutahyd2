@@ -28,10 +28,10 @@ jobs:
           test -f index.html
           test -f assets/css/app.css
           test -f assets/js/app.js
-          test -f assets/img/marca-hd.webp
+          test -f assets/img/prueba-rutahd2.webp
           node --check assets/js/app.js
           grep -Fq 'Demo' README.md || grep -Fq 'demostración' README.md
-          grep -Fq 'assets/img/marca-hd.webp' index.html
+          grep -Fq 'assets/img/prueba-rutahd2.webp' index.html
           grep -Fq 'assets/css/app.css' index.html
           echo "Frontend: $(git rev-parse HEAD)"
       - name: Instalar FTPS
@@ -83,15 +83,12 @@ jobs:
           set ftp:ssl-protect-data yes
           set ssl:verify-certificate yes
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
-          set cmd:fail-exit no
-          rm "$destination/marca-hd.webp"
-          set cmd:fail-exit yes
-          put /tmp/rutahyd2front/assets/img/marca-hd.webp -o "$destination/marca-hd.webp"
-          get "$destination/marca-hd.webp" -o /tmp/logo_verificado.webp
+          put /tmp/rutahyd2front/assets/img/prueba-rutahd2.webp -o "$destination/prueba-rutahd2.webp"
+          get "$destination/prueba-rutahd2.webp" -o /tmp/logo_verificado.webp
           bye
           EOF
             lftp -f /tmp/upload_logo.lftp
-            cmp -s /tmp/rutahyd2front/assets/img/marca-hd.webp /tmp/logo_verificado.webp
+            cmp -s /tmp/rutahyd2front/assets/img/prueba-rutahd2.webp /tmp/logo_verificado.webp
             echo "Logo verificado por FTPS en $destination"
           done
           rm -f /tmp/upload_logo.lftp /tmp/logo_verificado.webp
@@ -147,11 +144,11 @@ jobs:
           get /htdocs/index.html -o /tmp/check_root_html
           get /htdocs/assets/css/app.css -o /tmp/check_root_css
           get /htdocs/assets/js/app.js -o /tmp/check_root_js
-          get /htdocs/assets/img/marca-hd.webp -o /tmp/check_root_logo
+          get /htdocs/assets/img/prueba-rutahd2.webp -o /tmp/check_root_logo
           get /htdocs/violeta-demo/index.html -o /tmp/check_preview_html
           get /htdocs/violeta-demo/assets/css/app.css -o /tmp/check_preview_css
           get /htdocs/violeta-demo/assets/js/app.js -o /tmp/check_preview_js
-          get /htdocs/violeta-demo/assets/img/marca-hd.webp -o /tmp/check_preview_logo
+          get /htdocs/violeta-demo/assets/img/prueba-rutahd2.webp -o /tmp/check_preview_logo
           bye
           EOF
           lftp -f /tmp/verify.lftp
@@ -159,7 +156,7 @@ jobs:
             cmp -s /tmp/rutahyd2front/index.html /tmp/check_${target}_html
             cmp -s /tmp/rutahyd2front/assets/css/app.css /tmp/check_${target}_css
             cmp -s /tmp/rutahyd2front/assets/js/app.js /tmp/check_${target}_js
-            cmp -s /tmp/rutahyd2front/assets/img/marca-hd.webp /tmp/check_${target}_logo
+            cmp -s /tmp/rutahyd2front/assets/img/prueba-rutahd2.webp /tmp/check_${target}_logo
             echo "Verificado: $target (HTML + CSS + JS + logo original con transparencia)"
           done
           echo "Los 8 archivos coinciden por bytes con el repositorio."

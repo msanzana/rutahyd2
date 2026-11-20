@@ -26,9 +26,9 @@ jobs:
           git clone --depth 1 --branch feature/catalogos-api-adapter-v2-20261120 https://github.com/msanzana/rutahyd2front.git /tmp/rutahyd2front
           test -f /tmp/rutahyd2front/index.html
           cd /tmp/rutahyd2front
-          git fetch -q --depth 1 origin 3dec4efc3bd3b76475f5e461d86bda136f6f4b57
-          git checkout -q 3dec4efc3bd3b76475f5e461d86bda136f6f4b57
-          test "$(git rev-parse HEAD)" = "3dec4efc3bd3b76475f5e461d86bda136f6f4b57"
+          git fetch -q --depth 1 origin 9ac1299eda7aa6b763e63354c67e25c5f3104f72
+          git checkout -q 9ac1299eda7aa6b763e63354c67e25c5f3104f72
+          test "$(git rev-parse HEAD)" = "9ac1299eda7aa6b763e63354c67e25c5f3104f72"
           test -f index.html
           test -f assets/css/app.css
           test -f assets/js/app.js
@@ -45,6 +45,8 @@ jobs:
           node --check assets/js/admin-remoto.js
           node --check assets/js/perfiles.js
           grep -Fq 'id="productSubnav"' index.html
+          grep -Fq 'id="adminNavGroup"' index.html
+          grep -Fq 'id="adminSubnav"' index.html
           grep -Fq 'perfiles.js' index.html
           grep -Fq 'Demo' README.md || grep -Fq 'demostración' README.md
           grep -Fq 'assets/img/prueba-rutahd2.webp' index.html

@@ -1,0 +1,91 @@
+name: Auditoría de producción RutaHD2 — solo lectura
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deployment/solicitudes/auditar-productivo-jwt-v2.txt'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      SITE: https://rutahyd2.free.nf
+    steps:
+      - name: Preparar FTPS y comprobar secreto disponible
+        run: |
+          test -n "$FTP_PASSWORD" || { echo "::error::Credencial FTPS no configurada"; exit 1; }
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Leer archivos de producción por FTPS — sin modificar nada
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/ftps-audit.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_backend
+          get /htdocs/api/index.php -o /tmp/api_gateway
+          get /htdocs/api/.htaccess -o /tmp/guard_gateway
+          get /htdocs/api-v2/app/Http/Middleware/AutenticarToken.php -o /tmp/backend_auth
+          get /htdocs/api-v2/app/Http/Controllers/SesionControlador.php -o /tmp/backend_session
+          get /htdocs/api-v2/config/rutahd.php -o /tmp/backend_config
+          get /htdocs/api-v2/vendor/firebase/php-jwt/src/JWT.php -o /tmp/vendor_jwt
+          get /htdocs/api-v2/vendor/composer/installed.php -o /tmp/vendor_manifest
+          get /htdocs/assets/js/catalogos-api.js -o /tmp/frontend_auth
+          get /htdocs/index.html -o /tmp/frontend_home
+          cls -1 -a /htdocs/api-v2 > /tmp/backend_roots
+          cls -1 -a /htdocs/api-v2/storage/app/private > /tmp/activation_markers
+          bye
+          EOF
+          lftp -f /tmp/ftps-audit.lftp
+          rm -f /tmp/ftps-audit.lftp
+      - name: Inspeccionar señales seguras, nunca secretos
+        run: |
+          set -e
+          grep -Fq 'Require all denied' /tmp/guard_backend
+          grep -Fq 'rutahd2_api_ready' /tmp/api_gateway
+          grep -Fq "JWT::decode" /tmp/backend_auth
+          grep -Fq "JWT::encode" /tmp/backend_session
+          grep -Fq "jwt_secret" /tmp/backend_config
+          grep -Fq 'class JWT' /tmp/vendor_jwt
+          grep -Fq 'Bearer' /tmp/frontend_auth
+          test -s /tmp/vendor_manifest
+          if grep -Eq '^\.env($|\.)' /tmp/backend_roots; then
+            echo 'Configuración privada .env: presente (no se revela ni descarga)' >> "$GITHUB_STEP_SUMMARY"
+            echo "HAS_ENV=1" >> "$GITHUB_ENV"
+          else
+            echo 'Configuración privada .env: no detectada en raíz auditada' >> "$GITHUB_STEP_SUMMARY"
+            echo "HAS_ENV=0" >> "$GITHUB_ENV"
+          fi
+          if grep -Fxq 'rutahd2_api_ready' /tmp/activation_markers; then
+            echo 'Marcador de activación: presente' >> "$GITHUB_STEP_SUMMARY"
+            echo "HAS_MARKER=1" >> "$GITHUB_ENV"
+          else
+            echo 'Marcador de activación: ausente' >> "$GITHUB_STEP_SUMMARY"
+            echo "HAS_MARKER=0" >> "$GITHUB_ENV"
+          fi
+          echo 'Archivos JWT, puerta /api, frontend y protección: presentes por FTPS.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No se conectó a MySQL, no se ejecutó PHP remoto y no se modificó información.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Comprobar HTTP público solo con GET sin sesión
+        run: |
+          set +e
+          for route in "/" "/violeta-demo/" "/api/v1/estado"; do
+            status=$(curl -L -sS --max-time 20 -o /tmp/http_body -w '%{http_code}' "$SITE$route")
+            rc=$?
+            if test "$rc" != 0; then status="SIN_RESPUESTA_CURL_$rc"; fi
+            echo "$route : $status" >> "$GITHUB_STEP_SUMMARY"
+            if test "$route" = "/api/v1/estado" && test "$status" = 200; then
+              echo "::warning::API responde HTTP 200, revisar si fue activada y está protegida antes de escrituras"
+            fi
+          done
+          exit 0

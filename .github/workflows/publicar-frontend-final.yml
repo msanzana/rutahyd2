@@ -69,6 +69,32 @@ jobs:
             fi
           fi
           echo "Preflight de la web principal verificado."
+      - name: Subir y comprobar logo con una conexión FTPS independiente
+        run: |
+          set +x
+          umask 077
+          for destination in /htdocs/assets/img /htdocs/violeta-demo/assets/img; do
+            cat >/tmp/upload_logo.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 3
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          set cmd:fail-exit no
+          rm "$destination/marca-hd.webp"
+          set cmd:fail-exit yes
+          put /tmp/rutahyd2front/assets/img/marca-hd.webp -o "$destination/marca-hd.webp"
+          get "$destination/marca-hd.webp" -o /tmp/logo_verificado.webp
+          bye
+          EOF
+            lftp -f /tmp/upload_logo.lftp
+            cmp -s /tmp/rutahyd2front/assets/img/marca-hd.webp /tmp/logo_verificado.webp
+            echo "Logo verificado por FTPS en $destination"
+          done
+          rm -f /tmp/upload_logo.lftp /tmp/logo_verificado.webp
       - name: Transferir frontend al dominio y vista previa sin tocar api-v2
         run: |
           set +x
@@ -92,20 +118,14 @@ jobs:
           mkdir /htdocs/violeta-demo/assets/css
           mkdir /htdocs/violeta-demo/assets/js
           mkdir /htdocs/violeta-demo/assets/img
-          rm /htdocs/assets/img/logo-hd-transparente.webp
-          rm /htdocs/assets/img/marca-hd.webp
-          rm /htdocs/violeta-demo/assets/img/logo-hd-transparente.webp
-          rm /htdocs/violeta-demo/assets/img/marca-hd.webp
           set cmd:fail-exit yes
           cd /htdocs
           put /tmp/rutahyd2front/assets/css/app.css -o assets/css/app.css
           put /tmp/rutahyd2front/assets/js/app.js -o assets/js/app.js
-          put /tmp/rutahyd2front/assets/img/marca-hd.webp -o assets/img/marca-hd.webp
           put /tmp/rutahyd2front/index.html -o index.html
           cd /htdocs/violeta-demo
           put /tmp/rutahyd2front/assets/css/app.css -o assets/css/app.css
           put /tmp/rutahyd2front/assets/js/app.js -o assets/js/app.js
-          put /tmp/rutahyd2front/assets/img/marca-hd.webp -o assets/img/marca-hd.webp
           put /tmp/rutahyd2front/index.html -o index.html
           bye
           EOF

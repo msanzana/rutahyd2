@@ -100,6 +100,8 @@ final class CatalogoComercialControlador extends Controller
         }
 
         if ($catalogo === 'condiciones_tributarias') {
+            // Catálogo reservado: sus dos opciones son invariantes del sistema.
+            abort_unless($activo, 422, 'No se pueden desactivar las condiciones tributarias');
             // Mantener únicamente los dos códigos tributarios definidos por el proyecto.
             $codigo = match (mb_strtolower($nombre)) {
                 'afecto' => 'AFECTO',
@@ -147,6 +149,8 @@ final class CatalogoComercialControlador extends Controller
     public function eliminar(string $catalogo, int $id)
     {
         $this->esquema($catalogo);
+        abort_if($catalogo === 'condiciones_tributarias', 409,
+            'Las condiciones Afecto y Exento son registros reservados del sistema');
         try {
             DB::transaction(function () use ($catalogo, $id): void {
                 $fila = DB::table($catalogo)->where('id', $id)->lockForUpdate()->first();

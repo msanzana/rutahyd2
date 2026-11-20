@@ -52,3 +52,11 @@ Los permisos nuevos se instalan mediante `database/espanol/16_permisos_modulos_p
 3. Aplicar **solo las migraciones ausentes** en orden: 12 (tokens), 13 (catálogos), 14 (producto), 16 (20 permisos), previa comprobación de dependencias, recuentos e integridad y respaldo; no repetir ALTER TABLE ya aplicado.
 4. Crear administrador de manera segura y configurar secretamente Laravel, CORS/HTTPS y ruta pública que sirva exclusivamente `public/` sin exponer código privado.
 5. Repetir login real, prueba 401/403 y CRUD por perfil en la base real de ensayo, antes de abrir producción.
+
+## Publicación estática confirmada — 20 de noviembre de 2026
+- [Workflow #44685540091](https://github.com/msanzana/rutahyd2/actions/runs/44685540091): resultado `success`.
+- Código fuente del frontend comprobado: `3dec4efc3bd3b76475f5e461d86bda136f6f4b57`. El commit posterior `1497cdaffcbbe4af87d7c1281d9407dbd5450ccd` solo ajustó pruebas que validaron ese mismo código.
+- Se transfirieron a **`/htdocs/`** y **`/htdocs/violeta-demo/`** HTML, CSS y seis scripts JS (16 archivos en total). Ambos destinos fueron leídos de vuelta por FTPS y comparados byte a byte; se conservó el logo oficial H&D.
+- Se mantiene **protegido** `/htdocs/api-v2`; la publicación estática no ejecuta SQL ni instala credenciales.
+- El sitio HTTP no fue accesible desde la consulta web externa de esta sesión; la confirmación válida es la comparación FTPS y el éxito de GitHub Actions. La experiencia de usuario en producción deberá probarse en un navegador.
+- **Estado de permisos productivos:** el código del backend se subió al staging bloqueado [#44684958406](https://github.com/msanzana/rutahyd2/actions/runs/44684958406), pero los permisos SQL 16 y la conexión Laravel a MySQL real **siguen pendientes** de backup y acceso autorizado. La UI actualmente ofrece la navegación de demo, no autorización efectiva sobre datos reales.

@@ -5,3 +5,4 @@ archivos=index.html,assets/css/theme-violet.css,assets/img/logo-hd-oficial-v1.jp
 no_modificar=/htdocs/api-v2,/htdocs/index2.html,/htdocs/.htaccess
 
 actualizacion=logo_oficial_recuperado_de_RutaHD_V1
+reintento=verificacion_ftps_con_checksum

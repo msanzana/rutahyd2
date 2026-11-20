@@ -1,0 +1,7 @@
+REPARACION_STAGING_JWT_V2
+fecha=2026-11-20
+commit=a39a11f8237df05fd8c7f10d3229e47947b7bfbd
+solo_staging_protegido=true
+no_sql=true
+sin_env=true
+sin_usuario_productivo=true

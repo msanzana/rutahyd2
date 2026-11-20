@@ -30,11 +30,20 @@ jobs:
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
           cls -1 -a /htdocs > /tmp/htdocs_items
           get /htdocs/api-v2/.htaccess -o /tmp/backend_guard
-          set cmd:fail-exit no
-          get /htdocs/.htaccess -o /tmp/root_htaccess
           bye
           EOF
           lftp -f /tmp/inspect.lftp
+          # El .htaccess de raíz es OPCIONAL: su ausencia no falla la auditoría.
+          cat >/tmp/optional.lftp <<EOF
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/.htaccess -o /tmp/root_htaccess
+          bye
+          EOF
+          lftp -f /tmp/optional.lftp >/dev/null 2>&1 || true
       - name: Resumir sin publicar configuración ni secretos
         run: |
           set -e

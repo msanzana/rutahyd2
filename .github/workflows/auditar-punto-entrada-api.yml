@@ -1,0 +1,61 @@
+name: Auditar punto de entrada API sin cambios remotos
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/solicitudes/auditar-punto-entrada-api.txt']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnostico:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Leer estructura FTP sin subir archivos
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+          set +x
+          umask 077
+          cat >/tmp/inspect.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          cls -1 -a /htdocs > /tmp/htdocs_items
+          get /htdocs/api-v2/.htaccess -o /tmp/backend_guard
+          set cmd:fail-exit no
+          get /htdocs/.htaccess -o /tmp/root_htaccess
+          bye
+          EOF
+          lftp -f /tmp/inspect.lftp
+      - name: Resumir sin publicar configuración ni secretos
+        run: |
+          set -e
+          protected=no
+          if grep -Fq 'Require all denied' /tmp/backend_guard; then protected=yes;fi
+          root_htaccess=no
+          if test -f /tmp/root_htaccess; then root_htaccess=yes;fi
+          route_api=no
+          if test -f /tmp/root_htaccess && grep -iEq '(RewriteRule|Alias|Redirect).*api' /tmp/root_htaccess; then route_api=yes;fi
+          public_api=no
+          if grep -Fxq 'api' /tmp/htdocs_items; then public_api=yes;fi
+          echo "Backend bajo Require all denied: $protected"
+          echo "Root .htaccess encontrado: $root_htaccess"
+          echo "Regla root con posible destino API: $route_api"
+          echo "Carpeta pública /htdocs/api: $public_api"
+          echo "NO se inspeccionó ningún valor de credencial ni se ejecutó PHP/MySQL."
+          {
+            echo '### Auditoría no invasiva del punto de entrada HTTP'
+            echo "- Staging protegido: $protected"
+            echo "- .htaccess principal disponible: $root_htaccess"
+            echo "- Reescritura a API identificable: $route_api"
+            echo "- Carpeta /htdocs/api identificable: $public_api"
+            echo '- Sin cambios remotos ni base de datos'
+          } >> "$GITHUB_STEP_SUMMARY"

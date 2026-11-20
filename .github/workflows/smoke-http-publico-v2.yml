@@ -1,0 +1,41 @@
+name: Smoke HTTP público RutaHD2 sin credenciales
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deployment/solicitudes/smoke-http-publico-v2.txt'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  http:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Diagnosticar HTTP/TLS del sitio sin autenticarse
+        run: |
+          set +e
+          base=https://rutahyd2.free.nf
+          for resource in / /violeta-demo/ /assets/js/catalogos-api.js /api/v1/estado; do
+            file=$(mktemp)
+            result=$(curl --proto '=https' --tlsv1.2 --location --max-redirs 3 \
+              --connect-timeout 12 --max-time 20 --silent --show-error \
+              --output "$file" --write-out 'HTTP=%{http_code}; TYPE=%{content_type}; URL=%{url_effective}' \
+              "$base$resource" 2>/dev/null)
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "$resource: ERROR_DE_TRANSPORTE_$rc" | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              echo "$resource: $result" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+            if [ "$resource" = "/api/v1/estado" ]; then
+              if grep -Fq '"estado":"no_habilitada"' "$file"; then
+                echo "Gateway API: correctamente bloqueado por 503 (sin acceso productivo)." >> "$GITHUB_STEP_SUMMARY"
+              elif grep -Eq '"estado"[[:space:]]*:[[:space:]]*"disponible"' "$file"; then
+                echo "::warning::API parece estar habilitada; revisar permisos antes de cualquier escritura."
+              fi
+            fi
+            rm -f "$file"
+          done
+          echo "GET anónimo únicamente; ninguna migración, credencial o modificación." >> "$GITHUB_STEP_SUMMARY"
+          exit 0

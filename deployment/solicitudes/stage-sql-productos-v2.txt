@@ -1,0 +1,7 @@
+RUTAHD2_PREPARAR_SQL_12_17
+fecha=2026-11-20
+rama_commit=ba43b8c222d35c09fd890ad90522e61aeff02f4e
+solo_staging_protegido=true
+ninguna_ejecucion_sql=true
+ningun_cambio_frontend=true
+verificar_ftps=true

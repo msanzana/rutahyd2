@@ -24,3 +24,4 @@ archivos_nuevos=assets/js/catalogos.js
 migracion_BBDD=no_ejecutar
 reintento=catalogos_verificar_logo_existente_sin_sobrescritura
 reintento=catalogos_logo_webp_incrustado_HTML
+reintento=logo_original_GitHub_CDN_y_HTML_liviano

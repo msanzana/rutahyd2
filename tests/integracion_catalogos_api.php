@@ -54,6 +54,7 @@ function crear(string $catalogo, string $nombre, ?int $padre, string $token): in
     return (int) $respuesta['id'];
 }
 
+try {
 // La base de este test debe ser efímera y exclusivamente local a CI.
 verificar(DB::getDatabaseName() === 'rutahyd2_es_local',
     'La prueba solo está autorizada para rutahyd2_es_local');
@@ -167,3 +168,7 @@ esperar(401, api('GET', '/api/v1/catalogos/rubros', [], $token),
     'Token revocado');
 
 echo "OK: login real, 401/403, CRUD, reserva tributaria, relaciones, producto, legado y cierre de sesión en MySQL efímero.\n";
+} catch (\Throwable $e) {
+    fwrite(STDERR, "ERROR INTEGRACIÓN: " . $e->getMessage() . "\n");
+    exit(1);
+}

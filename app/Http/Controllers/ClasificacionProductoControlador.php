@@ -26,6 +26,23 @@ final class ClasificacionProductoControlador extends Controller
         'condicionTributariaId' => ['condiciones_tributarias', 'condicion_tributaria_id'],
     ];
 
+    public function ver(int $id)
+    {
+        $producto = DB::table('productos')->where('id', $id)->first();
+        abort_unless($producto, 404, 'Producto inexistente');
+        $clasificacion = [];
+        foreach (self::CAMPOS as $campo => [, $columna]) {
+            $clasificacion[$campo] = $producto->{$columna} === null
+                ? null : (int) $producto->{$columna};
+        }
+        return response()->json([
+            'id' => (int) $producto->id,
+            'sku' => $producto->sku,
+            'nombre' => $producto->nombre,
+            'clasificacion' => $clasificacion,
+        ]);
+    }
+
     public function guardar(Request $request, int $id)
     {
         $reglas = [];

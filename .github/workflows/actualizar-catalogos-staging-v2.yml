@@ -1,0 +1,155 @@
+name: Actualizar catálogos V2 en staging protegido FTPS
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'deployment/solicitudes/actualizar-catalogos-staging-v2.txt'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  subir-staging:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FTP_DEST: /htdocs/api-v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/catalogos-api-productos-v2-20261120
+      - name: Identificar versión de backend que se intenta instalar
+        run: |
+          echo "Código fuente: feature/catalogos-api-productos-v2-20261120"
+          echo "Commit validado: $(git rev-parse HEAD)"
+          test -f database/espanol/12_tokens_acceso_opcional.sql
+          test -f app/Models/DetalleVenta.php
+          test -f app/Http/Controllers/CatalogoComercialControlador.php
+          test -f app/Http/Controllers/ClasificacionProductoControlador.php
+          grep -Fq "token.rutahd" routes/api.php
+          grep -Fq "permiso.rutahd:productos.gestionar" routes/api.php
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, intl, xml, dom, curl, pdo_mysql, fileinfo, openssl
+      - name: Exigir secreto FTPS sin mostrarlo
+        run: |
+          test -n "$FTP_PASSWORD" || { echo "::error::Falta configurar INFINITYFREE_FTP_PASSWORD en GitHub Actions Secrets"; exit 1; }
+      - name: Compilar Laravel sin dependencias de desarrollo
+        run: composer install --no-dev --prefer-dist --no-interaction --no-progress
+      - name: Verificar sintaxis de rutas y controladores catalogos
+        run: |
+          php -l app/Http/Controllers/CatalogoComercialControlador.php
+          php -l app/Http/Controllers/ClasificacionProductoControlador.php
+          php -l routes/api.php
+      - name: Preparar contenido sin .env ni archivos secretos
+        run: |
+          mkdir -p despliegue
+          cp -a app bootstrap config public routes vendor artisan composer.json composer.lock despliegue/
+          mkdir -p despliegue/storage/logs despliegue/storage/app/private despliegue/storage/framework/cache/data despliegue/storage/framework/sessions despliegue/storage/framework/views
+          test -f despliegue/vendor/autoload.php
+          test -f despliegue/public/index.php
+          test "$(find despliegue/app/Models -maxdepth 1 -name '*.php' | wc -l)" -eq 34
+          if test -e despliegue/.env; then echo "::error::No se permite transferir .env desde GitHub"; exit 1; fi
+          printf '%s\n' '<IfModule mod_authz_core.c>' 'Require all denied' '</IfModule>' '<IfModule !mod_authz_core.c>' 'Deny from all' '</IfModule>' > /tmp/htaccess_staging
+      - name: Instalar cliente FTP sobre TLS
+        run: sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Colocar protección antes de subir código
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/ftp_guard.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 30
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          cd "$FTP_DEST"
+          put /tmp/htaccess_staging -o "$FTP_DEST/.htaccess"
+          bye
+          EOF
+          lftp -f /tmp/ftp_guard.lftp
+          rm -f /tmp/ftp_guard.lftp
+      - name: Verificar la protección remota en staging web por FTPS
+        run: |
+          set +x
+          case "$FTP_DEST" in
+            /htdocs/api-v2) ;;
+            *) echo "::error::Destino no autorizado"; exit 1 ;;
+          esac
+          umask 077
+          cat >/tmp/ftp_verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/.htaccess" -o /tmp/htaccess_remote
+          bye
+          EOF
+          lftp -f /tmp/ftp_verify.lftp
+          cmp -s /tmp/htaccess_staging /tmp/htaccess_remote || { echo "::error::.htaccess remoto difiere"; exit 1; }
+          rm -f /tmp/ftp_verify.lftp /tmp/htaccess_remote
+          echo "Protección .htaccess verificada por FTPS. No se sube .env; API aun no se activa."
+      - name: Transferir app y vendor cifrados sin activar API
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/ftp_upload.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 3
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          cd "$FTP_DEST"
+          mirror -R --verbose=0 --continue --parallel=2 --exclude-glob=.env --exclude-glob=.env.* despliegue .
+          bye
+          EOF
+          lftp -f /tmp/ftp_upload.lftp
+          rm -f /tmp/ftp_upload.lftp
+      - name: Verificar por FTPS archivos transferidos sin activar sitio
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/ftp_final.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 60
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/app/Models/DetalleVenta.php" -o /tmp/remoto_DetalleVenta.php
+          get "$FTP_DEST/app/Http/Controllers/CatalogoComercialControlador.php" -o /tmp/remoto_CatalogoComercialControlador.php
+          get "$FTP_DEST/app/Http/Controllers/ClasificacionProductoControlador.php" -o /tmp/remoto_ClasificacionProductoControlador.php
+          get "$FTP_DEST/routes/api.php" -o /tmp/remoto_routes_api.php
+          get "$FTP_DEST/vendor/autoload.php" -o /tmp/remoto_autoload.php
+          get "$FTP_DEST/.htaccess" -o /tmp/remoto_proteccion
+          bye
+          EOF
+          lftp -f /tmp/ftp_final.lftp
+          cmp -s despliegue/app/Models/DetalleVenta.php /tmp/remoto_DetalleVenta.php
+          cmp -s despliegue/app/Http/Controllers/CatalogoComercialControlador.php /tmp/remoto_CatalogoComercialControlador.php
+          cmp -s despliegue/app/Http/Controllers/ClasificacionProductoControlador.php /tmp/remoto_ClasificacionProductoControlador.php
+          cmp -s despliegue/routes/api.php /tmp/remoto_routes_api.php
+          cmp -s despliegue/vendor/autoload.php /tmp/remoto_autoload.php
+          cmp -s /tmp/htaccess_staging /tmp/remoto_proteccion
+          rm -f /tmp/ftp_final.lftp /tmp/remoto_DetalleVenta.php /tmp/remoto_autoload.php /tmp/remoto_proteccion
+          echo "OK: nuevos catálogos API y rutas presentes por FTPS en /htdocs/api-v2; .htaccess de denegación; sin .env, API NO habilitada. MySQL NO modificado."

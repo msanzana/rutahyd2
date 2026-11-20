@@ -1,0 +1,10 @@
+RUTA_HYD_V2_DEPLOY_JWT_STAGE
+source_sha=a2d0ba9dc48d6e8559aa5985a8deaa10f7f74e1b
+validacion_mysql_temporal=44749018315
+validacion_front_integracion=44749026047
+solo_staging_bloqueado=true
+no_sql_productivo=true
+no_env=true
+no_password_real=true
+no_marcar_api_ready=true
+comparar_bytes=true

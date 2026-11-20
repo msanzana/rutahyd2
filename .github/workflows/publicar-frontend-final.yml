@@ -37,17 +37,15 @@ jobs:
           grep -Fq 'assets/css/app.css' index.html
           python3 - <<'PY'
           from pathlib import Path
-          import base64
           html=Path('index.html')
           source=html.read_text(encoding='utf-8')
-          logo=Path('assets/img/prueba-rutahd2.webp').read_bytes()
-          if len(logo)<5000 or source.count('assets/img/prueba-rutahd2.webp')<2:
-              raise SystemExit('Logo original o rutas esperadas no disponibles')
-          uri='data:image/webp;base64,'+base64.b64encode(logo).decode('ascii')
-          html.write_text(source.replace('assets/img/prueba-rutahd2.webp',uri),encoding='utf-8')
-          print('Logo WebP transparente incrustado en HTML: '+str(len(logo))+' bytes')
+          old='assets/img/prueba-rutahd2.webp'
+          if source.count(old)<2 or not Path(old).is_file():
+              raise SystemExit('No se encontró el logo oficial en los archivos fuente')
+          url='https://raw.githubusercontent.com/msanzana/rutahyd2front/main/'+old
+          html.write_text(source.replace(old,url),encoding='utf-8')
+          print('Logo original: referencia estática GitHub raw, sin cambio de píxeles')
           PY
-          grep -Fq 'assets/js/catalogos.js' index.html
           echo "Frontend: $(git rev-parse HEAD)"
       - name: Instalar FTPS
         run: sudo apt-get -qq update && sudo apt-get -qq install -y lftp
@@ -151,14 +149,14 @@ jobs:
             cmp -s /tmp/rutahyd2front/assets/css/app.css /tmp/check_${target}_css
             cmp -s /tmp/rutahyd2front/assets/js/app.js /tmp/check_${target}_js
             cmp -s /tmp/rutahyd2front/assets/js/catalogos.js /tmp/check_${target}_catalogos
-            echo "Verificado: $target (HTML (logo incrustado) + CSS + 2 JS)"
+            echo "Verificado: $target (HTML (logo oficial desde GitHub) + CSS + 2 JS)"
           done
           echo "Los 8 archivos coinciden por bytes con el repositorio."
           {
             echo "### Frontend H&D2 publicado"
             echo "- [Sitio principal](https://rutahyd2.free.nf/)"
             echo "- [Vista previa](https://rutahyd2.free.nf/violeta-demo/)"
-            echo "- 8 archivos verificados por FTPS: HTML con logo incrustado, CSS, app.js y catalogos.js en dos destinos."
+            echo "- 8 archivos verificados por FTPS: HTML con logo oficial en GitHub, CSS, app.js y catalogos.js en dos destinos."
             echo "- /htdocs/api-v2 y la base de datos NO se modificaron."
             echo "- Modo demostración local: sin conexión a API de producción."
           } >> "$GITHUB_STEP_SUMMARY"

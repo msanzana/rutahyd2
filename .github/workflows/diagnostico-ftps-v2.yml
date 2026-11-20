@@ -36,7 +36,7 @@ jobs:
           set ssl:verify-certificate yes
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
           pwd
-          mkdir -p "$FTP_DEST"
+          cd "$FTP_DEST"
           put /tmp/sonda_local.txt -o "$FTP_DEST/comprobacion_transferencia.txt"
           cls -l "$FTP_DEST"
           get "$FTP_DEST/comprobacion_transferencia.txt" -o /tmp/sonda_recuperada.txt

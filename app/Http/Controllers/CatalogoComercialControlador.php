@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Database\QueryException;
+use App\Services\PermisosCatalogos;
 
 /**
  * Catálogos comerciales v2. Requiere token y permiso productos.gestionar
@@ -44,9 +45,10 @@ final class CatalogoComercialControlador extends Controller
         ];
     }
 
-    public function listar(string $catalogo)
+    public function listar(Request $request, string $catalogo)
     {
         $this->esquema($catalogo);
+        PermisosCatalogos::exigir($request->user(), $catalogo, 'ver');
         $filas = DB::table($catalogo)->orderBy('nombre')->get();
         return response()->json(['items' => $filas->map(
             fn (object $fila): array => $this->respuesta($catalogo, $fila)
@@ -56,6 +58,7 @@ final class CatalogoComercialControlador extends Controller
     public function crear(Request $request, string $catalogo)
     {
         $this->esquema($catalogo);
+        PermisosCatalogos::exigir($request->user(), $catalogo, 'gestionar');
         $fila = DB::transaction(fn (): object => $this->guardar($request, $catalogo, null));
         return response()->json($this->respuesta($catalogo, $fila), 201);
     }
@@ -63,6 +66,7 @@ final class CatalogoComercialControlador extends Controller
     public function actualizar(Request $request, string $catalogo, int $id)
     {
         $this->esquema($catalogo);
+        PermisosCatalogos::exigir($request->user(), $catalogo, 'gestionar');
         $fila = DB::transaction(fn (): object => $this->guardar($request, $catalogo, $id));
         return response()->json($this->respuesta($catalogo, $fila));
     }
@@ -146,9 +150,10 @@ final class CatalogoComercialControlador extends Controller
         return DB::table($catalogo)->where('id', $id)->first();
     }
 
-    public function eliminar(string $catalogo, int $id)
+    public function eliminar(Request $request, string $catalogo, int $id)
     {
         $this->esquema($catalogo);
+        PermisosCatalogos::exigir($request->user(), $catalogo, 'gestionar');
         abort_if($catalogo === 'condiciones_tributarias', 409,
             'Las condiciones Afecto y Exento son registros reservados del sistema');
         try {

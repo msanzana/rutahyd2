@@ -92,6 +92,8 @@ jobs:
           mkdir /htdocs/violeta-demo/assets/css
           mkdir /htdocs/violeta-demo/assets/js
           mkdir /htdocs/violeta-demo/assets/img
+          rm /htdocs/assets/img/logo-hd-transparente.webp
+          rm /htdocs/violeta-demo/assets/img/logo-hd-transparente.webp
           set cmd:fail-exit yes
           cd /htdocs
           put /tmp/rutahyd2front/assets/css/app.css -o assets/css/app.css

@@ -1,0 +1,58 @@
+name: Diagnosticar permisos imagen frontend H&D2
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/solicitudes/diagnosticar-logo-hd.txt']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  probar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Descargar logo de repositorio publico
+        run: |
+          git clone --depth 1 https://github.com/msanzana/rutahyd2front.git /tmp/front
+          test -s /tmp/front/assets/img/logo-hd-transparente.webp
+          test -s /tmp/front/assets/img/logo-hd-oficial-v1.jpg
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Inspeccionar carpetas de imágenes y comprobar extensiones
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/list.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          cls -l /htdocs/assets
+          cls -l /htdocs/assets/img
+          cls -l /htdocs/violeta-demo/assets/img
+          bye
+          EOF
+          lftp -f /tmp/list.lftp
+          for extension in jpg webp; do
+            if test "$extension" = jpg; then ORIGIN=/tmp/front/assets/img/logo-hd-oficial-v1.jpg; else ORIGIN=/tmp/front/assets/img/logo-hd-transparente.webp; fi
+            cat >/tmp/probe.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put "$ORIGIN" -o "/htdocs/assets/img/prueba-rutahd2.$extension"
+          get "/htdocs/assets/img/prueba-rutahd2.$extension" -o "/tmp/probe-read.$extension"
+          rm "/htdocs/assets/img/prueba-rutahd2.$extension"
+          bye
+          EOF
+            if lftp -f /tmp/probe.lftp; then
+              cmp -s "$ORIGIN" "/tmp/probe-read.$extension"
+              echo "PRUEBA_OK: extension $extension"
+            else
+              echo "::warning::PRUEBA_FALLIDA: extension $extension"
+            fi
+          done

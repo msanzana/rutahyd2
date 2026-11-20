@@ -1,0 +1,6 @@
+RUTAHD2_DIAGNOSTICO_LOGO
+modo=solo_archivos_de_prueba
+origen=msanzana/rutahyd2front
+carpeta=/htdocs/assets/img
+revisar_extension=jpg,webp
+sin_tocar_backend=true

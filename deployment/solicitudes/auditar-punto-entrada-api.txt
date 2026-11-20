@@ -1,0 +1,5 @@
+RUTAHD2_AUDIT_ROUTING
+fecha=2026-11-20
+sin_php=true
+sin_sql=true
+ftp_solo_lectura=true

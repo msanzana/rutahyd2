@@ -50,6 +50,44 @@ final class PerfilesCatalogosControlador extends Controller
         return response()->json(['roles'=>$datos, 'catalogos'=>PermisosCatalogos::MODULOS]);
     }
 
+    public function usuarios(Request $request)
+    {
+        $this->esAdministrador($request);
+        $rows=DB::table('usuarios')
+            ->join('roles','roles.id','=','usuarios.rol_id')
+            ->orderBy('usuarios.nombre')
+            ->get([
+                'usuarios.id','usuarios.nombre','usuarios.correo_electronico',
+                'usuarios.activo','usuarios.rol_id','roles.nombre as perfil'
+            ]);
+        return response()->json(['usuarios'=>$rows]);
+    }
+
+    public function asignarPerfil(Request $request,int $id)
+    {
+        $this->esAdministrador($request);
+        $datos=Validator::make($request->all(),[
+            'rol_id'=>['required','integer','min:1'],
+        ])->validate();
+        DB::transaction(function () use ($request,$id,$datos) {
+            $usuario=DB::table('usuarios')->where('id',$id)->lockForUpdate()->first();
+            abort_unless($usuario,404,'Usuario inexistente');
+            abort_if((int)$usuario->id === (int)$request->user()->id,403,
+                'No puedes cambiar tu propio perfil');
+            $actual=DB::table('roles')->where('id',$usuario->rol_id)->first();
+            abort_if($actual?->codigo === 'administrador',403,
+                'El perfil administrador no puede editarse desde esta pantalla');
+            $nuevo=DB::table('roles')->where('id',(int)$datos['rol_id'])->first();
+            abort_unless($nuevo,422,'Perfil inexistente');
+            abort_if($nuevo->codigo === 'administrador',403,
+                'El perfil administrador solo puede asignarse mediante procedimiento seguro');
+            DB::table('usuarios')->where('id',$id)->update([
+                'rol_id'=>(int)$nuevo->id
+            ]);
+        });
+        return response()->json(['actualizado'=>true,'usuario_id'=>$id]);
+    }
+
     public function actualizar(Request $request, int $id)
     {
         $this->esAdministrador($request);

@@ -1,0 +1,66 @@
+name: Estado seguro de activación — RutaHD2
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deployment/solicitudes/comprobar-activacion-v2.txt'
+permissions:
+  contents: read
+jobs:
+  comprobar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Instalar cliente de auditoría
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Leer solamente nombres de archivos y guardias
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          cls -1 -a /htdocs/api-v2 > /tmp/backend_names
+          cls -1 -a /htdocs/api-v2/storage/app/private > /tmp/activation_names
+          cls -1 -a /htdocs/api-v2/database/espanol > /tmp/sql_names
+          get /htdocs/api-v2/.htaccess -o /tmp/staging_guard
+          get /htdocs/api/index.php -o /tmp/gateway
+          bye
+          EOF
+          lftp -f /tmp/read.lftp
+          rm -f /tmp/read.lftp
+      - name: Registrar únicamente estados booleanos
+        run: |
+          set -e
+          has_env=NO; has_marker=NO; guarded=NO; scripts=SI
+          grep -Fxq '.env' /tmp/backend_names && has_env=SI || true
+          grep -Fxq 'rutahd2_api_ready' /tmp/activation_names && has_marker=SI || true
+          grep -Fq 'Require all denied' /tmp/staging_guard && guarded=SI || true
+          for prefix in 12_ 13_ 14_ 15_ 16_ 17_; do
+            grep -q "^$prefix" /tmp/sql_names || scripts=NO
+          done
+          echo "CONFIG_PRIVADA_PRESENTE=$has_env"
+          echo "MARCADOR_API_PRESENTE=$has_marker"
+          echo "BACKEND_BLOQUEADO_HTTP=$guarded"
+          echo "SQL_12_A_17_ALOJADOS=$scripts"
+          {
+            echo "### Estado de activación en InfinityFree (solo lectura)"
+            echo "- Configuración Laravel privada presente: $has_env"
+            echo "- Marcador que habilita API: $has_marker"
+            echo "- Backend bloqueado por .htaccess: $guarded"
+            echo "- Paquete SQL 12 a 17 disponible: $scripts"
+            echo "- Esta auditoría no demuestra ni modifica el contenido de MySQL"
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "$guarded" = SI
+          grep -Fq 'rutahd2_api_ready' /tmp/gateway

@@ -1,0 +1,9 @@
+DESPLIEGUE_AUTORIZADO_RUTAHYD2_V2
+fecha=2026-11-19
+origen=feature/backend-v2-es
+destino=/htdocs/api-v2
+modo=staging-protegido
+permisos=solo_si_el_secreto_INFINITYFREE_FTP_PASSWORD_esta_configurado
+base_de_datos=no_modificar
+regla=probar_403_antes_de_transferir
+solicitado_por=usuario_RutaHD2

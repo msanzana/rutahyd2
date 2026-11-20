@@ -80,9 +80,17 @@ jobs:
           bye
           EOF
           lftp -f /tmp/front_verify.lftp
-          cmp -s /tmp/rutahyd2front/index.html /tmp/frontend_verificado.html
-          cmp -s /tmp/rutahyd2front/assets/css/theme-violet.css /tmp/tema_verificado.css
-          cmp -s /tmp/rutahyd2front/assets/img/logo-hd-oficial-v1.jpg /tmp/logo_v1_verificado.jpg
+          for par in "html /tmp/rutahyd2front/index.html /tmp/frontend_verificado.html" "css /tmp/rutahyd2front/assets/css/theme-violet.css /tmp/tema_verificado.css" "logo /tmp/rutahyd2front/assets/img/logo-hd-oficial-v1.jpg /tmp/logo_v1_verificado.jpg"; do
+            read -r nombre original copia <<< "$par"
+            if cmp -s "$original" "$copia"; then
+              echo "VERIFICADO: $nombre $(wc -c < "$original") bytes"
+            else
+              echo "::error::Archivo $nombre no coincide con el original"
+              echo "ORIGEN ($nombre):"; sha256sum "$original"
+              echo "REMOTO ($nombre):"; sha256sum "$copia"
+              exit 1
+            fi
+          done
           echo "Vista previa violeta y logo original H&D V1: 3 archivos verificados por FTPS"
           echo "No se modifico index2.html ni /htdocs/api-v2"
           printf '[Ver vista previa violeta](https://rutahyd2.free.nf/violeta-demo/index.html)\n' >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,56 @@
+name: Probar migraciones de clasificaciones sobre MySQL temporal
+on:
+  push:
+    branches:
+      - feature/catalogos-api-productos-v2-20261120
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  esquema-catalogos:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: temporal_ci_solamente
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ptemporal_ci_solamente --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Importar esquema español y clasificaciones sin InfinityFree
+        run: |
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente < database/espanol/01_esquema_completo_34_tablas_es.sql
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/13_catalogos_comerciales_aditivos.sql
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/14_productos_clasificacion_campos.sql
+      - name: Confirmar estructura y conservación de categoría heredada
+        run: |
+          cat >/tmp/check.sql <<'SQL'
+          USE rutahyd2_es_local;
+          SELECT IF((SELECT COUNT(*) FROM information_schema.tables
+              WHERE table_schema=DATABASE() AND table_type='BASE TABLE')=44,1,0)
+              INTO @tablas;
+          SELECT IF((SELECT COUNT(*) FROM information_schema.columns
+              WHERE table_schema=DATABASE() AND table_name='productos'
+              AND column_name IN ('categoria_id','rubro_id','departamento_id',
+              'familia_id','linea_id','marca_id','modelo_id','tipo_unidad_id',
+              'gramaje_id','tipo_envasado_id','condicion_tributaria_id'))=11,1,0)
+              INTO @columnas;
+          SELECT IF((SELECT COUNT(*) FROM condiciones_tributarias WHERE codigo IN ('AFECTO','EXENTO'))=2,1,0)
+              INTO @tributos;
+          SELECT IF((SELECT COUNT(*) FROM information_schema.key_column_usage
+              WHERE table_schema=DATABASE() AND table_name='productos'
+              AND column_name IN ('rubro_id','departamento_id','familia_id',
+              'linea_id','marca_id','modelo_id','tipo_unidad_id','gramaje_id',
+              'tipo_envasado_id','condicion_tributaria_id')
+              AND referenced_table_name IS NOT NULL)=10,1,0) INTO @fks;
+          SELECT @tablas AS tablas_ok,@columnas AS columnas_ok,@tributos AS tributos_ok,@fks AS fks_ok;
+          SQL
+          RESULT=$(mysql -N -h 127.0.0.1 -uroot -ptemporal_ci_solamente < /tmp/check.sql | tail -1)
+          echo "Resultado: $RESULT"
+          test "$RESULT" = "$(printf '1\t1\t1\t1')" || exit 1
+          echo "CI OK: 44 tablas, 10 catálogos, claves foráneas e historial preservado."

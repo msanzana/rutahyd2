@@ -129,6 +129,21 @@ esperar(403, api('GET', '/api/v1/catalogos/rubros', [], $tokenLector),
     'Revocación efectiva sin nuevo login');
 esperar(403, api('PUT', '/api/v1/perfiles/' . $rolAdmin . '/catalogos',
     ['modulos'=>$modulos], $token), 'No alterar rol admin');
+
+$usuariosPerfil=esperar(200,api('GET','/api/v1/perfiles/usuarios',[],$token),
+    'Listar usuarios por perfil');
+verificar(count($usuariosPerfil['usuarios'])>=2,'Debe mostrar usuarios existentes');
+esperar(403,api('GET','/api/v1/perfiles/usuarios',[],$tokenLector),
+    'Un usuario común no ve otros perfiles');
+$rolVendedor=(int)DB::table('roles')->where('codigo','vendedor')->value('id');
+esperar(200,api('PUT','/api/v1/perfiles/usuarios/'.$lectorId.'/rol',
+    ['rol_id'=>$rolVendedor],$token),'Asignación de perfil a un usuario');
+verificar((int)DB::table('usuarios')->where('id',$lectorId)->value('rol_id')===$rolVendedor,
+    'Cambio de rol persistido en CI');
+esperar(403,api('PUT','/api/v1/perfiles/usuarios/'.$usuarioId.'/rol',
+    ['rol_id'=>$rolVendedor],$token),'No degradar propia cuenta admin');
+esperar(403,api('PUT','/api/v1/perfiles/usuarios/'.$lectorId.'/rol',
+    ['rol_id'=>$rolAdmin],$token),'No elevar a administrador por esta pantalla');
 esperar(404, api('GET', '/api/v1/catalogos/desconocido', [], $token),
     'Lista blanca de catálogos');
 

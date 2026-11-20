@@ -1,0 +1,69 @@
+name: Auditoria segura backend V2 en InfinityFree
+on:
+  push:
+    branches: [ main ]
+    paths: ['deployment/solicitudes/auditar-backend-v2.txt']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  auditar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FTP_DEST: /htdocs/api-v2
+    steps:
+      - name: Validar secreto
+        run: test -n "$FTP_PASSWORD"
+      - name: Instalar cliente FTPS
+        run: sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Comprobar archivos y protección de staging sin activar API
+        run: |
+          set +x
+          umask 077
+          cat > /tmp/audit.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 35
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/.htaccess" -o /tmp/remote_guard
+          get "$FTP_DEST/app/Models/DetalleVenta.php" -o /tmp/remote_model
+          get "$FTP_DEST/vendor/autoload.php" -o /tmp/remote_vendor
+          get "$FTP_DEST/public/index.php" -o /tmp/remote_entry
+          cls -1 -a "$FTP_DEST" > /tmp/remote_root_listing
+          cls -1 "$FTP_DEST/app/Models" > /tmp/remote_models_listing
+          bye
+          EOF
+          lftp -f /tmp/audit.lftp
+          test -s /tmp/remote_vendor
+          test -s /tmp/remote_model
+          test -s /tmp/remote_entry
+          grep -q 'Require all denied' /tmp/remote_guard
+          if grep -Eq '^\.env($|\.)' /tmp/remote_root_listing; then echo "::error::Hay archivo .env en staging"; exit 1; fi
+          MODELS=$(grep -c '\.php$' /tmp/remote_models_listing || true)
+          test "$MODELS" = 34 || { echo "::error::Esperados 34 modelos, encontrados $MODELS"; exit 1; }
+          echo "OK: 34 modelos PHP, vendor/autoload.php, public/index.php, .htaccess y sin .env."
+          {
+            echo "### Auditoria de backend Ruta H&D2"
+            echo "- Laravel: 34 modelos, autoload.php y entry point verificados."
+            echo "- Bloqueo Require all denied: presente."
+            echo "- .env en staging: ausente."
+            echo "- No se activo la API ni se modifico MySQL."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Diagnostico HTTP solo lectura
+        run: |
+          for ruta in /api-v2/ /api-v2/composer.json /api-v2/api/estado; do
+            HTTP=$(curl -sS -L --max-time 18 -o /dev/null -w '%{http_code}' "https://rutahyd2.free.nf$ruta" 2>/dev/null || true)
+            echo "Ruta $ruta: HTTP ${HTTP:-sin_respuesta}"
+            echo "- $ruta: HTTP ${HTTP:-sin_respuesta}" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$ruta" = "/api-v2/composer.json" ] && [ "$HTTP" = "200" ]; then
+              echo "::warning::HTTP 200 para composer.json, revisar challenge HTTP o acceso a fichero."
+            fi
+          done

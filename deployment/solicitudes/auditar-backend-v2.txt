@@ -1,0 +1,5 @@
+RUTAHD2_AUDITORIA_FINAL_BACKEND
+fecha=2026-11-19
+modo=solo_lectura
+objetivo=verificar_archivos_vendor_modelos_htaccess_env_y_http
+sin_tinyfish_ni_cambios_sql=true

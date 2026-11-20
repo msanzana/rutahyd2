@@ -1,0 +1,111 @@
+name: Actualizar permisos y perfiles V2 en staging bloqueado
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'deployment/solicitudes/actualizar-perfiles-staging-v2.txt'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FTP_DEST: /htdocs/api-v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a783c56530a8d35e4fcd267a5bd63518155395a1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+      - name: Validar código y commit de perfiles
+        run: |
+          test "$(git rev-parse HEAD)" = a783c56530a8d35e4fcd267a5bd63518155395a1
+          for f in app/Http/Controllers/CatalogoComercialControlador.php app/Http/Controllers/PerfilesCatalogosControlador.php app/Http/Controllers/SesionControlador.php app/Services/PermisosCatalogos.php routes/api.php; do php -l "$f"; done
+          grep -Fq "PermisosCatalogos::exigir" app/Http/Controllers/CatalogoComercialControlador.php
+          grep -Fq "Route::get('/perfiles/catalogos'" routes/api.php
+          grep -Fq "Route::put('/perfiles/usuarios/{id}/rol'" routes/api.php
+      - name: Preparar FTPS cifrado
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Verificar bloqueo de staging sin mostrar secretos
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/preflight.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/.htaccess" -o /tmp/guard_before
+          cls -1 -a "$FTP_DEST" > /tmp/backend_list
+          bye
+          EOF
+          lftp -f /tmp/preflight.lftp
+          grep -Fq 'Require all denied' /tmp/guard_before || { echo "::error::La API no está bloqueada";exit 1; }
+          if grep -Eq '^\.env($|\.)' /tmp/backend_list; then echo "::error::Se detectó .env en staging";exit 1;fi
+      - name: Transferir solo cinco archivos PHP en staging
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/upload.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put app/Http/Controllers/CatalogoComercialControlador.php -o "$FTP_DEST/app/Http/Controllers/CatalogoComercialControlador.php"
+          put app/Http/Controllers/PerfilesCatalogosControlador.php -o "$FTP_DEST/app/Http/Controllers/PerfilesCatalogosControlador.php"
+          put app/Http/Controllers/SesionControlador.php -o "$FTP_DEST/app/Http/Controllers/SesionControlador.php"
+          put app/Services/PermisosCatalogos.php -o "$FTP_DEST/app/Services/PermisosCatalogos.php"
+          put routes/api.php -o "$FTP_DEST/routes/api.php"
+          bye
+          EOF
+          lftp -f /tmp/upload.lftp
+          rm -f /tmp/upload.lftp
+      - name: Comparar archivos transferidos y protección conservada
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/app/Http/Controllers/CatalogoComercialControlador.php" -o /tmp/catalogo
+          get "$FTP_DEST/app/Http/Controllers/PerfilesCatalogosControlador.php" -o /tmp/perfiles
+          get "$FTP_DEST/app/Http/Controllers/SesionControlador.php" -o /tmp/sesion
+          get "$FTP_DEST/app/Services/PermisosCatalogos.php" -o /tmp/permisos
+          get "$FTP_DEST/routes/api.php" -o /tmp/routes
+          get "$FTP_DEST/.htaccess" -o /tmp/guard_after
+          bye
+          EOF
+          lftp -f /tmp/verify.lftp
+          cmp -s app/Http/Controllers/CatalogoComercialControlador.php /tmp/catalogo
+          cmp -s app/Http/Controllers/PerfilesCatalogosControlador.php /tmp/perfiles
+          cmp -s app/Http/Controllers/SesionControlador.php /tmp/sesion
+          cmp -s app/Services/PermisosCatalogos.php /tmp/permisos
+          cmp -s routes/api.php /tmp/routes
+          cmp -s /tmp/guard_before /tmp/guard_after
+          echo "OK: cinco archivos PHP de perfiles y autorización verificados en staging protegido."
+          echo "No se modificaron MySQL, frontend principal, .env ni la activación pública."

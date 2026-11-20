@@ -1,0 +1,6 @@
+RUTAHD2_PERFILES_STAGING
+version=a783c56530a8d35e4fcd267a5bd63518155395a1
+solo_staging_bloqueado=true
+no_sql=true
+no_env=true
+no_activar_http=true

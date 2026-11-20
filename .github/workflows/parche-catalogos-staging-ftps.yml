@@ -1,0 +1,115 @@
+name: Actualizar controladores catalogos V2 en staging protegido
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'deployment/solicitudes/parche-catalogos-staging-v2.txt'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  parche:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FTP_DEST: /htdocs/api-v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 27cc2e351fd1a6d1cb6d09e0660a252177d6344a
+      - name: Confirmar commit auditado y validar sintaxis PHP
+        run: |
+          test "$(git rev-parse HEAD)" = "27cc2e351fd1a6d1cb6d09e0660a252177d6344a"
+          php -l app/Http/Controllers/CatalogoComercialControlador.php
+          php -l app/Http/Controllers/ClasificacionProductoControlador.php
+          php -l routes/api.php
+          grep -Fq "token.rutahd" routes/api.php
+          grep -Fq "permiso.rutahd:productos.gestionar" routes/api.php
+      - name: Configurar cliente cifrado FTP
+        run: |
+          test -n "$FTP_PASSWORD" || { echo "::error::Falta secreto FTPS"; exit 1; }
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Verificar protección existente y preservar copias anteriores
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/preflight.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/.htaccess" -o /tmp/guard_antes
+          get "$FTP_DEST/app/Http/Controllers/CatalogoComercialControlador.php" -o /tmp/antes_catalogo
+          get "$FTP_DEST/app/Http/Controllers/ClasificacionProductoControlador.php" -o /tmp/antes_clasificacion
+          get "$FTP_DEST/routes/api.php" -o /tmp/antes_routes
+          cls -1 -a "$FTP_DEST" > /tmp/archivos_remotos
+          bye
+          EOF
+          lftp -f /tmp/preflight.lftp
+          grep -Fq 'Require all denied' /tmp/guard_antes || { echo "::error::Staging no está protegido"; exit 1; }
+          if grep -Eq '(^|/)\.env($|\.)' /tmp/archivos_remotos; then
+            echo "::error::Se detectó .env en staging; detener por seguridad"; exit 1
+          fi
+      - name: Actualizar exclusivamente dos controladores y rutas API
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/patch.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put app/Http/Controllers/CatalogoComercialControlador.php -o "$FTP_DEST/app/Http/Controllers/CatalogoComercialControlador.php"
+          put app/Http/Controllers/ClasificacionProductoControlador.php -o "$FTP_DEST/app/Http/Controllers/ClasificacionProductoControlador.php"
+          put routes/api.php -o "$FTP_DEST/routes/api.php"
+          bye
+          EOF
+          lftp -f /tmp/patch.lftp
+          rm -f /tmp/patch.lftp
+      - name: Verificar contenido y protección remota byte a byte
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/app/Http/Controllers/CatalogoComercialControlador.php" -o /tmp/ver_catalogo
+          get "$FTP_DEST/app/Http/Controllers/ClasificacionProductoControlador.php" -o /tmp/ver_clasificacion
+          get "$FTP_DEST/routes/api.php" -o /tmp/ver_routes
+          get "$FTP_DEST/.htaccess" -o /tmp/guard_despues
+          bye
+          EOF
+          lftp -f /tmp/verify.lftp
+          cmp -s app/Http/Controllers/CatalogoComercialControlador.php /tmp/ver_catalogo
+          cmp -s app/Http/Controllers/ClasificacionProductoControlador.php /tmp/ver_clasificacion
+          cmp -s routes/api.php /tmp/ver_routes
+          cmp -s /tmp/guard_antes /tmp/guard_despues
+          echo "OK: controladores y rutas actualizados en staging protegido por FTPS."
+          echo "MySQL, .env, frontend principal y API pública no modificados."
+          {
+            echo "### API de catálogos actualizada (staging protegido)"
+            echo "- Commit exacto: 27cc2e351fd1a6d1cb6d09e0660a252177d6344a"
+            echo "- 3 archivos verificados byte a byte"
+            echo "- Protección HTTP conservada"
+            echo "- Sin modificaciones MySQL, secretos ni activación pública"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -25,6 +25,7 @@ jobs:
       - name: Importar esquema español y clasificaciones sin InfinityFree
         run: |
           mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente < database/espanol/01_esquema_completo_34_tablas_es.sql
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente < database/espanol/05_semillas_es.sql
           mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/12_tokens_acceso_opcional.sql
           mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/13_catalogos_comerciales_aditivos.sql
           mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/14_productos_clasificacion_campos.sql
@@ -79,4 +80,7 @@ jobs:
           CACHE_STORE: array
           SESSION_DRIVER: array
           QUEUE_CONNECTION: sync
-        run: php tests/integracion_catalogos_api.php
+        run: |
+          set -o pipefail
+          php tests/integracion_catalogos_api.php | tee /tmp/resultado_catalogos_api.log
+          grep -Fq 'OK: login real' /tmp/resultado_catalogos_api.log

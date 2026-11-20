@@ -3,3 +3,8 @@ fecha=2026-11-19
 modo=solo_lectura
 objetivo=verificar_archivos_vendor_modelos_htaccess_env_y_http
 sin_tinyfish_ni_cambios_sql=true
+
+revision=2026-11-20
+solicitud=confirmar_estado_ftps_api_v2_tras_habilitaciones
+no_upload=true
+no_sql=true

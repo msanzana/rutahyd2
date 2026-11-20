@@ -34,3 +34,13 @@ Fecha: 20 de noviembre de 2026.
 
 ## Menú original
 Mantener exactamente Inicio, Pedidos, Clientes, Productos, Inventario, Informes y Administración. Los 10 catálogos son hijos de Productos y Perfiles y permisos es hijo de Administración. No publicar una rama que cambie esta jerarquía sin compararla con la imagen oficial del proyecto.
+
+
+## Auditoría posterior y situación comprobada a las 16:22 UTC
+
+- [Prueba navegador real en hosting #44772584141](https://github.com/msanzana/rutahyd2/actions/runs/44772584141): **SUCCESS**. Chromium navegó el frontend HTTPS con **HTTP 200**, encontró exactamente los **siete módulos padres**, y comprobó que `/api/v1/estado` respondió **HTTP 503 en JSON**, conforme al bloqueo previsto de la API. Esto aclara que los errores `curl 52` anteriores procedían del transporte/antibot del entorno de prueba, no probaban que el frontend estuviera caído.
+- [Auditoría FTPS de estado #44771858205](https://github.com/msanzana/rutahyd2/actions/runs/44771858205): `.env` **no presente**, marcador `rutahd2_api_ready` **no presente**, directorio Laravel **protegido** por `Require all denied`.
+- [Auditoría FTP de nombres #44772104056](https://github.com/msanzana/rutahyd2/actions/runs/44772104056): marcó falsamente como ausentes los seis scripts por el método de análisis de listado, **no es evidencia válida para concluir ausencia**.
+- [Verificación FTPS directa #44772410412](https://github.com/msanzana/rutahyd2/actions/runs/44772410412): **SUCCESS**; descargó los **seis SQL 12 a 17 uno por uno**, comparó bytes exactos contra GitHub y confirmó `.htaccess` intacto. **Los scripts están alojados pero no ejecutados en MySQL real**.
+- Sin conexión autenticada a `if0_43460400_rutahyd2_es`, no es seguro ni técnicamente posible confirmar backup, tablas, datos, alta de administrador o aplicar `ALTER TABLE` por los conectores disponibles en esta conversación.
+- Por tanto la API mantiene deliberadamente HTTP 503. **No** subir `.env`, crear el marcador ni publicar acceso a cuentas hasta respaldar/verificar MySQL y configurar secretos privados por sesión autorizada.

@@ -1,0 +1,103 @@
+name: Instalar gateway HTTP bloqueado para futura API V2
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/solicitudes/instalar-gateway-api-bloqueado.txt']
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  gateway:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: db712f579da25796ac4c1946a056a5fc7ce1c36b
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+      - name: Validar origen, sintaxis y compuerta cerrada
+        run: |
+          test "$(git rev-parse HEAD)" = db712f579da25796ac4c1946a056a5fc7ce1c36b
+          php -l deployment/infinityfree/gateway-publico/index.php
+          test -s deployment/infinityfree/gateway-publico/.htaccess
+          test "$(php deployment/infinityfree/gateway-publico/index.php | grep -c '"estado":"no_habilitada"')" = 1
+          grep -Fq 'rutahd2_api_ready' deployment/infinityfree/gateway-publico/index.php
+          grep -Fq "RewriteBase /api/" deployment/infinityfree/gateway-publico/.htaccess
+      - name: Acceso FTPS y diagnóstico de reemplazo
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+          set +x
+          umask 077
+          cat >/tmp/preflight.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          cls -1 -a /htdocs > /tmp/htdocs_list
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_original
+          bye
+          EOF
+          lftp -f /tmp/preflight.lftp
+          grep -Fq 'Require all denied' /tmp/guard_original || { echo '::error::Backend no protegido';exit 1; }
+          if grep -Fxq 'api' /tmp/htdocs_list; then
+            echo '::error::Existe directorio /htdocs/api preexistente. No reemplazar sin auditoría específica.'
+            exit 1
+          fi
+      - name: Crear puerta pública apagada sin tocar SQL ni frontend
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/deploy.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          mkdir /htdocs/api
+          put deployment/infinityfree/gateway-publico/.htaccess -o /htdocs/api/.htaccess
+          put deployment/infinityfree/gateway-publico/index.php -o /htdocs/api/index.php
+          bye
+          EOF
+          lftp -f /tmp/deploy.lftp
+          rm -f /tmp/deploy.lftp
+      - name: Verificar bytes y mantener guardia del backend
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/check.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api/.htaccess -o /tmp/gateway_htaccess
+          get /htdocs/api/index.php -o /tmp/gateway_index
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_despues
+          bye
+          EOF
+          lftp -f /tmp/check.lftp
+          cmp -s deployment/infinityfree/gateway-publico/.htaccess /tmp/gateway_htaccess
+          cmp -s deployment/infinityfree/gateway-publico/index.php /tmp/gateway_index
+          cmp -s /tmp/guard_original /tmp/guard_despues
+          echo 'OK: gateway /api instalado byte a byte, con activación bloqueada por .env y marcador.'
+          echo 'NO se creó .env ni rutahd2_api_ready, no se ejecutó SQL y backend privado permanece protegido.'
+          {
+            echo '### Gateway HTTP V2 instalado (bloqueado)'
+            echo '- /htdocs/api/index.php y .htaccess verificados byte a byte'
+            echo '- Marcador rutahd2_api_ready NO creado'
+            echo '- Protección /htdocs/api-v2 intacta'
+            echo '- API autenticada no activada; base MySQL intacta'
+          } >> "$GITHUB_STEP_SUMMARY"

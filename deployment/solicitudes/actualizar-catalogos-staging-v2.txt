@@ -1,0 +1,9 @@
+RUTAHD2_ACTUALIZACION_CATALOGOS_STAGING
+fecha=2026-11-20
+rama=feature/catalogos-api-productos-v2-20261120
+destino=/htdocs/api-v2
+modalidad=staging_protegido_por_htaccess
+sin_sql=true
+sin_env=true
+sin_activar_api=true
+verificar_byte_a_byte=true

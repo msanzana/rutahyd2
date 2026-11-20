@@ -1,4 +1,4 @@
-name: Preparar backend RutaHD2 V2 por FTPS (staging bloqueado)
+name: Desplegar backend RutaHD2 V2 a staging privado por FTPS
 on:
   push:
     branches: [ main ]
@@ -19,8 +19,7 @@ jobs:
       FTP_HOST: ftpupload.net
       FTP_USER: if0_43460400
       FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
-      FTP_DEST: /htdocs/api-v2
-      API_URL: https://rutahyd2.free.nf/api-v2/
+      FTP_DEST: /rutahyd2-backend-v2-privado
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,11 +71,31 @@ jobs:
           EOF
           lftp -f /tmp/ftp_guard.lftp
           rm -f /tmp/ftp_guard.lftp
-      - name: Comprobar bloqueo HTTP de staging antes de publicar archivos
+      - name: Verificar staging privado y protección por FTP sin exponerlo en la web
         run: |
-          ESTADO=$(curl -sSL -o /dev/null -w '%{http_code}' "$API_URL")
-          echo "Estado del directorio staging: $ESTADO"
-          test "$ESTADO" = "403" || { echo "::error::El directorio no devuelve 403. Se detiene la transferencia por seguridad."; exit 1; }
+          set +x
+          case "$FTP_DEST" in
+            /htdocs/*|/htdocs|/) echo "::error::Destino inseguro, se detiene"; exit 1 ;;
+            /rutahyd2-backend-v2-privado) ;;
+            *) echo "::error::Destino no autorizado"; exit 1 ;;
+          esac
+          umask 077
+          cat >/tmp/ftp_verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/.htaccess" -o /tmp/htaccess_remote
+          bye
+          EOF
+          lftp -f /tmp/ftp_verify.lftp
+          cmp -s /tmp/htaccess_staging /tmp/htaccess_remote || { echo "::error::.htaccess remoto difiere"; exit 1; }
+          rm -f /tmp/ftp_verify.lftp /tmp/htaccess_remote
+          echo "Destino privado fuera de htdocs y .htaccess remoto verificado."
       - name: Transferir app y vendor cifrados sin activar API
         run: |
           set +x
@@ -96,9 +115,27 @@ jobs:
           EOF
           lftp -f /tmp/ftp_upload.lftp
           rm -f /tmp/ftp_upload.lftp
-      - name: Confirmar que sigue protegido
+      - name: Verificar por FTPS archivos transferidos sin activar sitio
         run: |
-          ESTADO=$(curl -sSL -o /dev/null -w '%{http_code}' "$API_URL")
-          echo "Estado final de staging: $ESTADO"
-          test "$ESTADO" = "403"
-          echo "Código transferido a staging protegido. NO se activó la API ni se subió .env."
+          set +x
+          umask 077
+          cat >/tmp/ftp_final.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 60
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/app/Models/DetalleVenta.php" -o /tmp/remoto_DetalleVenta.php
+          get "$FTP_DEST/vendor/autoload.php" -o /tmp/remoto_autoload.php
+          get "$FTP_DEST/.htaccess" -o /tmp/remoto_proteccion
+          bye
+          EOF
+          lftp -f /tmp/ftp_final.lftp
+          cmp -s despliegue/app/Models/DetalleVenta.php /tmp/remoto_DetalleVenta.php
+          cmp -s despliegue/vendor/autoload.php /tmp/remoto_autoload.php
+          cmp -s /tmp/htaccess_staging /tmp/remoto_proteccion
+          rm -f /tmp/ftp_final.lftp /tmp/remoto_DetalleVenta.php /tmp/remoto_autoload.php /tmp/remoto_proteccion
+          echo "OK: backend y vendor recibidos por FTPS, staging fuera de htdocs, API no activada."

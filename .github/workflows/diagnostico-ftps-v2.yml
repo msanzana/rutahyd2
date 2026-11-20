@@ -1,0 +1,49 @@
+name: Diagnostico FTPS RutaHD2 V2 sin publicar
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'deployment/solicitudes/diagnostico-ftps-v2.txt'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  comprobar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FTP_DEST: /rutahyd2-backend-v2-privado
+    steps:
+      - name: Confirmar credencial sin mostrar valor
+        run: test -n "$FTP_PASSWORD"
+      - name: Instalar cliente FTPS
+        run: sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Probar permiso de escritura y lectura de archivo inocuo fuera de htdocs
+        run: |
+          set +x
+          umask 077
+          printf 'RutaHD2 prueba de transferencia FTPS sin datos sensibles\n' > /tmp/sonda_local.txt
+          cat >/tmp/sonda.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-allow yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          pwd
+          mkdir -p "$FTP_DEST"
+          put /tmp/sonda_local.txt -o "$FTP_DEST/comprobacion_transferencia.txt"
+          cls -l "$FTP_DEST"
+          get "$FTP_DEST/comprobacion_transferencia.txt" -o /tmp/sonda_recuperada.txt
+          bye
+          EOF
+          lftp -f /tmp/sonda.lftp
+          cmp -s /tmp/sonda_local.txt /tmp/sonda_recuperada.txt
+          echo "FTPS comprobado: subir y descargar archivo fuera de htdocs."
+      - name: Resultado
+        run: echo "No se subió backend, no se modificó htdocs ni la base de datos."

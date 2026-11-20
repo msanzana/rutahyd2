@@ -1,0 +1,4 @@
+RUTAHD2_DIAGNOSTICO_FTPS
+intento=2026-11-19-probe-1
+Destino=/rutahyd2-backend-v2-privado
+Objetivo=verificar escritura lectura archivo txt sin credenciales ni DDL

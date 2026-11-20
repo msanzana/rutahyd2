@@ -48,7 +48,12 @@ jobs:
           grep -Fxq 'rutahd2_api_ready' /tmp/activation_names && has_marker=SI || true
           grep -Fq 'Require all denied' /tmp/staging_guard && guarded=SI || true
           for prefix in 12_ 13_ 14_ 15_ 16_ 17_; do
-            grep -q "^$prefix" /tmp/sql_names || scripts=NO
+            if grep -q "^$prefix" /tmp/sql_names; then
+              echo "SCRIPT_$prefix=SI"
+            else
+              echo "SCRIPT_$prefix=NO"
+              scripts=NO
+            fi
           done
           echo "CONFIG_PRIVADA_PRESENTE=$has_env"
           echo "MARCADOR_API_PRESENTE=$has_marker"

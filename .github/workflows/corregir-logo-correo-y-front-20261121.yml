@@ -41,6 +41,14 @@ jobs:
           image.thumbnail((180,180),Image.Resampling.LANCZOS)
           # PNG transparente y email-friendly: no depender de WebP remoto.
           image.save('/tmp/logo-hd-email.png',format='PNG',optimize=True)
+          site=Image.open('/tmp/frontend/assets/img/prueba-rutahd2.webp').convert('RGBA')
+          site.thumbnail((480,480),Image.Resampling.LANCZOS)
+          site.save('/tmp/logo-hd-site.png',format='PNG',optimize=True)
+          html=Path('/tmp/frontend/index.html').read_text(encoding='utf-8')
+          assert html.count('assets/img/prueba-rutahd2.webp')==3
+          updated=html.replace('assets/img/prueba-rutahd2.webp','hd-branding/logo-hd-site.png?v=20261121-2')
+          Path('/tmp/index-hd-fix.html').write_text(updated,encoding='utf-8')
+          assert Path('/tmp/logo-hd-site.png').stat().st_size>2000
           assert Path('/tmp/logo-hd-email.png').stat().st_size>2000
           assert Image.open('/tmp/logo-hd-email.png').format=='PNG'
           print('Logotipo corporativo PNG generado con transparencia.')
@@ -62,6 +70,7 @@ jobs:
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
           get /htdocs/api-v2/.htaccess -o /tmp/lguard
           get /htdocs/api/index.php -o /tmp/lgateway
+          get /htdocs/index.html -o /tmp/lindex_before
           cls -1 -a /htdocs/api-v2/storage/app/private > /tmp/lmarkers
           cls -1 -a /htdocs/assets/img > /tmp/limage_before
           bye
@@ -69,6 +78,7 @@ jobs:
           lftp -f /tmp/lread.lftp >/dev/null
           grep -Fq 'Require all denied' /tmp/lguard
           grep -Fq 'rutahd2_api_ready' /tmp/lgateway
+          cmp -s /tmp/frontend/index.html /tmp/lindex_before || { echo '::error::HTML en servidor no corresponde al frontend auditado; no sobrescribirlo'; exit 1; }
           if grep -Fxq rutahd2_api_ready /tmp/lmarkers; then
             echo "::error::API activa de forma inesperada: detener cambio de plantilla."
             exit 1
@@ -89,10 +99,12 @@ jobs:
           set ftp:ssl-protect-data yes
           set ssl:verify-certificate yes
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
-          mirror -R --verbose=0 /tmp/frontend/assets/img /htdocs/assets/img
+          mkdir -p /htdocs/hd-branding
+          put /tmp/logo-hd-site.png -o /htdocs/hd-branding/logo-hd-site.png
           mkdir -p /htdocs/api-v2/resources/mail
           put /tmp/logo-hd-email.png -o /htdocs/api-v2/resources/mail/logo-hd-email.png
           put /tmp/backend_mail/resources/views/emails/corporativo.blade.php -o /htdocs/api-v2/resources/views/emails/corporativo.blade.php
+          put /tmp/index-hd-fix.html -o /htdocs/index.html
           bye
           EOF
           lftp -f /tmp/lwrite.lftp >/dev/null
@@ -109,8 +121,8 @@ jobs:
           set ftp:ssl-protect-data yes
           set ssl:verify-certificate yes
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
-          get /htdocs/assets/img/prueba-rutahd2.webp -o /tmp/public_main_logo
-          get /htdocs/assets/img/logo-hd-transparente.webp -o /tmp/public_transparent_logo
+          get /htdocs/hd-branding/logo-hd-site.png -o /tmp/public_main_logo
+          get /htdocs/index.html -o /tmp/lindex_after
           get /htdocs/api-v2/resources/mail/logo-hd-email.png -o /tmp/private_email_logo
           get /htdocs/api-v2/resources/views/emails/corporativo.blade.php -o /tmp/private_email_blade
           get /htdocs/api-v2/.htaccess -o /tmp/lguard_after
@@ -118,8 +130,8 @@ jobs:
           bye
           EOF
           lftp -f /tmp/lverify.lftp >/dev/null
-          cmp -s /tmp/frontend/assets/img/prueba-rutahd2.webp /tmp/public_main_logo
-          cmp -s /tmp/frontend/assets/img/logo-hd-transparente.webp /tmp/public_transparent_logo
+          cmp -s /tmp/logo-hd-site.png /tmp/public_main_logo
+          cmp -s /tmp/index-hd-fix.html /tmp/lindex_after
           cmp -s /tmp/logo-hd-email.png /tmp/private_email_logo
           cmp -s /tmp/backend_mail/resources/views/emails/corporativo.blade.php /tmp/private_email_blade
           cmp -s /tmp/lguard /tmp/lguard_after
@@ -127,7 +139,7 @@ jobs:
           echo 'LOGOS_PUBLICO_Y_CORREO_CID_OK=SI'
           {
             echo '### Corrección de logotipos H&D'
-            echo '- Los logos del frontend se encuentran en /htdocs/assets/img y coinciden byte a byte.'
+            echo '- Logo PNG del frontend publicado en /htdocs/hd-branding y referencia HTML corregida byte a byte.'
             echo '- El PNG interno para correo CID se encuentra dentro del backend protegido.'
             echo '- El Blade embed insertará el logo PNG como recurso inline en SMTP Laravel.'
             echo '- No se modificó .env, base de datos ni gateway.'

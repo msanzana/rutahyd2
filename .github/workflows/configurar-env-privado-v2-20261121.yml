@@ -1,0 +1,108 @@
+name: Configurar conexión Laravel-MySQL sin publicar secretos (API cerrada)
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/solicitudes/configurar-env-privado-v2-20261121.txt']
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  configure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FTP_DEST: /htdocs/api-v2
+    steps:
+      - name: Validar precondiciones y cliente FTPS
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Verificar que no hay configuración previa y API no activa
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$FTP_DEST/.htaccess" -o /tmp/guard
+          get /htdocs/api/index.php -o /tmp/gateway
+          cls -1 -a "$FTP_DEST" > /tmp/rootlist
+          cls -1 -a "$FTP_DEST/storage/app/private" > /tmp/markers
+          bye
+          EOF
+          lftp -f /tmp/read.lftp
+          grep -Fq 'Require all denied' /tmp/guard
+          grep -Fq 'rutahd2_api_ready' /tmp/gateway
+          if grep -Fxq '.env' /tmp/rootlist; then echo "::error::Ya existe .env; no se sobrescribe"; exit 1; fi
+          if grep -Fxq 'rutahd2_api_ready' /tmp/markers; then echo "::error::API ya habilitada; no se modifica configuración"; exit 1; fi
+      - name: Generar configuración privada y claves fuertes, sin mostrarlas
+        run: |
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import os,secrets,base64,json,pathlib
+          pwd=os.environ['FTP_PASSWORD']
+          assert pwd and len(pwd)>=8 and '\n' not in pwd and '\r' not in pwd
+          # En InfinityFree la clave de MySQL corresponde a la cuenta de hosting,
+          # la misma ya guardada para el despliegue FTPS.
+          values=[
+            ('APP_NAME','Ruta H&D2 API'),
+            ('APP_ENV','production'),('APP_DEBUG','false'),
+            ('APP_URL','https://rutahyd2.free.nf'),
+            ('FRONTEND_ORIGIN','https://rutahyd2.free.nf'),
+            ('APP_KEY','base64:'+base64.b64encode(secrets.token_bytes(32)).decode()),
+            ('RUTAHD_JWT_SECRET',secrets.token_hex(48)),
+            ('HASH_DRIVER','argon2id'),('DB_CONNECTION','mysql'),
+            ('DB_HOST','sql307.infinityfree.com'),('DB_PORT','3306'),
+            ('DB_DATABASE','if0_43460400_rutahyd2_es'),
+            ('DB_USERNAME','if0_43460400'),('DB_PASSWORD',pwd),
+            ('SESSION_DRIVER','file'),('CACHE_STORE','file'),
+            ('QUEUE_CONNECTION','sync'),('LOG_CHANNEL','single'),
+          ]
+          text=''.join(k+'='+json.dumps(v,ensure_ascii=False)+'\n' for k,v in values)
+          p=pathlib.Path('/tmp/rutahd2_private_env')
+          p.write_text(text,encoding='utf-8')
+          p.chmod(0o600)
+          assert p.stat().st_size>400
+          print('Generadas APP_KEY y JWT_SECRET independientes; configuración privada no impresa.')
+          PY
+      - name: Instalar solo .env protegido mediante FTPS
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/upload.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/rutahd2_private_env -o "$FTP_DEST/.env"
+          cls -1 -a "$FTP_DEST" > /tmp/afterlist
+          get "$FTP_DEST/.htaccess" -o /tmp/guard_after
+          bye
+          EOF
+          lftp -f /tmp/upload.lftp
+          grep -Fxq '.env' /tmp/afterlist
+          cmp -s /tmp/guard /tmp/guard_after
+          shred -u /tmp/rutahd2_private_env || rm -f /tmp/rutahd2_private_env
+          echo 'Configuración privada instalada, no se habilitó API ni se modificó MySQL.'
+          {
+            echo '### Configuración de producción'
+            echo '- APP_KEY aleatoria y RUTAHD_JWT_SECRET aleatorio independientes'
+            echo '- DB_HOST sql307.infinityfree.com y base española seleccionados'
+            echo '- DB_PASSWORD proveniente del secreto FTPS de la cuenta de hosting'
+            echo '- Directorio api-v2 sigue bloqueado por .htaccess'
+            echo '- Marcador de activación intencionalmente ausente'
+          } >> "$GITHUB_STEP_SUMMARY"

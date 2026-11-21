@@ -6,3 +6,4 @@ api=sin_activar
 intento=2_sintaxis_corregida
 intento=3_solo_recursos_usados
 intento=4_mirror_sin_mkdir
+intento=5_logo_publico_reutilizado

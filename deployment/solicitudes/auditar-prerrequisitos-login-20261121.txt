@@ -1,0 +1,3 @@
+RUTAHD2_AUDITORIA_CAMPOS_PRIVADOS
+fecha=2026-11-21
+solo_booleanos_sin_secretos=true

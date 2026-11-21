@@ -195,3 +195,17 @@ Portada y violeta-demo verificadas mediante navegador externo: al abrir se ve lo
 
 - Preflight SMTP nuevo tras reparar alias Gmail: https://github.com/msanzana/rutahyd2/actions/runs/44958577283 FALLÓ antes de FTP: el secreto RUTAHD_GMAIL_APP_PASSWORD sigue vacío en GitHub Actions. Gmail conectado a ChatGPT sí puede enviar, pero Laravel no tiene esa contraseña de aplicación. No se modificó .env ni gateway.
 - Para correo automático: registrar en Repository Secrets de Github la contraseña de aplicación YA CREADA para neo.hiper.xavier@gmail.com bajo nombre exacto RUTAHD_GMAIL_APP_PASSWORD (nunca como variable ordinaria ni por chat). Después probar envío desde Laravel. Para login, confirmar si se importó DML de la contraseña temporal remitida previamente; no afirmar que ya funciona.
+
+## Cambio de procedimiento oficial — 21-11-2026: DDL, sin Firecrawl
+
+Por instrucción expresa del titular, **se abandona Firecrawl como herramienta de trabajo para Ruta H&D V2**. No volver a proponer ni utilizar Firecrawl, Firecrawl Hangar ni macros de navegación para operar la base de datos, desplegar cambios o continuar esta implementación.
+
+**Método vigente para la base de datos:** entregar y mantener scripts SQL **DDL** explícitos, auditables y versionados para toda modificación de estructura (por ejemplo, `CREATE TABLE`, `ALTER TABLE`, índices y claves foráneas). El titular ejecuta estos scripts en su MariaDB/phpMyAdmin de producción cuando corresponda; comprobar después su aplicación con consultas SQL de solo lectura y reportar los resultados observados. No confundir archivos DDL preparados con migraciones ejecutadas.
+
+**Integración fullstack:** continuar trabajando directamente sobre los repositorios del frontend y backend y sus flujos de despliegue/verificación disponibles; mantener **modo producción permanente**, sin datos ni navegación de demostración, y completar la conexión real frontend → Laravel/JWT → MariaDB. No activar el gateway únicamente porque los archivos estén desplegados; confirmar autenticación y seguridad.
+
+**Nuevo estado informado por el titular:** los correos enviados desde el backend ya llegan correctamente. Tomar SMTP como avance funcional comunicado, sin reabrir el problema de envío salvo que aparezca una nueva falla.
+
+**Regla permanente del proyecto:** para futuros cambios de base de datos, proporcionar el SQL DDL correspondiente en vez de migraciones PHP o automatizaciones de navegador. Para modificaciones de filas (DML), distinguirlas expresamente de DDL y gestionarlas aparte, sin publicar contraseñas ni datos personales en repositorios.
+
+Esta instrucción sustituye las recomendaciones anteriores del diario que priorizaban Firecrawl Hangar.

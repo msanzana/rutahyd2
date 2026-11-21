@@ -10,7 +10,7 @@ Fecha: 21-11-2026. Procedimiento reservado al operador autorizado.
 - Frontend productivo sin demostración publicado con login obligatorio.
 - Gateway `/api/v1/estado` devuelve HTTP 503 `no_habilitada`; no es una caída de Laravel interno.
 - El titular confirmó la importación del SQL privado del administrador y el resultado **`cuentas_actualizadas=1`**. La sonda verifica existencia y tipo de hash, **no la coincidencia exacta con la contraseña recibida**.
-- La auditoría del archivo `.env` de esta instancia informó `MAIL_MAILER` distinto de `smtp` y campos SMTP sin configurar; el titular informa entregas de correos desde el backend. El intento nuevo de aplicar SMTP por Actions [44962024296](https://github.com/msanzana/rutahyd2/actions/runs/44962024296) **falló en el preflight porque `RUTAHD_GMAIL_APP_PASSWORD` llegó vacío**, antes de FTPS. Debe volver a guardarse el secreto bajo **Repository secrets** del repositorio backend `msanzana/rutahyd2` y disparar una ejecución nueva. No compartir su valor.
+- **SMTP ya instalado y confirmado**. Tras corregir el Repository secret, [44962575559](https://github.com/msanzana/rutahyd2/actions/runs/44962575559) instaló y comparó el `.env` por FTPS. La [auditoría privada 44962636619](https://github.com/msanzana/rutahyd2/actions/runs/44962636619) confirmó todos los campos SMTP, la base y el JWT; la [auditoría PHP 44962780428](https://github.com/msanzana/rutahyd2/actions/runs/44962780428) comprobó `smtp_config_laravel_efectiva=true`. **No hay aún prueba del envío y recepción real desde Laravel**; no confundir configuración con entrega.
 
 ## Preflight obligatorio (sin escribir en MySQL)
 
@@ -18,7 +18,7 @@ Fecha: 21-11-2026. Procedimiento reservado al operador autorizado.
 2. Verificar en `/htdocs/api-v2/.env` protegido que `APP_ENV=production`, `APP_DEBUG=false`, base correcta, `APP_KEY` y `RUTAHD_JWT_SECRET` presentes. No mostrar sus valores.
 3. Verificar que Laravel responde internamente y rechaza `GET /api/v1/perfil` sin JWT con HTTP 401.
 4. Confirmar por canal privado que el administrador reconoce y posee la contraseña vigente. No pegarla en archivos, issues, logs ni chat.
-5. Resolver SMTP/recuperación. La entrega por otro servicio de Gmail no demuestra que Laravel tenga configurado `MAIL_MAILER=smtp` ni que sus endpoints de recuperación funcionen.
+5. SMTP configurado y cargado por Laravel: confirmado. Falta una prueba controlada de envío y recepción real desde Laravel y del flujo de recuperación; nunca se publican contraseñas ni enlaces de recuperación.
 6. Confirmar que `/htdocs/api-v2/.htaccess` conserva la denegación de acceso directo y que el gateway público es el único punto de entrada.
 
 ## Activación operativa controlada
@@ -27,7 +27,7 @@ La compuerta usa **la existencia de un archivo privado**, no una variable de fro
 
 `/htdocs/api-v2/storage/app/private/rutahd2_api_ready`
 
-**No crear el marcador sin cumplir el preflight**. La creación debe realizarla el operador autorizado mediante los controles seguros del hosting, con plan de reversión. No publicar esta ruta como recurso accesible por HTTP, ni subir credenciales. El marcador nunca debe transferirse desde el frontend.
+**No crear el marcador sin cumplir el preflight**. La creación debe realizarla el operador autorizado mediante los controles seguros del hosting, en una prueba temporal supervisada con plan de reversión; no afirmar acceso exitoso antes de probar credenciales. No publicar esta ruta como recurso accesible por HTTP, ni subir credenciales. El marcador nunca debe transferirse desde el frontend.
 
 Una vez habilitado temporalmente, verificar desde navegador limpio, sin conservar tokens:
 

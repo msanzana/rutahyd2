@@ -113,3 +113,10 @@ Portada y violeta-demo verificadas mediante navegador externo: al abrir se ve lo
 - Este diario previamente documentaba verificaciones de navegador y transferencias FTPS por GitHub Actions, pero no incluía literalmente la dirección de Hangar; esta entrada la registra expresamente.
 - En esta revisión, el navegador remoto Firecrawl no pudo iniciar sesión y la lectura anónima de la URL devolvió HTTP 404. Esto NO prueba indisponibilidad del entorno autenticado del usuario; hace falta acceso de sesión autorizado para acciones dentro de Hangar.
 - Regla de seguridad vigente: la navegación mediante Hangar no equivale a disponer de permisos SQL. Crear el administrador únicamente tras verificar acceso a la base correcta, respaldo, estructura, SMTP y mecanismo seguro de contraseña; mantener API bloqueada hasta completar pruebas reales.
+
+## Sesión Firecrawl autorizada — 21-11-2026
+- Usuario ingresó manualmente a InfinityFree mediante el navegador remoto interactivo de Firecrawl Hangar. Sesión comprobada en `dash.infinityfree.com/accounts`; cuenta de hosting `if0_43460400`.
+- Navegación autenticada hasta phpMyAdmin de la base **`if0_43460400_rutahyd2_es`**, URL `php-myadmin.net/db_structure.php`. Estructura de solo lectura: 45 tablas; `usuarios`, `roles` y `tokens_acceso` existen; **`restablecimientos_contrasena` aún no existe**.
+- Se configuró exportación SQL de las 45 tablas, estructura+datos y gzip; el primer intento no terminó en el tiempo disponible. Descarga por CLI devolvió cancelada. El intento de visualizar exportación en texto dejó el navegador remoto sin aceptar comandos. **No hay backup verificado y no hubo SQL de escritura ni alta de usuarios**.
+- Se abrió nueva sesión de Firecrawl con perfil persistente `rutahyd2-infinityfree` (saveChanges), que inicialmente requiere nueva autenticación manual. No asumir que conserva cookies hasta comprobarlo en la próxima interacción.
+- El próximo paso es comprobar el respaldo fuera del hosting ANTES de SQL 18/19, aprovisionamiento privado y apertura del gateway JWT.

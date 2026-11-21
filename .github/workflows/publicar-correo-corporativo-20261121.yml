@@ -1,0 +1,119 @@
+name: Publicar correo corporativo Laravel protegido
+on:
+  push:
+    branches: [main]
+    paths:
+      - deployment/solicitudes/publicar-correo-corporativo-20261121.txt
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACKEND_SHA: c372d718e0b37584efb51e478f34d163c0168864
+    steps:
+      - name: Obtener backend probado por SHA
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          git clone --depth 1 --branch feature/email-corporativo-v2-20261121 https://github.com/msanzana/rutahyd2.git /tmp/email_backend >/dev/null
+          test "$(git -C /tmp/email_backend rev-parse HEAD)" = "$BACKEND_SHA"
+          php -l /tmp/email_backend/app/Mail/CorreoCorporativo.php
+          php -l /tmp/email_backend/app/Http/Controllers/RecuperacionContrasenaControlador.php
+          grep -Fq 'emails.corporativo-texto' /tmp/email_backend/app/Mail/CorreoCorporativo.php
+          test -s /tmp/email_backend/resources/views/emails/corporativo.blade.php
+          test -s /tmp/email_backend/resources/views/emails/corporativo-texto.blade.php
+      - name: Instalar FTPS
+        run: |
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Confirmar API deshabilitada y backend protegido
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/mail-read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/.htaccess -o /tmp/mail_guard_before
+          get /htdocs/api/index.php -o /tmp/mail_gateway_before
+          get /htdocs/index.html -o /tmp/mail_frontend_before
+          cls -1 -a /htdocs/api-v2/storage/app/private > /tmp/mail_markers
+          bye
+          EOF
+          lftp -f /tmp/mail-read.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/mail_guard_before
+          grep -Fq 'rutahd2_api_ready' /tmp/mail_gateway_before
+          if grep -Fxq rutahd2_api_ready /tmp/mail_markers; then
+            echo "::error::API activada inesperadamente: abortando actualización del controlador."
+            exit 1
+          fi
+      - name: Subir solamente plantilla y controlador de recuperación
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/mail-write.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          mirror -R --verbose=0 /tmp/email_backend/app/Mail /htdocs/api-v2/app/Mail
+          mirror -R --verbose=0 /tmp/email_backend/resources/views/emails /htdocs/api-v2/resources/views/emails
+          put /tmp/email_backend/app/Http/Controllers/RecuperacionContrasenaControlador.php -o /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php
+          bye
+          EOF
+          lftp -f /tmp/mail-write.lftp >/dev/null
+      - name: Verificar por bytes y conservar archivos sensibles intactos
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/mail-verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/app/Mail/CorreoCorporativo.php -o /tmp/mail_class_after
+          get /htdocs/api-v2/resources/views/emails/corporativo.blade.php -o /tmp/mail_html_after
+          get /htdocs/api-v2/resources/views/emails/corporativo-texto.blade.php -o /tmp/mail_text_after
+          get /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php -o /tmp/mail_recovery_after
+          get /htdocs/api-v2/.htaccess -o /tmp/mail_guard_after
+          get /htdocs/api/index.php -o /tmp/mail_gateway_after
+          get /htdocs/index.html -o /tmp/mail_frontend_after
+          bye
+          EOF
+          lftp -f /tmp/mail-verify.lftp >/dev/null
+          cmp -s /tmp/email_backend/app/Mail/CorreoCorporativo.php /tmp/mail_class_after
+          cmp -s /tmp/email_backend/resources/views/emails/corporativo.blade.php /tmp/mail_html_after
+          cmp -s /tmp/email_backend/resources/views/emails/corporativo-texto.blade.php /tmp/mail_text_after
+          cmp -s /tmp/email_backend/app/Http/Controllers/RecuperacionContrasenaControlador.php /tmp/mail_recovery_after
+          cmp -s /tmp/mail_guard_before /tmp/mail_guard_after
+          cmp -s /tmp/mail_gateway_before /tmp/mail_gateway_after
+          cmp -s /tmp/mail_frontend_before /tmp/mail_frontend_after
+          php -l /tmp/mail_class_after
+          php -l /tmp/mail_recovery_after
+          {
+            echo '### Plantilla de correo Ruta H&D V2'
+            echo '- Mailable HTML+texto instalada por FTPS y verificada byte a byte'
+            echo '- Recuperación e invitación inicial consumen plantilla general'
+            echo '- No se modificaron .env, MySQL, frontend ni gateway; API continúa cerrada'
+            echo '- SMTP de Laravel NO fue habilitado por este despliegue'
+          } >> "$GITHUB_STEP_SUMMARY"

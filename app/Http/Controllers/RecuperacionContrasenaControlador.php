@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Models\Usuario;
+use App\Mail\CorreoCorporativo;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -37,13 +38,8 @@ final class RecuperacionContrasenaControlador extends Controller
         // El fragmento # evita enviar el token al servidor web al abrir el sitio.
         $url = $base . '/#recuperar?token=' . $token;
         try {
-            Mail::raw(
-                "Se solicitó restablecer la contraseña de Ruta H&D2.\n\n"
-                . "Abre este enlace durante los próximos 30 minutos:\n" . $url
-                . "\n\nSi no lo solicitaste, ignora el mensaje. La contraseña actual sigue funcionando.",
-                static function ($message) use ($usuario): void {
-                    $message->to($usuario->correo_electronico)->subject('Ruta H&D2 · Recuperación de cuenta');
-                }
+            Mail::to($usuario->correo_electronico)->send(
+                CorreoCorporativo::recuperacion($url)
             );
         } catch (\Throwable $e) {
             DB::table('restablecimientos_contrasena')->where('hash_token', $hash)->delete();

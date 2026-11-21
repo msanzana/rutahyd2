@@ -12,3 +12,6 @@ jwt_activacion=false
 revision=2_login_dos_columnas
 sha_front=c284c573d5a176dcacbc2f50bdb6ea2e33c24ede
 ci_final=44886964422_success
+revision=3_recuperacion_retorno_login
+sha_front=39dd803b9853cecc550ac4fab1b99f667580c951
+ci=44887294926_success

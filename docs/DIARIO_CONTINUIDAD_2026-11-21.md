@@ -209,3 +209,30 @@ Por instrucción expresa del titular, **se abandona Firecrawl como herramienta d
 **Regla permanente del proyecto:** para futuros cambios de base de datos, proporcionar el SQL DDL correspondiente en vez de migraciones PHP o automatizaciones de navegador. Para modificaciones de filas (DML), distinguirlas expresamente de DDL y gestionarlas aparte, sin publicar contraseñas ni datos personales en repositorios.
 
 Esta instrucción sustituye las recomendaciones anteriores del diario que priorizaban Firecrawl Hangar.
+
+## Reanudación efectiva — 21-11-2026: frontend productivo y diagnóstico fullstack
+
+**Metodología respetada:** solo GitHub, FTPS, scripts de verificación y pruebas Playwright; no Firecrawl ni operaciones de escritura de esquema. Para cambios futuros de BBDD, únicamente scripts DDL explícitos.
+
+### Auditoría de código y producción
+- Repositorios activos: `msanzana/rutahyd2` para backend/operaciones y `msanzana/rutahyd2front` para frontend. El código Laravel desplegado procede de la rama de integración `feature/catalogos-api-productos-v2-20261120`; el frontend publicado procede de `main`. No afirmar que el backend Laravel está presente como árbol fuente en la rama `main` del backend: esta última contiene principalmente flujos y documentación.
+- Auditoría de FTPS y protección JWT, solo lectura, exitosa: https://github.com/msanzana/rutahyd2/actions/runs/44959442130 . Detectó ausencia del marcador `rutahd2_api_ready`. Su comprobación de presencia de `.env` mediante listado FTP produjo falso negativo; auditoría específica posterior comprobó el archivo privado por descarga segura.
+- Auditoría específica de `.env`, sin exponer secretos, exitosa: https://github.com/msanzana/rutahyd2/actions/runs/44959538228 .
+- Auditoría de PHP/Laravel/MariaDB y prueba anónima desde Chromium, con sonda temporal retirada, exitosa: https://github.com/msanzana/rutahyd2/actions/runs/44959577317 . Resultado: base conectada, 46 tablas, 5 roles, 1 usuario y 1 administrador activo, hash Argon2id válido, DDL18/DDL19 presentes, biblioteca JWT y Laravel interno operativos.
+- La sonda devolvió también **SMTP .env no habilitado** (`smtp_habilitado=false`, credencial=false, host/usuario Gmail=false). El titular declara que ya puede recibir correo del backend: ambas observaciones quedan registradas sin asumir que prueban exactamente el mismo transporte. No desconfigurar correos que funcionan.
+- El navegador del alojamiento confirmó API pública HTTP **503**, JSON `estado=no_habilitada`, `gateway_habilitado=false`; el login JWT no es utilizable en la portada hasta abrir el marcador tras validar credenciales y recuperación. El frontend no debe omitir esta compuerta ni presentar conexión operativa artificialmente.
+
+### Implementaciones y despliegue realizados
+- CI de producción `msanzana/rutahyd2front/.github/workflows/produccion-sin-demo-v2-ci.yml` actualizada para validar la rama `main` y comprobar ocho menús oficiales, login productivo, y ausencia de scripts de demostración. Corridas verdes: https://github.com/msanzana/rutahyd2front/actions/runs/44959599063 y https://github.com/msanzana/rutahyd2front/actions/runs/44959623473 .
+- La suite antigua violeta/demostración (`verificar-tema.yml`) quedó solo manual, para que no invalide las pruebas productivas de `main`.
+- El workflow `publicar-produccion-sin-demo-20261121.yml` se corrigió para desplegar el **frontend main actual**, no una SHA antigua de `feature`. Incluye exigencia de modo productivo, versión nueva de scripts/estilos, ruta PNG de logo oficial `hd-branding/logo-hd-site.png`, respaldo previo, cotejo por bytes y rollback.
+- **Publicación exitosa**: https://github.com/msanzana/rutahyd2/actions/runs/44959751680 . SHA frontend desplegada y verificada por flujo: `cb3c5c30547c0fd16bcf4eae88a02673a626dc57`. Se publicaron únicamente interfaz y recursos JS/CSS; protección y backend intactos. No se ejecutó DDL, DML ni se creó marcador JWT.
+- Se actualizó el README del frontend, eliminando descripciones obsoletas de demo y documentando la integración y sus bloqueos reales.
+- Se preparó y solicitó smoke browser no autenticado de la portada definitiva: https://github.com/msanzana/rutahyd2/actions/runs/44959951853 . Consultar conclusión de esta corrida antes de certificar prueba de navegador final.
+
+### Pendiente para cerrar la conexión de verdad
+1. Reconciliar el método de correo que el titular confirma con la configuración SMTP que ve la sonda del `.env` de Laravel, sin cambiar lo que funciona.
+2. Confirmar de manera privada que la contraseña actual del administrador corresponde al hash almacenado; no hay prueba de login real porque la compuerta está cerrada.
+3. Activar el gateway solo después de ese preflight, con mecanismo reversible y ensayo de login, perfil, permiso, logout y revocación JWT; no publicar ni pedir credenciales en chat.
+4. Validar CRUD reales por rol sobre API y MariaDB; Compras/Ventas/Proveedores/Clientes/Bodega aún están en lectura y Cuentas corrientes no tiene endpoint.
+5. Cualquier cambio adicional de estructura se documentará como **DDL SQL** antes de importación, sin migraciones PHP.

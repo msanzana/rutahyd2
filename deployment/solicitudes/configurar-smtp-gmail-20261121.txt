@@ -3,3 +3,4 @@ fecha=2026-11-21
 remitente=neo.hiper.xavier@gmail.com
 requiere_secret_privado=RUTAHD_GMAIL_APP_PASSWORD
 no_habilitar_api=true
+reintento_con_secreto_actualizado=2026-11-21-2

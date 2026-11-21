@@ -48,7 +48,6 @@ jobs:
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
           get /htdocs/index.html -o /tmp/orig_root.html
           get /htdocs/violeta-demo/index.html -o /tmp/orig_violet.html
-          get /htdocs/catalogos-v2-preview/index.html -o /tmp/orig_preview.html
           get /htdocs/api-v2/.htaccess -o /tmp/guard_old
           get /htdocs/api-v2/routes/api.php -o /tmp/routes_old
           get /htdocs/assets/js/app.js -o /tmp/app_old
@@ -69,7 +68,7 @@ jobs:
           menus=source[a:b]
           assert menus.count('data-admin-catalog=')==10
           parents=('inicio','pedidos','clientes','productos','inventario','informes','administracion')
-          for loc in ('root','violet','preview'):
+          for loc in ('root','violet'):
             old=Path('/tmp/orig_'+loc+'.html').read_text(encoding='utf-8')
             indexes=[old.index('data-nav="'+name+'"') for name in parents]
             assert indexes==sorted(indexes) and len(set(indexes))==7
@@ -116,13 +115,8 @@ jobs:
           put /tmp/front/assets/js/app.js -o /htdocs/violeta-demo/assets/js/app.js
           put /tmp/front/assets/js/catalogos-api.js -o /htdocs/violeta-demo/assets/js/catalogos-api.js
           put /tmp/front/assets/js/admin-remoto.js -o /htdocs/violeta-demo/assets/js/admin-remoto.js
-          put /tmp/front/assets/js/productos-remotos.js -o /htdocs/catalogos-v2-preview/assets/js/productos-remotos.js
-          put /tmp/front/assets/js/app.js -o /htdocs/catalogos-v2-preview/assets/js/app.js
-          put /tmp/front/assets/js/catalogos-api.js -o /htdocs/catalogos-v2-preview/assets/js/catalogos-api.js
-          put /tmp/front/assets/js/admin-remoto.js -o /htdocs/catalogos-v2-preview/assets/js/admin-remoto.js
           put /tmp/new_root.html -o /htdocs/index.html
           put /tmp/new_violet.html -o /htdocs/violeta-demo/index.html
-          put /tmp/new_preview.html -o /htdocs/catalogos-v2-preview/index.html
           bye
           EOF
           lftp -f /tmp/write.lftp
@@ -140,7 +134,6 @@ jobs:
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
           get /htdocs/index.html -o /tmp/check_root.html
           get /htdocs/violeta-demo/index.html -o /tmp/check_violet.html
-          get /htdocs/catalogos-v2-preview/index.html -o /tmp/check_preview.html
           get /htdocs/api-v2/routes/api.php -o /tmp/check_routes
           get /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php -o /tmp/check_controller
           get /htdocs/assets/js/productos-remotos.js -o /tmp/check_productos_root
@@ -151,15 +144,11 @@ jobs:
           get /htdocs/violeta-demo/assets/js/app.js -o /tmp/check_app_violet
           get /htdocs/violeta-demo/assets/js/catalogos-api.js -o /tmp/check_api_violet
           get /htdocs/violeta-demo/assets/js/admin-remoto.js -o /tmp/check_admin_violet
-          get /htdocs/catalogos-v2-preview/assets/js/productos-remotos.js -o /tmp/check_productos_preview
-          get /htdocs/catalogos-v2-preview/assets/js/app.js -o /tmp/check_app_preview
-          get /htdocs/catalogos-v2-preview/assets/js/catalogos-api.js -o /tmp/check_api_preview
-          get /htdocs/catalogos-v2-preview/assets/js/admin-remoto.js -o /tmp/check_admin_preview
           get /htdocs/api-v2/.htaccess -o /tmp/guard_new
           bye
           EOF
           lftp -f /tmp/verify.lftp
-          for loc in root violet preview; do
+          for loc in root violet; do
             cmp -s "/tmp/new_$loc.html" "/tmp/check_$loc.html"
             cmp -s /tmp/front/assets/js/catalogos-api.js "/tmp/check_api_$loc"
             cmp -s /tmp/front/assets/js/admin-remoto.js "/tmp/check_admin_$loc"
@@ -169,5 +158,5 @@ jobs:
           cmp -s /tmp/guard_old /tmp/guard_new
           cmp -s /tmp/backend/routes/api.php /tmp/check_routes
           cmp -s /tmp/backend/app/Http/Controllers/ProductoComercialControlador.php /tmp/check_controller
-          echo 'OK: menú oficial, diez catálogos y CRUD Productos verificados en tres frontends y backend privado.'
+          echo 'OK: menú oficial, diez catálogos y CRUD Productos verificados en dos frontends y backend privado.'
           echo 'No se modificó la base de datos ni se habilitó la API.'

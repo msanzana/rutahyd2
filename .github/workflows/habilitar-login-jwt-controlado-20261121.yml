@@ -76,6 +76,27 @@ jobs:
           print('Preflight: Laravel produccion, DB, JWT y SMTP presentes sin revelar secretos.')
           PY
           shred -u /tmp/activation-private-env || rm -f /tmp/activation-private-env
+      - name: Confirmar por HTTP que la API estaba cerrada antes de abrirla
+        working-directory: /tmp/rutahd-activation
+        run: |
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const b=await chromium.launch({headless:true});
+          try {
+            const p=await b.newPage({locale:'es-CL'});
+            await p.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:45000});
+            await p.waitForTimeout(12000);
+            const health=await p.evaluate(async()=>{
+              const r=await fetch('/api/v1/estado',{cache:'no-store',headers:{Accept:'application/json'}});
+              const body=(r.headers.get('content-type')||'').includes('json')?await r.json():{};
+              return {http:r.status,estado:body.estado,servicio:body.servicio};
+            });
+            console.log('ESTADO_PRE_ACTIVACION',JSON.stringify(health));
+            if(health.http!==503||health.estado!=='no_habilitada'||
+              health.servicio!=='Ruta H&D2 API')throw Error('API ya habilitada o estado incorrecto');
+            await p.close();
+          }finally{await b.close();}
+          JS
       - name: Abrir gateway con marcador privado
         run: |
           set -euo pipefail
@@ -154,11 +175,11 @@ jobs:
           set ftp:ssl-protect-data yes
           set ssl:verify-certificate yes
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
-          cls -1 -a /htdocs/api-v2/storage/app/private > /tmp/activation-confirm-markers
+          get /htdocs/api-v2/storage/app/private/rutahd2_api_ready -o /tmp/activation-marker-readback
           bye
           EOF
           lftp -f /tmp/activation-confirm.lftp >/dev/null
-          grep -Fxq rutahd2_api_ready /tmp/activation-confirm-markers
+          cmp -s /tmp/activation-ready /tmp/activation-marker-readback
           echo 'API JWT habilitada y rutas anonimas protegidas. Login real administrador pendiente de prueba por titular.' >> "$GITHUB_STEP_SUMMARY"
       - name: Revertir el marcador si falla cualquier comprobacion
         if: failure()
@@ -183,4 +204,4 @@ jobs:
           set +x
           shred -u /tmp/activation-private-env /tmp/activation-ready 2>/dev/null || true
           rm -f /tmp/activation-*.lftp /tmp/activation-guard /tmp/activation-gateway /tmp/activation-front
-          rm -f /tmp/activation-existing-markers /tmp/activation-confirm-markers
+          rm -f /tmp/activation-existing-markers /tmp/activation-confirm-markers /tmp/activation-marker-readback

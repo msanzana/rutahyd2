@@ -70,7 +70,7 @@ jobs:
              $mailHostOk=($_ENV['MAIL_HOST']??null)==='smtp.gmail.com';
              $mailUserOk=($_ENV['MAIL_USERNAME']??null)==='neo.hiper.xavier@gmail.com';
              $readyMarker=is_file($base.'/storage/app/private/rutahd2_api_ready');
-             $interno=false; $internoError='none';
+             $interno=false; $anonDenied=false; $internoError='none';
              try {
                $app=require $base.'/bootstrap/app.php';
                $kernel=$app->make(\Illuminate\Contracts\Http\Kernel::class);
@@ -82,15 +82,23 @@ jobs:
                    && ($data['servicio']??null)==='Ruta H&D2 API'
                    && ($data['estado']??null)==='disponible';
                $kernel->terminate($request,$res);
+               // Solicitud protegida SIN credenciales: debe ser rechazada siempre.
+               // No se ejecuta inicio de sesión ni modificación en MariaDB.
+               $anonRequest=\Illuminate\Http\Request::create('/api/v1/perfil','GET',[],[],[],
+                 ['HTTP_ACCEPT'=>'application/json','HTTP_HOST'=>'rutahyd2.free.nf','HTTPS'=>'on']);
+               $anonResponse=$kernel->handle($anonRequest);
+               $anonDenied=$anonResponse->getStatusCode()===401;
+               $kernel->terminate($anonRequest,$anonResponse);
              }catch(\Throwable $e){ $internoError=get_class($e); }
 
-             $ok=$tablas===46&&$roles===5&&$usuarios===1&&$admin===1&&$hashOk&&$rutOk&&$correoOk&&$ddl18&&$ddl19&&$rutUnico&&$jwt&&$argon;
+             $ok=$tablas===46&&$roles===5&&$usuarios===1&&$admin===1&&$hashOk&&$rutOk&&$correoOk&&$ddl18&&$ddl19&&$rutUnico&&$jwt&&$argon&&$interno&&$anonDenied;
              http_response_code(200);
              echo json_encode(['ok'=>$ok,'db'=>'connected','tablas'=>$tablas,'roles'=>$roles,'usuarios'=>$usuarios,
                 'admin_activo'=>$admin===1,'hash_argon2id'=>$hashOk,'rut_formato'=>$rutOk,'correo_formato'=>$correoOk,
                 'ddl18'=>$ddl18,'ddl19'=>$ddl19,'rut_unico'=>$rutUnico,'jwt_lib'=>$jwt,'argon2id'=>$argon,
                 'smtp_habilitado'=>$mailMode==='smtp','smtp_credencial'=>$mailCred,
-                'smtp_host_gmail'=>$mailHostOk,'smtp_usuario_gmail'=>$mailUserOk,'gateway_habilitado'=>$readyMarker,'laravel_interno'=>$interno,'laravel_error'=>$internoError]);
+                'smtp_host_gmail'=>$mailHostOk,'smtp_usuario_gmail'=>$mailUserOk,'gateway_habilitado'=>$readyMarker,'laravel_interno'=>$interno,
+                'perfil_anonimo_rechazado'=>$anonDenied,'laravel_error'=>$internoError]);
           } catch(\Throwable $e) {
              http_response_code(503);
              echo json_encode(['ok'=>false,'stage'=>'php_or_database','error_class'=>get_class($e)]);
@@ -145,6 +153,7 @@ jobs:
                   smtp_habilitado:content.smtp_habilitado,smtp_credencial:content.smtp_credencial,
                   smtp_host_gmail:content.smtp_host_gmail,smtp_usuario_gmail:content.smtp_usuario_gmail,
                   gateway_habilitado:content.gateway_habilitado,
+                  perfil_anonimo_rechazado:content.perfil_anonimo_rechazado,
                   laravel_interno:content.laravel_interno,laravel_error:content.laravel_error,
                   error_class:typeof content.error_class==='string'?content.error_class:'none'};
               }finally{clearTimeout(tm);}
@@ -167,7 +176,7 @@ jobs:
             });
             console.log('GATEWAY_PUBLICO',JSON.stringify(pub));
             console.log('LOGO_FRONTAL',JSON.stringify(logo));
-            if(result.http!==200||result.db!=='connected')process.exitCode=1;
+            if(result.http!==200||!result.ok||result.db!=='connected'||result.perfil_anonimo_rechazado!==true)process.exitCode=1;
             await page.close();
           }finally{await browser.close();}
           JS

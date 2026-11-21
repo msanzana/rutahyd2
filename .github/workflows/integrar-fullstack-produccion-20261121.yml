@@ -69,9 +69,13 @@ jobs:
           bye
           EOF
           lftp -f /tmp/read.lftp >/dev/null
+          for spec in 'Require all denied|/tmp/guard_before' 'rutahd2_api_ready|/tmp/gateway_before' '.env|/tmp/backend_files'; do
+            pattern="${spec%%|*}"; file="${spec#*|}"
+            if grep -Fq -- "$pattern" "$file"; then echo "PREFLIGHT=$pattern:SI"; else echo "PREFLIGHT=$pattern:NO"; fi
+          done
           grep -Fq 'Require all denied' /tmp/guard_before
           grep -Fq 'rutahd2_api_ready' /tmp/gateway_before
-          grep -Fxq '.env' /tmp/backend_files
+          grep -Fq '.env' /tmp/backend_files
           if grep -Fxq rutahd2_api_ready /tmp/backend_markers; then
             echo "::error::API activa; no desplegar cambios de autenticación sin ventana de mantenimiento."
             exit 1

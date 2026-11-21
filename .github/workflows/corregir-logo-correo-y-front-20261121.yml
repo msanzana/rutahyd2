@@ -79,7 +79,18 @@ jobs:
           lftp -f /tmp/lread.lftp >/dev/null
           grep -Fq 'Require all denied' /tmp/lguard
           grep -Fq 'rutahd2_api_ready' /tmp/lgateway
-          cmp -s /tmp/logo-hd-site.png /tmp/lbrand_existing || { echo '::error::Logo publicado no coincide con fuente'; exit 1; }
+          python3 - <<'PY'
+          from PIL import Image,ImageChops
+          from pathlib import Path
+          local=Path('/tmp/logo-hd-site.png');remote=Path('/tmp/lbrand_existing')
+          print('LOGO_LOCAL_BYTES='+str(local.stat().st_size)+' LOGO_FTPS_BYTES='+str(remote.stat().st_size))
+          try:
+            a=Image.open(local).convert('RGBA');b=Image.open(remote).convert('RGBA')
+          except Exception as ex:
+            raise SystemExit('Logotipo FTP no es una imagen válida: '+type(ex).__name__)
+          print('LOGO_LOCAL_DIM='+str(a.size)+' LOGO_FTPS_DIM='+str(b.size))
+          assert a.size==b.size and ImageChops.difference(a,b).getbbox() is None,'Logo FTP tiene píxeles distintos al esperado'
+          PY
           cmp -s /tmp/frontend/index.html /tmp/lindex_before || { echo '::error::HTML en servidor no corresponde al frontend auditado; no sobrescribirlo'; exit 1; }
           if grep -Fxq rutahd2_api_ready /tmp/lmarkers; then
             echo "::error::API activa de forma inesperada: detener cambio de plantilla."

@@ -133,3 +133,11 @@ Portada y violeta-demo verificadas mediante navegador externo: al abrir se ve lo
 - La autorización de Gmail para el chat no concede credenciales SMTP/OAuth a la instalación Laravel de InfinityFree; `MAIL_MAILER` productivo continúa sin configuración confirmada. Este envío **no constituye alta del usuario ni correo de activación**.
 - Un intento posterior de recuperar sesión de InfinityFree mediante Firecrawl falló por **créditos MCP insuficientes**; no se pudo reabrir phpMyAdmin ni ejecutar operaciones. La base de datos, la cuenta administradora y el gateway no fueron modificados.
 - Seguir pendiente: respaldo durable y recuperable, migraciones, alta segura, entrega del enlace de definición de contraseña, pruebas JWT y habilitación API. No afirmar que estos pasos se completaron.
+
+## Gmail personal con contraseña de aplicación — 21-11-2026
+- El titular indicó haber creado una contraseña de aplicación para la cuenta de correo neo.hiper.xavier@gmail.com y autorizó su uso como remitente SMTP del backend.
+- Verificado en documentación de Google y foro InfinityFree que smtp.gmail.com:587 con STARTTLS y contraseña de aplicación es compatible; es necesario validar entrega real desde InfinityFree.
+- PR backend #7 integrada a main: https://github.com/msanzana/rutahyd2/pull/7 . Contiene tools/actualizar_env_smtp_gmail.py, workflow seguro .github/workflows/configurar-smtp-gmail-20261121.yml y documentación docs/SMTP_GMAIL_INFINITYFREE_20261121.md. El workflow copia el .env por FTPS y solo reemplaza MAIL_*, exige secreto privado, verifica contenido descargado y permite reversión; no habilita API ni escribe SQL.
+- CI de preparación aprobada: https://github.com/msanzana/rutahyd2/actions/runs/44946232892
+- Intento de aplicación en producción: https://github.com/msanzana/rutahyd2/actions/runs/44946293518 **DETENIDO ANTES DE ACCESO FTPS** por ausencia del secreto Actions RUTAHD_GMAIL_APP_PASSWORD. No se modificó .env ni se envió correo desde Laravel.
+- Para continuar: titular registra el valor de la contraseña de aplicación, exclusivamente en GitHub -> Settings -> Secrets and variables -> Actions -> New repository secret, con nombre RUTAHD_GMAIL_APP_PASSWORD. Nunca mostrar contraseña en chat ni commits. Después reejecutar por workflow_dispatch o nueva solicitud. Comprobar recepción desde servidor antes de crear administrador.

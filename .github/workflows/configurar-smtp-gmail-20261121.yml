@@ -1,0 +1,131 @@
+name: Configurar Gmail SMTP en Laravel sin habilitar API
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - deployment/solicitudes/configurar-smtp-gmail-20261121.txt
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  configurar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      RUTAHD_GMAIL_APP_PASSWORD: ${{ secrets.RUTAHD_GMAIL_APP_PASSWORD }}
+      RUTAHD_DEST: /htdocs/api-v2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Comprobar secretos privados antes de cualquier cambio
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          if [[ -z "$FTP_PASSWORD" || -z "$RUTAHD_GMAIL_APP_PASSWORD" ]]; then
+            echo "::error::Configura el secret RUTAHD_GMAIL_APP_PASSWORD en GitHub Actions. No se modificó producción."
+            exit 1
+          fi
+          python3 - <<'PY'
+          import os,re
+          p=''.join(os.environ['RUTAHD_GMAIL_APP_PASSWORD'].split())
+          assert re.fullmatch(r'[A-Za-z0-9]{16}',p), 'La clave Gmail debe tener 16 caracteres sin espacios'
+          print('Secret privado disponible y formato plausible; sin revelar valor.')
+          PY
+      - name: Instalar cliente FTPS
+        run: sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Actualizar .env con snapshot, comprobación y reversión
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          mkdir -p /tmp/rutahd_mail
+          chmod 700 /tmp/rutahd_mail
+          cd /tmp/rutahd_mail
+          UPLOAD=0
+          VERIFIED=0
+          cleanup() {
+            if [[ "$UPLOAD" == "1" && "$VERIFIED" != "1" && -s original.env ]]; then
+              echo "::warning::Verificación fallida; intentando restauración de .env anterior."
+              cat > restore.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put original.env -o "$RUTAHD_DEST/.env"
+          bye
+          EOF
+              lftp -f restore.lftp >/dev/null || echo "::error::Restauración no confirmada."
+            fi
+            cd /tmp
+            for f in /tmp/rutahd_mail/*; do
+              if [[ -f "$f" ]]; then shred -u "$f" 2>/dev/null || rm -f "$f"; fi
+            done
+            rmdir /tmp/rutahd_mail 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          cat > read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$RUTAHD_DEST/.env" -o original.env
+          get "$RUTAHD_DEST/.htaccess" -o original.htaccess
+          cls -1 -a "$RUTAHD_DEST/storage/app/private" > markers.txt
+          bye
+          EOF
+          lftp -f read.lftp >/dev/null
+          test -s original.env
+          grep -Fq 'Require all denied' original.htaccess
+          if grep -Fxq rutahd2_api_ready markers.txt; then
+            echo "::error::API activa: revisar mantenimiento antes de actualizar correo."
+            exit 1
+          fi
+          python3 "$GITHUB_WORKSPACE/tools/actualizar_env_smtp_gmail.py" original.env candidato.env
+          test -s candidato.env
+          cat > upload.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put candidato.env -o "$RUTAHD_DEST/.env"
+          bye
+          EOF
+          UPLOAD=1
+          lftp -f upload.lftp >/dev/null
+          cat > verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$RUTAHD_DEST/.env" -o verificado.env
+          bye
+          EOF
+          lftp -f verify.lftp >/dev/null
+          cmp -s candidato.env verificado.env
+          VERIFIED=1
+          echo "SMTP Gmail configurado y verificado en .env por FTPS; API sigue cerrada."
+          {
+            echo "### Correo de Laravel"
+            echo "- Cuenta: neo.hiper.xavier@gmail.com"
+            echo "- Servidor: smtp.gmail.com:587 (TLS)"
+            echo "- Credencial: tomada de GitHub Actions Secret, nunca revelada"
+            echo "- Base de datos y API: sin modificaciones"
+            echo "- Falta verificar entrega real desde el hosting"
+          } >> "$GITHUB_STEP_SUMMARY"

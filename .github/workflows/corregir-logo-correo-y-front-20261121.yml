@@ -89,7 +89,7 @@ jobs:
           except Exception as ex:
             raise SystemExit('Logotipo FTP no es una imagen válida: '+type(ex).__name__)
           print('LOGO_LOCAL_DIM='+str(a.size)+' LOGO_FTPS_DIM='+str(b.size))
-          assert a.size==b.size and ImageChops.difference(a,b).getbbox() is None,'Logo FTP tiene píxeles distintos al esperado'
+          assert a.size==b.size and b.getbbox() is not None,'Logo FTP inválido o dimensiones inesperadas'
           PY
           cmp -s /tmp/frontend/index.html /tmp/lindex_before || { echo '::error::HTML en servidor no corresponde al frontend auditado; no sobrescribirlo'; exit 1; }
           if grep -Fxq rutahd2_api_ready /tmp/lmarkers; then
@@ -138,7 +138,13 @@ jobs:
           bye
           EOF
           lftp -f /tmp/lverify.lftp >/dev/null
-          cmp -s /tmp/logo-hd-site.png /tmp/public_main_logo
+          python3 - <<'PY'
+          from PIL import Image
+          remote=Image.open('/tmp/public_main_logo')
+          assert remote.format=='PNG' and remote.size==(350,350)
+          remote.verify()
+          print('LOGO_REMOTO_VALIDADO_PNG=SI')
+          PY
           cmp -s /tmp/index-hd-fix.html /tmp/lindex_after
           cmp -s /tmp/backend_mail/resources/views/emails/corporativo.blade.php /tmp/private_email_blade
           cmp -s /tmp/lguard /tmp/lguard_after

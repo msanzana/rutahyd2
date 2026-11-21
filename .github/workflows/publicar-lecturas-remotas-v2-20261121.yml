@@ -1,0 +1,123 @@
+name: Publicar consultas comerciales remotas y forzar JavaScript actualizado
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/solicitudes/publicar-lecturas-remotas-v2-20261121.txt']
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Obtener frontend probado
+        run: |
+          git clone --depth 1 --branch feature/catalogos-api-adapter-v2-20261120 https://github.com/msanzana/rutahyd2front.git /tmp/front
+          test "$(git -C /tmp/front rev-parse HEAD)" = "1f1e1eed96e6ae7aeaefffb1db0943f0b2164b0d"
+          node --check /tmp/front/assets/js/catalogos-api.js
+          node --check /tmp/front/assets/js/admin-remoto.js
+          grep -Fq 'Consultas reales del servidor' /tmp/front/assets/js/admin-remoto.js
+      - name: Instalar FTPS
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Obtener HTML exacto publicado y guardia Laravel
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/orig_root.html
+          get /htdocs/violeta-demo/index.html -o /tmp/orig_violet.html
+          get /htdocs/catalogos-v2-preview/index.html -o /tmp/orig_preview.html
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_old
+          bye
+          EOF
+          lftp -f /tmp/read.lftp
+          grep -Fq 'Require all denied' /tmp/guard_old
+      - name: Modificar solo dos referencias script; preservar HTML y menú
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          for loc in ('root','violet','preview'):
+            p=Path('/tmp/orig_'+loc+'.html')
+            s=p.read_text(encoding='utf-8')
+            assert s.count('src="assets/js/catalogos-api.js"')==1
+            assert s.count('src="assets/js/admin-remoto.js"')==1
+            assert len(re.findall(r'<(?:button|div)\b[^>]*class="(?:nav-link|nav-group)',s))>=7
+            updated=s.replace('src="assets/js/catalogos-api.js"','src="assets/js/catalogos-api.js?v=20261121-2"')
+            updated=updated.replace('src="assets/js/admin-remoto.js"','src="assets/js/admin-remoto.js?v=20261121-2"')
+            assert updated.replace('?v=20261121-2','')==s
+            Path('/tmp/new_'+loc+'.html').write_text(updated,encoding='utf-8')
+          PY
+      - name: Publicar JS y HTML con menú intacto
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/write.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/front/assets/js/catalogos-api.js -o /htdocs/assets/js/catalogos-api.js
+          put /tmp/front/assets/js/admin-remoto.js -o /htdocs/assets/js/admin-remoto.js
+          put /tmp/front/assets/js/catalogos-api.js -o /htdocs/violeta-demo/assets/js/catalogos-api.js
+          put /tmp/front/assets/js/admin-remoto.js -o /htdocs/violeta-demo/assets/js/admin-remoto.js
+          put /tmp/front/assets/js/catalogos-api.js -o /htdocs/catalogos-v2-preview/assets/js/catalogos-api.js
+          put /tmp/front/assets/js/admin-remoto.js -o /htdocs/catalogos-v2-preview/assets/js/admin-remoto.js
+          put /tmp/new_root.html -o /htdocs/index.html
+          put /tmp/new_violet.html -o /htdocs/violeta-demo/index.html
+          put /tmp/new_preview.html -o /htdocs/catalogos-v2-preview/index.html
+          bye
+          EOF
+          lftp -f /tmp/write.lftp
+      - name: Verificar integridad y bloqueo privado
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/check_root.html
+          get /htdocs/violeta-demo/index.html -o /tmp/check_violet.html
+          get /htdocs/catalogos-v2-preview/index.html -o /tmp/check_preview.html
+          get /htdocs/assets/js/catalogos-api.js -o /tmp/check_api_root
+          get /htdocs/assets/js/admin-remoto.js -o /tmp/check_admin_root
+          get /htdocs/violeta-demo/assets/js/catalogos-api.js -o /tmp/check_api_violet
+          get /htdocs/violeta-demo/assets/js/admin-remoto.js -o /tmp/check_admin_violet
+          get /htdocs/catalogos-v2-preview/assets/js/catalogos-api.js -o /tmp/check_api_preview
+          get /htdocs/catalogos-v2-preview/assets/js/admin-remoto.js -o /tmp/check_admin_preview
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_new
+          bye
+          EOF
+          lftp -f /tmp/verify.lftp
+          for loc in root violet preview; do
+            cmp -s "/tmp/new_$loc.html" "/tmp/check_$loc.html"
+            cmp -s /tmp/front/assets/js/catalogos-api.js "/tmp/check_api_$loc"
+            cmp -s /tmp/front/assets/js/admin-remoto.js "/tmp/check_admin_$loc"
+          done
+          cmp -s /tmp/guard_old /tmp/guard_new
+          echo 'OK: interfaz actualizada, siete menús preservados; consultas remotas visibles tras login.'
+          echo 'No se modificó la base de datos ni se habilitó la API.'

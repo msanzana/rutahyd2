@@ -1,0 +1,134 @@
+name: Corregir logos en frontend y correos H&D V2
+on:
+  push:
+    branches: [main]
+    paths:
+      - deployment/solicitudes/corregir-logo-y-correo-20261121.txt
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  reparar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      MAIL_SHA: 26af91e7c1c9513220fec4036edd358c703358a1
+      FRONT_SHA: 70b8d07650c5cc69983eb706f5cbab0cc8d5006d
+    steps:
+      - name: Preparar fuentes fijadas y comprobar plantilla
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          git clone --depth 1 --branch feature/email-corporativo-v2-20261121 -q https://github.com/msanzana/rutahyd2.git /tmp/backend_mail
+          git clone --depth 1 --branch main -q https://github.com/msanzana/rutahyd2front.git /tmp/frontend
+          test "$(git -C /tmp/backend_mail rev-parse HEAD)" = "$MAIL_SHA"
+          test "$(git -C /tmp/frontend rev-parse HEAD)" = "$FRONT_SHA"
+          grep -Fq "embed(resource_path('mail/logo-hd-email.png'))" /tmp/backend_mail/resources/views/emails/corporativo.blade.php
+          test -s /tmp/frontend/assets/img/logo-hd-transparente.webp
+          test -s /tmp/frontend/assets/img/prueba-rutahd2.webp
+          php -l /tmp/backend_mail/app/Mail/CorreoCorporativo.php
+          python3 -m pip install --break-system-packages -q Pillow
+          python3 - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+          source=Path('/tmp/frontend/assets/img/logo-hd-transparente.webp')
+          image=Image.open(source).convert('RGBA')
+          image.thumbnail((180,180),Image.Resampling.LANCZOS)
+          # PNG transparente y email-friendly: no depender de WebP remoto.
+          image.save('/tmp/logo-hd-email.png',format='PNG',optimize=True)
+          assert Path('/tmp/logo-hd-email.png').stat().st_size>2000
+          assert Image.open('/tmp/logo-hd-email.png').format=='PNG'
+          print('Logotipo corporativo PNG generado con transparencia.')
+          PY
+      - name: Instalar FTPS
+        run: sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Comprobar guardias y gateway cerrado sin modificar privados
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/lread.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/.htaccess -o /tmp/lguard
+          get /htdocs/api/index.php -o /tmp/lgateway
+          cls -1 -a /htdocs/api-v2/storage/app/private > /tmp/lmarkers
+          cls -1 -a /htdocs/assets/img > /tmp/limage_before
+          bye
+          EOF
+          lftp -f /tmp/lread.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/lguard
+          grep -Fq 'rutahd2_api_ready' /tmp/lgateway
+          if grep -Fxq rutahd2_api_ready /tmp/lmarkers; then
+            echo "::error::API activa de forma inesperada: detener cambio de plantilla."
+            exit 1
+          fi
+          for f in prueba-rutahd2.webp logo-hd-transparente.webp; do
+            if grep -Fxq "$f" /tmp/limage_before; then echo "ACTIVO_ANTES_$f=SI"; else echo "ACTIVO_ANTES_$f=NO"; fi
+          done
+      - name: Subir logotipos públicos y logo interno PNG + Blade CID
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/lwrite.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          mirror -R --verbose=0 /tmp/frontend/assets/img /htdocs/assets/img
+          mkdir -p /htdocs/api-v2/resources/mail
+          put /tmp/logo-hd-email.png -o /htdocs/api-v2/resources/mail/logo-hd-email.png
+          put /tmp/backend_mail/resources/views/emails/corporativo.blade.php -o /htdocs/api-v2/resources/views/emails/corporativo.blade.php
+          bye
+          EOF
+          lftp -f /tmp/lwrite.lftp >/dev/null
+      - name: Verificar por bytes que las imágenes y el Blade están publicados
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/lverify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/assets/img/prueba-rutahd2.webp -o /tmp/public_main_logo
+          get /htdocs/assets/img/logo-hd-transparente.webp -o /tmp/public_transparent_logo
+          get /htdocs/api-v2/resources/mail/logo-hd-email.png -o /tmp/private_email_logo
+          get /htdocs/api-v2/resources/views/emails/corporativo.blade.php -o /tmp/private_email_blade
+          get /htdocs/api-v2/.htaccess -o /tmp/lguard_after
+          get /htdocs/api/index.php -o /tmp/lgateway_after
+          bye
+          EOF
+          lftp -f /tmp/lverify.lftp >/dev/null
+          cmp -s /tmp/frontend/assets/img/prueba-rutahd2.webp /tmp/public_main_logo
+          cmp -s /tmp/frontend/assets/img/logo-hd-transparente.webp /tmp/public_transparent_logo
+          cmp -s /tmp/logo-hd-email.png /tmp/private_email_logo
+          cmp -s /tmp/backend_mail/resources/views/emails/corporativo.blade.php /tmp/private_email_blade
+          cmp -s /tmp/lguard /tmp/lguard_after
+          cmp -s /tmp/lgateway /tmp/lgateway_after
+          echo 'LOGOS_PUBLICO_Y_CORREO_CID_OK=SI'
+          {
+            echo '### Corrección de logotipos H&D'
+            echo '- Los logos del frontend se encuentran en /htdocs/assets/img y coinciden byte a byte.'
+            echo '- El PNG interno para correo CID se encuentra dentro del backend protegido.'
+            echo '- El Blade embed insertará el logo PNG como recurso inline en SMTP Laravel.'
+            echo '- No se modificó .env, base de datos ni gateway.'
+          } >> "$GITHUB_STEP_SUMMARY"

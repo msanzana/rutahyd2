@@ -44,3 +44,26 @@ Se debe:
 4. Mantener el gateway `/api` bloqueado (HTTP 503) hasta completar los pasos previos. Retirar el marcador para rollback inmediato de la API.
 
 **Conclusión:** migraciones BBDD **completadas y verificadas**. Creación de administrador, configuración privada, activación JWT y pruebas HTTP de autenticación **pendientes**. El respaldo previo fue generado y entregado como archivo privado, no publicado en el repositorio.
+
+
+## Estado posterior de integración — 21 noviembre 2026
+
+- [Sincronización gateway Laravel + frontend](https://github.com/msanzana/rutahyd2/actions/runs/44875111753): SUCCESS, cotejada por bytes remotos.
+- [Verificación configuración privada](https://github.com/msanzana/rutahyd2/actions/runs/44875673709): SUCCESS; .env existe, APP_KEY y RUTAHD_JWT_SECRET independientes, host/base/usuario MySQL correctos.
+- [Diagnóstico PHP→MariaDB real](https://github.com/msanzana/rutahyd2/actions/runs/44875842428): SUCCESS; conexión PDO desde PHP 8.4 del propio InfinityFree con 45 tablas y cinco roles; biblioteca Firebase JWT disponible y password_hash Argon2id soportado. Sonda efímera autenticada y eliminada.
+- [Cliente remoto y solución anti-bot publicada](https://github.com/msanzana/rutahyd2/actions/runs/44876079811): SUCCESS; assets verificados en tres ubicaciones y siete entradas padres de menú preservadas.
+- Firecrawl confirmó en navegador público botón «Verificar API Laravel» y respuesta esperada «API protegida (HTTP 503)».
+
+### Protección anti-bot necesaria para el frontend
+
+El hosting de InfinityFree devuelve HTML de desafío JavaScript para fetch del mismo dominio si se usa credentials:omit. Se verificó HTTP 503 JSON al usar credentials:same-origin. La versión aprobada del frontend usa únicamente cookies técnicas del mismo origen; los tokens JWT permanecen en memoria y solo se envían con Authorization: Bearer.
+
+### Lo que falta
+
+- La base productiva está migrada y la conexión PHP→MySQL es efectiva.
+- La cuenta administradora aún NO existe: cero filas en usuarios.
+- La API pública aún NO está activada, marcador privado ausente, HTTP 503.
+- Antes de activar: crear administrador mediante procedimiento privado con contraseña NUEVA y hash Argon2id, probar login Bearer y errores 401/403, lecturas/CRUD autorizados, y entonces crear el marcador de activación. Para cerrar la API retirar ese marcador.
+- El frontend mantiene los CRUD generales de Pedidos, Clientes, Productos e Informes en localStorage demostrativo. SOLO los catálogos remotos (CRUD) y las consultas de recursos (lecturas) interactúan con Laravel/MySQL. No mezclar ambos almacenes.
+
+Nota operativa: el primer workflow de generación .env terminó en failure por comprobar un listado FTPS que no muestra archivos ocultos; el posterior audit directo verificó la existencia, contenidos estructurales correctos y conectividad real. No reinstalar ni regenerar claves.

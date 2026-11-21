@@ -90,7 +90,7 @@ final class ProductoComercialControlador extends Controller
         $datos=$request->validate([
             'page'=>['sometimes','integer','min:1','max:10000'],
             'por_pagina'=>['sometimes','integer','min:1','max:100'],
-            'buscar'=>['sometimes','string','max:120'],
+            'buscar'=>['sometimes','nullable','string','max:120'],
             'incluye_inactivos'=>['sometimes','boolean']
         ]);
         $q=DB::table('productos');

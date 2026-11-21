@@ -37,7 +37,7 @@ jobs:
         run: |
           test -n "$FTP_PASSWORD"
           sudo apt-get -qq update && sudo apt-get -qq install -y lftp
-      - name: Preflight: comprobar bloqueo Laravel y que el menú publicado no cambia
+      - name: Comprobar bloqueo Laravel y que el menú publicado no cambia
         run: |
           set -euo pipefail
           set +x

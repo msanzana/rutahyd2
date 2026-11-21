@@ -27,8 +27,14 @@ jobs:
         run: |
           set -euo pipefail
           set +x
-          if [[ -z "$FTP_PASSWORD" || -z "$RUTAHD_GMAIL_APP_PASSWORD" ]]; then
-            echo "::error::Configura el secret RUTAHD_GMAIL_APP_PASSWORD en GitHub Actions. No se modificó producción."
+          if [[ -z "$FTP_PASSWORD" ]]; then
+            echo "::error::No se recibió INFINITYFREE_FTP_PASSWORD desde los Repository secrets de msanzana/rutahyd2."
+            exit 1
+          fi
+          if [[ -z "$RUTAHD_GMAIL_APP_PASSWORD" ]]; then
+            echo "::error::RUTAHD_GMAIL_APP_PASSWORD llegó VACÍO a este workflow del repositorio msanzana/rutahyd2."
+            echo "::error::Revisar Settings > Secrets and variables > Actions > Repository secrets de ESTE repositorio (no rutahyd2front, Codespaces, Variables ni Environment secrets)."
+            echo "::error::No se conectó por FTPS y no se modificó producción."
             exit 1
           fi
           python3 - <<'PY'

@@ -9,8 +9,8 @@ Fecha: 21-11-2026. Procedimiento reservado al operador autorizado.
 - DDL18 y DDL19 ya existen; **no repetirlos**. No se necesita DDL nuevo para activar el JWT.
 - Frontend productivo sin demostración publicado con login obligatorio.
 - Gateway `/api/v1/estado` devuelve HTTP 503 `no_habilitada`; no es una caída de Laravel interno.
-- El titular confirma que importó el SQL privado de reemplazo de contraseña del administrador. La sonda verifica existencia y tipo de hash, **no la coincidencia exacta con la contraseña recibida**.
-- La auditoría del archivo `.env` de esta instancia informó `MAIL_MAILER` distinto de `smtp` y campos SMTP sin configurar; el titular informa entregas de correos desde el backend. Resolver cuál proceso hace los envíos y desde qué configuración antes de dar por probada la recuperación Laravel.
+- El titular confirmó la importación del SQL privado del administrador y el resultado **`cuentas_actualizadas=1`**. La sonda verifica existencia y tipo de hash, **no la coincidencia exacta con la contraseña recibida**.
+- La auditoría del archivo `.env` de esta instancia informó `MAIL_MAILER` distinto de `smtp` y campos SMTP sin configurar; el titular informa entregas de correos desde el backend. El intento nuevo de aplicar SMTP por Actions [44962024296](https://github.com/msanzana/rutahyd2/actions/runs/44962024296) **falló en el preflight porque `RUTAHD_GMAIL_APP_PASSWORD` llegó vacío**, antes de FTPS. Debe volver a guardarse el secreto bajo **Repository secrets** del repositorio backend `msanzana/rutahyd2` y disparar una ejecución nueva. No compartir su valor.
 
 ## Preflight obligatorio (sin escribir en MySQL)
 

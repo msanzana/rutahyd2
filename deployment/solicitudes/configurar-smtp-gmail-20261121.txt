@@ -4,3 +4,4 @@ remitente=neo.hiper.xavier@gmail.com
 requiere_secret_privado=RUTAHD_GMAIL_APP_PASSWORD
 no_habilitar_api=true
 reintento_con_secreto_actualizado=2026-11-21-2
+revisar_secret_tras_correccion_remitente=2026-11-21-login

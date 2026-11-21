@@ -73,10 +73,12 @@ jobs:
             old=Path('/tmp/orig_'+loc+'.html').read_text(encoding='utf-8')
             indexes=[old.index('data-nav="'+name+'"') for name in parents]
             assert indexes==sorted(indexes) and len(set(indexes))==7
-            assert 'id="adminSubnav"' in old and 'data-admin-catalog' not in old
+            n=old.count('data-admin-catalog=')
+            print('MENU_PREFLIGHT',loc,'adminSubnav=',('id="adminSubnav"' in old),'adminCatalogs=',n)
+            assert 'id="adminSubnav"' in old and n in (0,10),(loc,n)
             profile=re.search(r'<button[^>]*data-nav="perfiles"[^>]*>',old)
             assert profile
-            updated=old[:profile.start()]+menus+old[profile.start():]
+            updated=old if n==10 else old[:profile.start()]+menus+old[profile.start():]
             assert 'productos-remotos.js' not in updated
             assert 'src="assets/js/app.js"' in updated
             updated=updated.replace('<script src="assets/js/app.js"',

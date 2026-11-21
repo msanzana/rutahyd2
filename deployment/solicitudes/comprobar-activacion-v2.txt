@@ -5,3 +5,4 @@ no_sql=true
 no_escritura_en_hosting=true
 detalle_sql_por_archivo=true
 reintento=auditoria_archivos
+revision_activacion_21_noviembre_usuario_continuar=si

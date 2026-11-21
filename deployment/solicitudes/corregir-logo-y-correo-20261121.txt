@@ -3,3 +3,4 @@ FRONT_ASSETS=prueba-rutahd2.webp,logo-hd-transparente.webp
 EMAIL_INLINE_PNG=true
 NO_SQL=true
 NO_ACTIVACION_API=true
+REINTENTO=PNG_Branding_20261121

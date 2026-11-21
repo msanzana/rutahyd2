@@ -1,0 +1,5 @@
+SYNC_RUTAHD2_20261121
+backend=7149ed3deeeff47c1cffa64c15f08fc09605918e
+frontend=da6f4058d93ceea2cbc748184d46e515252a7945
+no_sql=true
+no_secretos=true

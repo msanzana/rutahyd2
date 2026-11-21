@@ -70,7 +70,7 @@ jobs:
              $mailHostOk=($_ENV['MAIL_HOST']??null)==='smtp.gmail.com';
              $mailUserOk=($_ENV['MAIL_USERNAME']??null)==='neo.hiper.xavier@gmail.com';
              $readyMarker=is_file($base.'/storage/app/private/rutahd2_api_ready');
-             $interno=false; $anonDenied=false; $rutasProtegidas=false; $bearerInvalido=false; $internoError='none';
+             $interno=false; $anonDenied=false; $rutasProtegidas=false; $bearerInvalido=false; $mailLaravel=false; $internoError='none';
              try {
                $app=require $base.'/bootstrap/app.php';
                $kernel=$app->make(\Illuminate\Contracts\Http\Kernel::class);
@@ -82,6 +82,10 @@ jobs:
                    && ($data['servicio']??null)==='Ruta H&D2 API'
                    && ($data['estado']??null)==='disponible';
                $kernel->terminate($request,$res);
+               // Confirmar configuración EFECTIVA de Laravel, no solo variables del .env.
+               $mailLaravel=(string)config('mail.default')==='smtp'
+                   && (string)config('mail.mailers.smtp.host')==='smtp.gmail.com'
+                   && (string)config('mail.from.address')==='neo.hiper.xavier@gmail.com';
                // Solicitud protegida SIN credenciales: debe ser rechazada siempre.
                // No se ejecuta inicio de sesión ni modificación en MariaDB.
                $anonRequest=\Illuminate\Http\Request::create('/api/v1/perfil','GET',[],[],[],
@@ -112,7 +116,8 @@ jobs:
                 'admin_activo'=>$admin===1,'hash_argon2id'=>$hashOk,'rut_formato'=>$rutOk,'correo_formato'=>$correoOk,
                 'ddl18'=>$ddl18,'ddl19'=>$ddl19,'rut_unico'=>$rutUnico,'jwt_lib'=>$jwt,'argon2id'=>$argon,
                 'smtp_habilitado'=>$mailMode==='smtp','smtp_credencial'=>$mailCred,
-                'smtp_host_gmail'=>$mailHostOk,'smtp_usuario_gmail'=>$mailUserOk,'gateway_habilitado'=>$readyMarker,'laravel_interno'=>$interno,
+                'smtp_host_gmail'=>$mailHostOk,'smtp_usuario_gmail'=>$mailUserOk,
+                'smtp_config_laravel_efectiva'=>$mailLaravel,'gateway_habilitado'=>$readyMarker,'laravel_interno'=>$interno,
                 'perfil_anonimo_rechazado'=>$anonDenied,'rutas_anonimas_rechazadas'=>$rutasProtegidas,
                 'bearer_invalido_rechazado'=>$bearerInvalido,'laravel_error'=>$internoError]);
           } catch(\Throwable $e) {
@@ -168,6 +173,7 @@ jobs:
                   jwt_lib:content.jwt_lib,argon2id:content.argon2id,
                   smtp_habilitado:content.smtp_habilitado,smtp_credencial:content.smtp_credencial,
                   smtp_host_gmail:content.smtp_host_gmail,smtp_usuario_gmail:content.smtp_usuario_gmail,
+                  smtp_config_laravel_efectiva:content.smtp_config_laravel_efectiva,
                   gateway_habilitado:content.gateway_habilitado,
                   perfil_anonimo_rechazado:content.perfil_anonimo_rechazado,
                   rutas_anonimas_rechazadas:content.rutas_anonimas_rechazadas,

@@ -20,8 +20,9 @@ jobs:
       - name: Validar version del frontend y crear HTML
         run: |
           set -euo pipefail
-          git clone --depth 1 --branch feature/produccion-sin-demo-login-v2-20261121 https://github.com/msanzana/rutahyd2front.git /tmp/front
-          test "$(git -C /tmp/front rev-parse HEAD)" = '39dd803b9853cecc550ac4fab1b99f667580c951'
+          git clone --depth 1 --branch main https://github.com/msanzana/rutahyd2front.git /tmp/front
+          test -n "$(git -C /tmp/front rev-parse HEAD)"
+          echo "FRONTEND_SHA=$(git -C /tmp/front rev-parse HEAD)" >> "$GITHUB_ENV"
           for f in /tmp/front/assets/js/*.js; do node --check "$f"; done
           python3 - <<'PY'
           from pathlib import Path
@@ -43,19 +44,17 @@ jobs:
           assert 'src="assets/js/app.js"' not in s
           assert 'assets/js/modulos-oficiales.js' in s
           assert 'assets/css/menu-oficial.css' in s
-          import base64
           assert s.count('assets/img/prueba-rutahd2.webp')==3
-          logo=Path('/tmp/front/assets/img/prueba-rutahd2.webp').read_bytes()
-          assert 10000<len(logo)<150000 and logo[:4]==b'RIFF' and logo[8:12]==b'WEBP'
-          image='data:image/webp;base64,'+base64.b64encode(logo).decode('ascii')
-          s=s.replace('assets/img/prueba-rutahd2.webp',image)
-          s=s.replace('href="assets/css/app.css"','href="assets/css/app.css?v=20261121-prod10"')
-          s=s.replace('correcciones-ui.css?v=20261121-prod10','correcciones-ui.css?v=20261121-prod10')
-          s=s.replace('menu-oficial.css?v=20261121-2','menu-oficial.css?v=20261121-prod10')
-          s=s.replace('produccion.css?v=20261121-1','produccion.css?v=20261121-prod10')
-          s=re.sub(r'src="assets/js/([a-z-]+)\.js"',r'src="assets/js/\1.js?v=20261121-prod10"',s)
-          assert s.count('src="assets/js/login-produccion.js?v=20261121-prod10"')==1
-          assert s.count('src="assets/js/app-produccion.js?v=20261121-prod10"')==1
+          # El servidor publica el PNG oficial desde /hd-branding. No reponer WebP ausente.
+          s=s.replace('assets/img/prueba-rutahd2.webp','hd-branding/logo-hd-site.png?v=20261121-prod11')
+          assert s.count('hd-branding/logo-hd-site.png?v=20261121-prod11')==3
+          s=s.replace('href="assets/css/app.css"','href="assets/css/app.css?v=20261121-prod11"')
+          s=s.replace('correcciones-ui.css?v=20261121-prod11','correcciones-ui.css?v=20261121-prod11')
+          s=s.replace('menu-oficial.css?v=20261121-2','menu-oficial.css?v=20261121-prod11')
+          s=s.replace('produccion.css?v=20261121-1','produccion.css?v=20261121-prod11')
+          s=re.sub(r'src="assets/js/([a-z-]+)\.js"',r'src="assets/js/\1.js?v=20261121-prod11"',s)
+          assert s.count('src="assets/js/login-produccion.js?v=20261121-prod11"')==1
+          assert s.count('src="assets/js/app-produccion.js?v=20261121-prod11"')==1
           Path('/tmp/release_index.html').write_text(s,'utf-8')
           Path('/tmp/redirect_violeta.html').write_text(
             '<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Ruta H&D2 · Producción</title>'
@@ -84,6 +83,7 @@ jobs:
           get /htdocs/index.html -o /tmp/root_before.html
           get /htdocs/violeta-demo/index.html -o /tmp/violet_before.html
           get /htdocs/api-v2/.htaccess -o /tmp/guard_before
+          get /htdocs/hd-branding/logo-hd-site.png -o /tmp/logo_prod
           mirror /htdocs/assets/js /tmp/old_root_js
           mirror /htdocs/assets/css /tmp/old_root_css
           mirror /htdocs/violeta-demo/assets/js /tmp/old_violet_js
@@ -92,6 +92,7 @@ jobs:
           EOF
           lftp -f /tmp/read.lftp >/dev/null
           grep -Fq 'Require all denied' /tmp/guard_before
+          test "$(head -c 8 /tmp/logo_prod | od -An -tx1 | tr -d ' \n')" = 89504e470d0a1a0a
           python3 - <<'PY'
           from pathlib import Path
           names=['administracion','compras','ventas','proveedores','clientes','productos','bodega','cuentas_corrientes']
@@ -149,7 +150,8 @@ jobs:
           cmp -s /tmp/front/assets/js/accesos.js /tmp/accesos_after.js
           cmp -s /tmp/front/assets/css/produccion.css /tmp/css_after.css
           cmp -s /tmp/guard_before /tmp/guard_after
-          echo 'Frontend definitivo, login exclusivo y panel sin demostración publicados. Backend no habilitado, MySQL sin tocar.' >> "$GITHUB_STEP_SUMMARY"
+          echo "Frontend productivo SHA: $FRONTEND_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Login JWT exclusivo, ocho menús y logotipo PNG oficial publicados por FTPS; backend y MariaDB intactos.' >> "$GITHUB_STEP_SUMMARY"
       - name: Restaurar archivos originales ante cualquier fallo
         if: failure()
         run: |

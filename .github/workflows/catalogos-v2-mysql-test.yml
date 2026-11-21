@@ -94,3 +94,5 @@ jobs:
           set -o pipefail
           php tests/integracion_catalogos_api.php | tee /tmp/resultado_catalogos_api.log
           grep -Fq 'OK: login real' /tmp/resultado_catalogos_api.log
+          php tests/integracion_productos_crud.php | tee /tmp/resultado_productos_crud.log
+          grep -Fq 'OK: productos CRUD Laravel + MySQL' /tmp/resultado_productos_crud.log

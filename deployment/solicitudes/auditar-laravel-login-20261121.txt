@@ -9,3 +9,4 @@ post_dml_admin=2026-11-21-confirmacion_usuario
 verificacion_perfil_anonimo_401=2026-11-21
 auditoria_jwt_rutas=2026-11-21-sin-escrituras
 audit_laravel_smtp_post_install=2026-11-21
+verificar_config_efectiva_mail_laravel=2026-11-21

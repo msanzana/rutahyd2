@@ -36,7 +36,11 @@ jobs:
           assert h.count('data-catalog-key=')==10 and h.count('data-admin-catalog=')==10
           assert 'id="loginDemo"' in h and 'modulos-oficiales.js' in h and 'menu-oficial.css' in h
           assert h.count('assets/img/prueba-rutahd2.webp')==3
-          h=h.replace('assets/img/prueba-rutahd2.webp','/assets/img/prueba-rutahd2.webp')
+          import base64
+          logo=Path('/tmp/front/assets/img/prueba-rutahd2.webp').read_bytes()
+          assert 10000<len(logo)<150000 and logo[:4]==b'RIFF' and logo[8:12]==b'WEBP'
+          image='data:image/webp;base64,'+base64.b64encode(logo).decode('ascii')
+          h=h.replace('assets/img/prueba-rutahd2.webp',image)
           h=h.replace('</head>','  <meta name="robots" content="noindex,nofollow">\n</head>')
           Path('/tmp/preview.html').write_text(h,'utf-8')
           PY
@@ -77,7 +81,6 @@ jobs:
           set ftp:ssl-protect-data yes
           set ssl:verify-certificate yes
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
-          mkdir -p "$PREVIEW_PATH"
           mirror -R --verbose=0 /tmp/front/assets/js "$PREVIEW_PATH/assets/js"
           mirror -R --verbose=0 /tmp/front/assets/css "$PREVIEW_PATH/assets/css"
           put /tmp/preview.html -o "$PREVIEW_PATH/index.html"

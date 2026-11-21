@@ -1,0 +1,146 @@
+name: Publicar vista previa Usuarios V2 y preparar backend privado (sin abrir API)
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/solicitudes/stage-usuarios-seguro-v2-20261121.txt']
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      PREVIEW_PATH: /htdocs/usuarios-v2-preview-20261121
+      ROUTES_BASE_SHA: d07dc4a7d3e79d110818b14cfd873c364a20d230
+    steps:
+      - name: Obtener dos versiones probadas y fijar SHA
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch feature/catalogos-api-productos-v2-20261120 https://github.com/msanzana/rutahyd2.git /tmp/backend
+          git clone --depth 1 --branch feature/catalogos-api-adapter-v2-20261120 https://github.com/msanzana/rutahyd2front.git /tmp/front
+          test "$(git -C /tmp/backend rev-parse HEAD)" = 'f6d89008a4b6265f87e3a33f1e5a0b5e3e4c42d1'
+          test "$(git -C /tmp/front rev-parse HEAD)" = '6470938e9a51c549962e0aab0bedf2f403a08c43'
+          for file in /tmp/backend/app/Http/Controllers/RecuperacionContrasenaControlador.php /tmp/backend/app/Http/Controllers/UsuariosControlador.php /tmp/backend/routes/api.php /tmp/backend/config/mail.php; do php -l "$file"; done
+          for file in /tmp/front/assets/js/*.js; do node --check "$file"; done
+          test "$(grep -o 'data-admin-catalog=' /tmp/front/index.html | wc -l)" -eq 10
+          test "$(grep -o 'data-catalog-key=' /tmp/front/index.html | wc -l)" -eq 10
+          grep -Fq 'id="navUsuarios"' /tmp/front/index.html
+          test -f /tmp/backend/database/espanol/18_recuperacion_contrasenas.sql
+          echo 'Orígenes completos y versión de código verificadas.'
+      - name: Instalar cliente FTPS validado
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Preflight: comprobar bloqueo Laravel y que el menú publicado no cambia
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_before
+          get /htdocs/api-v2/routes/api.php -o /tmp/routes_before
+          get /htdocs/index.html -o /tmp/public_root_before
+          get /htdocs/violeta-demo/index.html -o /tmp/public_violet_before
+          bye
+          EOF
+          lftp -f /tmp/read.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/guard_before
+          test "$(git hash-object /tmp/routes_before)" = "$ROUTES_BASE_SHA"
+          python3 - <<'PY'
+          from pathlib import Path
+          for location in ('root','violet'):
+              html=Path('/tmp/public_'+location+'_before').read_text('utf-8')
+              assert html.count('data-admin-catalog=')==10
+              assert html.count('data-catalog-key=')==10
+              seven=['inicio','pedidos','clientes','productos','inventario','informes','administracion']
+              positions=[html.index('data-nav="'+x+'"') for x in seven]
+              assert positions==sorted(positions)
+          print('OK: menú productivo íntegro; backend sigue protegido.')
+          PY
+      - name: Preparar HTML de vista previa sin indexación
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          original=Path('/tmp/front/index.html').read_text('utf-8')
+          assert original.count('</head>')==1
+          output=original.replace('</head>','  <meta name="robots" content="noindex,nofollow">\n</head>')
+          Path('/tmp/preview_index.html').write_text(output,'utf-8')
+          PY
+      - name: Publicar SOLO vista previa y archivos dentro de Laravel protegido
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/write.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          mkdir -p "$PREVIEW_PATH"
+          mirror -R --verbose=0 /tmp/front/assets "$PREVIEW_PATH/assets"
+          put /tmp/preview_index.html -o "$PREVIEW_PATH/index.html"
+          put /tmp/backend/app/Http/Controllers/RecuperacionContrasenaControlador.php -o /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php
+          put /tmp/backend/app/Http/Controllers/UsuariosControlador.php -o /htdocs/api-v2/app/Http/Controllers/UsuariosControlador.php
+          put /tmp/backend/config/mail.php -o /htdocs/api-v2/config/mail.php
+          put /tmp/backend/database/espanol/18_recuperacion_contrasenas.sql -o /htdocs/api-v2/database/espanol/18_recuperacion_contrasenas.sql
+          put /tmp/backend/routes/api.php -o /htdocs/api-v2/routes/api.php
+          bye
+          EOF
+          lftp -f /tmp/write.lftp >/dev/null
+      - name: Leer de nuevo y verificar por bytes, confirmar producción intacta
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_after
+          get /htdocs/api-v2/routes/api.php -o /tmp/routes_after
+          get /htdocs/api-v2/config/mail.php -o /tmp/mail_after
+          get /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php -o /tmp/recovery_after
+          get /htdocs/api-v2/app/Http/Controllers/UsuariosControlador.php -o /tmp/users_after
+          get /htdocs/api-v2/database/espanol/18_recuperacion_contrasenas.sql -o /tmp/sql18_after
+          get "$PREVIEW_PATH/index.html" -o /tmp/preview_after
+          get "$PREVIEW_PATH/assets/js/usuarios.js" -o /tmp/users_js_after
+          get "$PREVIEW_PATH/assets/js/recuperacion.js" -o /tmp/recovery_js_after
+          get /htdocs/index.html -o /tmp/public_root_after
+          get /htdocs/violeta-demo/index.html -o /tmp/public_violet_after
+          bye
+          EOF
+          lftp -f /tmp/verify.lftp >/dev/null
+          cmp -s /tmp/guard_before /tmp/guard_after
+          cmp -s /tmp/public_root_before /tmp/public_root_after
+          cmp -s /tmp/public_violet_before /tmp/public_violet_after
+          cmp -s /tmp/backend/routes/api.php /tmp/routes_after
+          cmp -s /tmp/backend/config/mail.php /tmp/mail_after
+          cmp -s /tmp/backend/app/Http/Controllers/RecuperacionContrasenaControlador.php /tmp/recovery_after
+          cmp -s /tmp/backend/app/Http/Controllers/UsuariosControlador.php /tmp/users_after
+          cmp -s /tmp/backend/database/espanol/18_recuperacion_contrasenas.sql /tmp/sql18_after
+          cmp -s /tmp/preview_index.html /tmp/preview_after
+          cmp -s /tmp/front/assets/js/usuarios.js /tmp/users_js_after
+          cmp -s /tmp/front/assets/js/recuperacion.js /tmp/recovery_js_after
+          echo 'Staging protegido verificado. Menú público, API gateway, .env, credenciales y MySQL intactos.' | tee -a "$GITHUB_STEP_SUMMARY"
+          echo 'Vista previa: https://rutahyd2.free.nf/usuarios-v2-preview-20261121/' >> "$GITHUB_STEP_SUMMARY"

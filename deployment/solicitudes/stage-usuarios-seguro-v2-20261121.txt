@@ -4,3 +4,4 @@ laravel=privado_bloqueado
 mysql=sin_escrituras
 api=sin_activar
 intento=2_sintaxis_corregida
+intento=3_solo_recursos_usados

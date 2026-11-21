@@ -8,3 +8,7 @@ respaldo_frontend=temporal_ftps
 rollback=si
 sin_sql=true
 jwt_activacion=false
+
+revision=2_login_dos_columnas
+sha_front=c284c573d5a176dcacbc2f50bdb6ea2e33c24ede
+ci_final=44886964422_success

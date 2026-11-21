@@ -10,7 +10,9 @@ use App\Http\Controllers\CatalogoComercialControlador;
 use App\Http\Controllers\ClasificacionProductoControlador;
 use App\Http\Controllers\PerfilesCatalogosControlador;
 
+// El frontend pregunta /api/v1/estado; la ruta antigua /api/estado sigue disponible.
 Route::get('/estado',fn()=>response()->json(['servicio'=>'RutaH&D2 API','estado'=>'disponible','version'=>'v2-es']));
+Route::get('/v1/estado',fn()=>response()->json(['servicio'=>'Ruta H&D2 API','estado'=>'disponible','version'=>'v2-es']))->middleware('throttle:30,1');
 Route::post('/v1/sesion',[SesionControlador::class,'iniciar'])->middleware('throttle:5,1');
 
 Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {

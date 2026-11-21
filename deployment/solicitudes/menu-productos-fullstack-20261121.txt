@@ -6,3 +6,5 @@ productos_crud=true
 catalogos=10
 api_gate_remains_closed=true
 no_mysql_writes=true
+
+retry=menu-check-2

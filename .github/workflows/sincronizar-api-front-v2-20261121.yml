@@ -1,0 +1,122 @@
+name: Sincronizar gateway Laravel y cliente de frontend V2
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/solicitudes/sincronizar-api-front-v2-20261121.txt']
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 7149ed3deeeff47c1cffa64c15f08fc09605918e
+      - name: Traer frontend exacto y validar los archivos
+        run: |
+          test "$(git rev-parse HEAD)" = "7149ed3deeeff47c1cffa64c15f08fc09605918e"
+          git clone --depth 1 --branch feature/catalogos-api-adapter-v2-20261120 https://github.com/msanzana/rutahyd2front.git /tmp/front
+          test "$(git -C /tmp/front rev-parse HEAD)" = "da6f4058d93ceea2cbc748184d46e515252a7945"
+          php -l routes/api.php
+          php -l deployment/infinityfree/gateway-publico/index.php
+          node --check /tmp/front/assets/js/catalogos-api.js
+          node --check /tmp/front/assets/js/admin-remoto.js
+          grep -Fq "SCRIPT_NAME" deployment/infinityfree/gateway-publico/index.php
+          grep -Fq "'/v1/estado'" routes/api.php
+          grep -Fq 'function status()' /tmp/front/assets/js/catalogos-api.js
+      - name: Preparar conexión FTPS
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Verificar guardias y API desactivada antes de cambios
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/ftps.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_backend
+          get /htdocs/api/.htaccess -o /tmp/guard_gateway
+          get /htdocs/api/index.php -o /tmp/gateway_old
+          get /htdocs/index.html -o /tmp/index_old
+          cls -1 -a /htdocs/api-v2/storage/app/private > /tmp/markers
+          bye
+          EOF
+          lftp -f /tmp/ftps.lftp
+          grep -Fq 'Require all denied' /tmp/guard_backend
+          grep -Fq 'rutahd2_api_ready' /tmp/gateway_old
+          grep -Fq 'RewriteRule' /tmp/guard_gateway
+          if grep -Fxq 'rutahd2_api_ready' /tmp/markers; then echo "::error::API ya activa, detener"; exit 1; fi
+      - name: Publicar cambios de conexión sin secretos
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/ftps.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put routes/api.php -o /htdocs/api-v2/routes/api.php
+          put deployment/infinityfree/gateway-publico/index.php -o /htdocs/api/index.php
+          put /tmp/front/assets/js/catalogos-api.js -o /htdocs/assets/js/catalogos-api.js
+          put /tmp/front/assets/js/admin-remoto.js -o /htdocs/assets/js/admin-remoto.js
+          put /tmp/front/assets/js/catalogos-api.js -o /htdocs/violeta-demo/assets/js/catalogos-api.js
+          put /tmp/front/assets/js/admin-remoto.js -o /htdocs/violeta-demo/assets/js/admin-remoto.js
+          put /tmp/front/assets/js/catalogos-api.js -o /htdocs/catalogos-v2-preview/assets/js/catalogos-api.js
+          put /tmp/front/assets/js/admin-remoto.js -o /htdocs/catalogos-v2-preview/assets/js/admin-remoto.js
+          bye
+          EOF
+          lftp -f /tmp/ftps.lftp
+      - name: Comprobar archivos remotos byte por byte y guardias intactas
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/ftps.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_backend_after
+          get /htdocs/api/.htaccess -o /tmp/guard_gateway_after
+          get /htdocs/index.html -o /tmp/index_after
+          get /htdocs/api/index.php -o /tmp/gateway_new
+          get /htdocs/api-v2/routes/api.php -o /tmp/routes_new
+          get /htdocs/assets/js/catalogos-api.js -o /tmp/catalogos_root
+          get /htdocs/assets/js/admin-remoto.js -o /tmp/admin_root
+          get /htdocs/violeta-demo/assets/js/catalogos-api.js -o /tmp/catalogos_violet
+          get /htdocs/violeta-demo/assets/js/admin-remoto.js -o /tmp/admin_violet
+          get /htdocs/catalogos-v2-preview/assets/js/catalogos-api.js -o /tmp/catalogos_preview
+          get /htdocs/catalogos-v2-preview/assets/js/admin-remoto.js -o /tmp/admin_preview
+          bye
+          EOF
+          lftp -f /tmp/ftps.lftp
+          cmp -s /tmp/guard_backend /tmp/guard_backend_after
+          cmp -s /tmp/guard_gateway /tmp/guard_gateway_after
+          cmp -s /tmp/index_old /tmp/index_after
+          cmp -s deployment/infinityfree/gateway-publico/index.php /tmp/gateway_new
+          cmp -s routes/api.php /tmp/routes_new
+          for loc in root violet preview; do
+            cmp -s /tmp/front/assets/js/catalogos-api.js "/tmp/catalogos_$loc"
+            cmp -s /tmp/front/assets/js/admin-remoto.js "/tmp/admin_$loc"
+          done
+          echo 'OK: Backend y cliente JWT alineados, mismos archivos en tres frontends.'
+          echo 'API sigue cerrada, no se tocaron secretos, base de datos ni menú.'

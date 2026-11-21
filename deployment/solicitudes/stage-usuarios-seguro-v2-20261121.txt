@@ -3,3 +3,4 @@ vista_previa=solo_nueva_ruta
 laravel=privado_bloqueado
 mysql=sin_escrituras
 api=sin_activar
+intento=2_sintaxis_corregida

@@ -20,7 +20,7 @@ jobs:
       - name: Obtener frontend probado
         run: |
           git clone --depth 1 --branch feature/catalogos-api-adapter-v2-20261120 https://github.com/msanzana/rutahyd2front.git /tmp/front
-          test "$(git -C /tmp/front rev-parse HEAD)" = "5b0c96f688046043f47a832a4ac32d1e185af5b5"
+          test "$(git -C /tmp/front rev-parse HEAD)" = "1181eec0e4991f9255332957ab8b133f35f90364"
           node --check /tmp/front/assets/js/catalogos-api.js
           node --check /tmp/front/assets/js/admin-remoto.js
           node --check /tmp/front/assets/js/productos-remotos.js

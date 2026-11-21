@@ -1,0 +1,5 @@
+STAGE_USUARIOS_SEGURO_20261121
+vista_previa=solo_nueva_ruta
+laravel=privado_bloqueado
+mysql=sin_escrituras
+api=sin_activar

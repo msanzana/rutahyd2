@@ -3,3 +3,4 @@ fecha=2026-11-20
 sin_autenticar=true
 solo_get=true
 no_mysql=true
+revalidacion=20261121-produccion-main-png-jwt

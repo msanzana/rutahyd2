@@ -1,0 +1,5 @@
+STAGING_UI_MENU_PLANO_LOGIN
+fecha=2026-11-21
+frontend_sha=37087a7a04331a407cc8558ae980310a956d7f5e
+sin_cambios_en_main_publico=true
+sin_sql_ni_credenciales=true

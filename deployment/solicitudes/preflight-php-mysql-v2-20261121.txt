@@ -3,3 +3,5 @@ fecha=2026-11-21
 sin_escrituras_sql=true
 sonda_efimera=true
 solicitud=continuacion_2026-11-21_revision_2
+
+reverificacion=2026-11-21_administrador_bootstrap

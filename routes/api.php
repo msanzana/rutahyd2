@@ -8,6 +8,7 @@ use App\Http\Controllers\NotaVentaControlador;
 use App\Http\Controllers\InventarioControlador;
 use App\Http\Controllers\CatalogoComercialControlador;
 use App\Http\Controllers\ClasificacionProductoControlador;
+use App\Http\Controllers\ProductoComercialControlador;
 use App\Http\Controllers\PerfilesCatalogosControlador;
 
 // El frontend pregunta /api/v1/estado; la ruta antigua /api/estado sigue disponible.
@@ -20,6 +21,13 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::post('/catalogos/{catalogo}',[CatalogoComercialControlador::class,'crear']);
     Route::put('/catalogos/{catalogo}/{id}',[CatalogoComercialControlador::class,'actualizar'])->whereNumber('id');
     Route::delete('/catalogos/{catalogo}/{id}',[CatalogoComercialControlador::class,'eliminar'])->whereNumber('id');
+    // CRUD de productos reales. Precio y envase residen en presentaciones_productos,
+    // stock se gestiona exclusivamente en Inventario; DELETE es baja lógica.
+    Route::get('/productos',[ProductoComercialControlador::class,'listar'])->middleware('permiso.rutahd:productos.gestionar');
+    Route::post('/productos',[ProductoComercialControlador::class,'crear'])->middleware('permiso.rutahd:productos.gestionar');
+    Route::get('/productos/{id}',[ProductoComercialControlador::class,'ver'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
+    Route::put('/productos/{id}',[ProductoComercialControlador::class,'actualizar'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
+    Route::delete('/productos/{id}',[ProductoComercialControlador::class,'desactivar'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
     Route::get('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'ver'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
     Route::patch('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'guardar'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
     Route::get('/perfiles/catalogos',[PerfilesCatalogosControlador::class,'listar']);

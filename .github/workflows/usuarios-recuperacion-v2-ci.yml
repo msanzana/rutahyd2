@@ -40,7 +40,7 @@ jobs:
           cat >/tmp/check.sql <<'SQL'
           USE rutahyd2_es_local;
           SELECT IF((SELECT COUNT(*) FROM information_schema.tables
-              WHERE table_schema=DATABASE() AND table_type='BASE TABLE')=45,1,0)
+              WHERE table_schema=DATABASE() AND table_type='BASE TABLE')=46,1,0)
               INTO @tablas;
           SELECT IF((SELECT COUNT(*) FROM information_schema.columns
               WHERE table_schema=DATABASE() AND table_name='productos'

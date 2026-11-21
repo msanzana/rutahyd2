@@ -52,3 +52,16 @@ No ejecutar cambios de esquema, habilitar el gateway o cargar credenciales hasta
 4. Crear administrador inicial con contraseña nueva por procedimiento administrativo privado. La última sonda comprobó cero usuarios.
 5. Configurar SMTP en entorno protegido y verificar entrega y recuperación real.
 6. Verificar JWT real, permisos, CRUD y reversión antes de crear marcador rutahd2_api_ready. No se habilitó la API.
+
+## Revisión gráfica y de autenticación — 21-11-2026
+- Frontend corregido en feature/ui-menu-plano-login-20261121, PR #3 fusionado a rama de integración. Subítems alineados sin sangrías ni encabezados internos: Listado y 10 clasificaciones de Productos.
+- Nuevo login modal desde cabecera e indicador de estado de API. Si el gateway está deshabilitado no se envían credenciales; la sesión JWT se comparte con catálogos y permisos del frontend.
+- CSS responsivo adicional para sidebar con scroll interno, topbar, texto envolvente, formularios y avisos.
+- CI frontend: 29 pruebas pasadas, 1 omitida: https://github.com/msanzana/rutahyd2front/actions/runs/44882540313
+- Vista previa verificada por FTPS: https://rutahyd2.free.nf/ui-plana-login-v2-20261121/ ; https://github.com/msanzana/rutahyd2/actions/runs/44882632359
+- Publicación a portada y violeta-demo con snapshot y cotejo por bytes exitosa: https://github.com/msanzana/rutahyd2/actions/runs/44883250734
+- Primer despliegue público revirtió correctamente debido a un error de expansión de variable Bash en la verificación, corregido para ejecución exitosa.
+- Browser real confirma login e indicador API no habilitada en portada y violeta-demo; Productos presenta listado + 10 catálogos planos en portada.
+- Persisten bloqueos: base productiva sin administrador verificado, API HTTP 503 no_habilitada, SMTP/recuperación sin prueba real, SQL18 sin ejecutar y respaldo externo no certificado.
+- Menú principal oficial no cotejado con la imagen histórica de otro chat, no accesible como archivo en esta sesión. Conservar siete padres actualmente publicados hasta recibir imagen original y aplicar nombres exactos.
+- Clientes/Pedidos siguen con localStorage de demo; no afirmar fullstack hasta completar su API.

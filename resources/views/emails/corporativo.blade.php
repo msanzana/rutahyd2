@@ -29,7 +29,7 @@
           <tr>
             <td width="76" valign="middle" style="width:76px;">
               <a href="{{ $sitioUrl }}" style="text-decoration:none;">
-                <img class="correo-logo" src="https://raw.githubusercontent.com/msanzana/rutahyd2front/main/assets/img/logo-hd-transparente.webp" alt="Logo oficial H&amp;D" width="68" height="68" style="display:block;width:68px;height:68px;object-fit:contain;border:0;border-radius:12px;background:#ffffff;">
+                <img class="correo-logo" src="{{ $message->embed(resource_path('mail/logo-hd-email.png')) }}" alt="H&amp;D" width="68" height="68" style="display:block;width:68px;height:68px;object-fit:contain;border:0;border-radius:12px;background:#ffffff;">
               </a>
             </td>
             <td valign="middle" style="padding-left:14px;">

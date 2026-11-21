@@ -10,11 +10,15 @@ use App\Http\Controllers\CatalogoComercialControlador;
 use App\Http\Controllers\ClasificacionProductoControlador;
 use App\Http\Controllers\ProductoComercialControlador;
 use App\Http\Controllers\PerfilesCatalogosControlador;
+use App\Http\Controllers\UsuariosControlador;
+use App\Http\Controllers\RecuperacionContrasenaControlador;
 
 // El frontend pregunta /api/v1/estado; la ruta antigua /api/estado sigue disponible.
 Route::get('/estado',fn()=>response()->json(['servicio'=>'RutaH&D2 API','estado'=>'disponible','version'=>'v2-es']));
 Route::get('/v1/estado',fn()=>response()->json(['servicio'=>'Ruta H&D2 API','estado'=>'disponible','version'=>'v2-es']))->middleware('throttle:30,1');
 Route::post('/v1/sesion',[SesionControlador::class,'iniciar'])->middleware('throttle:5,1');
+Route::post('/v1/recuperacion/solicitar',[RecuperacionContrasenaControlador::class,'solicitar'])->middleware('throttle:5,1');
+Route::post('/v1/recuperacion/restablecer',[RecuperacionContrasenaControlador::class,'restablecer'])->middleware('throttle:5,1');
 
 Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::get('/catalogos/{catalogo}',[CatalogoComercialControlador::class,'listar']);
@@ -32,6 +36,10 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::patch('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'guardar'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
     Route::get('/perfiles/catalogos',[PerfilesCatalogosControlador::class,'listar']);
     Route::get('/perfiles/usuarios',[PerfilesCatalogosControlador::class,'usuarios']);
+    Route::get('/usuarios',[UsuariosControlador::class,'index']);
+    Route::post('/usuarios',[UsuariosControlador::class,'crear']);
+    Route::put('/usuarios/{id}',[UsuariosControlador::class,'actualizar'])->whereNumber('id');
+    Route::delete('/usuarios/{id}',[UsuariosControlador::class,'eliminar'])->whereNumber('id');
     Route::put('/perfiles/usuarios/{id}/rol',[PerfilesCatalogosControlador::class,'asignarPerfil'])->whereNumber('id');
     Route::put('/perfiles/{id}/catalogos',[PerfilesCatalogosControlador::class,'actualizar'])->whereNumber('id');
     Route::get('/perfil',[SesionControlador::class,'perfil']);

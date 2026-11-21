@@ -20,7 +20,7 @@ jobs:
       - name: Obtener frontend probado
         run: |
           git clone --depth 1 --branch feature/catalogos-api-adapter-v2-20261120 https://github.com/msanzana/rutahyd2front.git /tmp/front
-          test "$(git -C /tmp/front rev-parse HEAD)" = "1f1e1eed96e6ae7aeaefffb1db0943f0b2164b0d"
+          test "$(git -C /tmp/front rev-parse HEAD)" = "e751ad27673f52f754aa73adb3715e3b2601b06e"
           node --check /tmp/front/assets/js/catalogos-api.js
           node --check /tmp/front/assets/js/admin-remoto.js
           grep -Fq 'Consultas reales del servidor' /tmp/front/assets/js/admin-remoto.js
@@ -56,12 +56,12 @@ jobs:
           for loc in ('root','violet','preview'):
             p=Path('/tmp/orig_'+loc+'.html')
             s=p.read_text(encoding='utf-8')
-            assert s.count('src="assets/js/catalogos-api.js"')==1
-            assert s.count('src="assets/js/admin-remoto.js"')==1
+            assert s.count('src="assets/js/catalogos-api.js?v=20261121-2"')==1
+            assert s.count('src="assets/js/admin-remoto.js?v=20261121-2"')==1
             assert len(re.findall(r'<(?:button|div)\b[^>]*class="(?:nav-link|nav-group)',s))>=7
-            updated=s.replace('src="assets/js/catalogos-api.js"','src="assets/js/catalogos-api.js?v=20261121-2"')
-            updated=updated.replace('src="assets/js/admin-remoto.js"','src="assets/js/admin-remoto.js?v=20261121-2"')
-            assert updated.replace('?v=20261121-2','')==s
+            updated=s.replace('src="assets/js/catalogos-api.js?v=20261121-2"','src="assets/js/catalogos-api.js?v=20261121-3"')
+            updated=updated.replace('src="assets/js/admin-remoto.js?v=20261121-2"','src="assets/js/admin-remoto.js?v=20261121-3"')
+            assert updated.replace('?v=20261121-3','?v=20261121-2')==s
             Path('/tmp/new_'+loc+'.html').write_text(updated,encoding='utf-8')
           PY
       - name: Publicar JS y HTML con menú intacto

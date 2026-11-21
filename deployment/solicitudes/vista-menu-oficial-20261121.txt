@@ -1,0 +1,6 @@
+VISTA_MENU_OFICIAL_Y_LOGIN_V2
+fecha=2026-11-21
+frontend_sha=0a1d84846c9f594e3bb917a5a480dcbd50413ccd
+ocho_padres=administracion,compras,ventas,proveedores,clientes,productos,bodega,cuentas_corrientes
+sin_escrituras_sql=true
+solo_vista_previa=true

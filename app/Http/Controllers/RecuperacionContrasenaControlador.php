@@ -57,6 +57,8 @@ final class RecuperacionContrasenaControlador extends Controller
         $datos = Validator::make($request->all(), [
             'correo_electronico' => ['required', 'email', 'max:190'],
         ])->validate();
+        // Si SMTP no está disponible, la respuesta es idéntica para todas las cuentas.
+        abort_unless(config('mail.default') === 'smtp', 503, 'Servicio de recuperación no disponible');
         $correo = mb_strtolower(trim($datos['correo_electronico']));
         $clave = 'recuperar:' . hash('sha256', $correo . '|' . $request->ip());
         // Límite por combinación cuenta/IP además del throttle de la ruta.

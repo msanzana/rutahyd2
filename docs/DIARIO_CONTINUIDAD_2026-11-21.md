@@ -90,3 +90,10 @@ Portada y violeta-demo verificadas mediante navegador externo: al abrir se ve lo
 - Verificación en navegador externo de la portada tras segundo despliegue: no existe botón ni enlace de demostración; login ancho 960px y dos columnas a 1440px, logo 350x350, sin solapes; `/violeta-demo` redirige a la portada principal.
 - Persisten bloqueadores productivos NO solventados: gateway `/api/v1/estado` responde HTTP 503 `no_habilitada`, última sonda SQL constató cero usuarios, no hay respaldo de MariaDB fuera del hosting comprobado, migración de recuperación no ejecutada y SMTP no certificado. No se crearon cuentas, ni se alteró SQL, ni se insertaron contraseñas en el código.
 - **Importante:** que el frontend tenga adaptadores Laravel y que pase pruebas con API simulada NO implica que ya funcione autenticación JWT contra la base productiva. El login productivo está correctamente bloqueado hasta una activación autorizada y verificada.
+
+### Ajuste final de recuperación del sitio productivo
+- Se corrigió el retorno desde el formulario de recuperación al login obligatorio sin dejar una pantalla vacía.
+- CI final frontend aprobada: https://github.com/msanzana/rutahyd2front/actions/runs/44887294926
+- Publicación final productiva con respaldo y comparación de archivos aprobada: https://github.com/msanzana/rutahyd2/actions/runs/44887370611
+- Verificación real en navegador: login sin demo, abrir Recuperar cuenta, cancelar y regresar a Iniciar sesión; API sigue en HTTP 503 y NO se enviaron datos.
+- No se modificaron usuarios ni esquema MariaDB. Activación real de JWT sigue bloqueada por falta de administrador inicial respaldado y pruebas de correo.

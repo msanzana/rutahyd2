@@ -97,3 +97,13 @@ Portada y violeta-demo verificadas mediante navegador externo: al abrir se ve lo
 - Publicación final productiva con respaldo y comparación de archivos aprobada: https://github.com/msanzana/rutahyd2/actions/runs/44887370611
 - Verificación real en navegador: login sin demo, abrir Recuperar cuenta, cancelar y regresar a Iniciar sesión; API sigue en HTTP 503 y NO se enviaron datos.
 - No se modificaron usuarios ni esquema MariaDB. Activación real de JWT sigue bloqueada por falta de administrador inicial respaldado y pruebas de correo.
+
+## Alta de administrador solicitada — 21-11-2026 (estado verificable)
+- Se solicitó el primer administrador con nombre completo, RUT validado y correo indicado por el titular. Evitar publicar esos datos personales o contraseñas en archivos GitHub.
+- Diagnóstico sobre **MariaDB Ruta H&D correcta** por sonda PHP de solo lectura, workflow https://github.com/msanzana/rutahyd2/actions/runs/44888264970: PHP/PDO conectan, 45 tablas, 5 roles, 0 usuarios, librería JWT disponible y Argon2id habilitado. Sonda eliminada correctamente.
+- BlazeSQL disponible en este chat está conectado a una base DTE SII diferente y sus consultas son de solo lectura. No permite crear usuarios en Ruta H&D.
+- Preparados en rama `feature/alta-admin-rut-segura-20261121` (PR #6 integrada a rama de backend) los archivos `database/espanol/19_rut_usuarios.sql`, `app/Support/RutChileno.php`, modelo Usuario con RUT y CLI `rutahd:crear-administrador` con `--rut` y `--nombre`.
+- El CLI exige SMTP real y las tablas de recuperación/token. Genera contraseña inicial aleatoria inaccesible y **envía enlace de un solo uso para definir la contraseña**; no envía contraseñas en texto plano, rollback si falla el correo.
+- Pruebas de sintaxis y validador RUT aprobadas: https://github.com/msanzana/rutahyd2/actions/runs/44888377005
+- **NO se ha creado aún la cuenta ni enviado ningún correo**. No se ejecutó SQL19, ni se importó SQL18 ni se activó la API. La cuenta no puede anunciarse como existente hasta contar con acceso de escritura seguro a `if0_43460400_rutahyd2_es` y comprobar SMTP y respaldo.
+- Orden necesario: respaldo externo validado -> migración si hace falta -> configurar SMTP -> alta privada del administrador -> confirmar recepción/enlace e inicio JWT -> activar marcador `rutahd2_api_ready` -> verificar CRUD real con permisos.

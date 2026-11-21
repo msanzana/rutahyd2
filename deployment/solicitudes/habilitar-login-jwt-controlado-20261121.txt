@@ -1,0 +1,8 @@
+RUTAHD2_HABILITAR_JWT_PRODUCCION
+fecha=2026-11-21
+solicitado_por_titular=continuar_activacion
+modo=produccion_sin_demo
+checks=preflight_privado,frontend_oficial,jwt_anonimo_401,api_estado_200,rollback_si_falla
+mysql_modificaciones=NO
+firecrawl=NO
+contraseñas_en_repositorio=NO

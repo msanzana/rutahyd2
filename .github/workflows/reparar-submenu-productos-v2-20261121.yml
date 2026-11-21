@@ -50,8 +50,8 @@ jobs:
           lftp -f /tmp/read.lftp
           grep -Fq 'Require all denied' /tmp/guard_before
           for loc in root violet; do
-            test "$(git hash-object /tmp/app_$loc_before)" = "5a4877461532aa4e9596893291a4b74abeb9fe9d"
-            test "$(git hash-object /tmp/css_$loc_before)" = "7a0ba70e469ee75dbde6d477ca1d6cb59c9f7cd7"
+            test "$(git hash-object /tmp/app_${loc}_before)" = "5a4877461532aa4e9596893291a4b74abeb9fe9d"
+            test "$(git hash-object /tmp/css_${loc}_before)" = "7a0ba70e469ee75dbde6d477ca1d6cb59c9f7cd7"
           done
       - name: Reemplazar SOLO bloque de submenú de Productos conservando siete padres
         run: |
@@ -134,9 +134,9 @@ jobs:
           lftp -f /tmp/verify.lftp
           cmp -s /tmp/guard_before /tmp/guard_after
           for loc in root violet; do
-            cmp -s "/tmp/html_$loc_new" "/tmp/html_$loc_after"
-            cmp -s /tmp/front/assets/js/app.js "/tmp/app_$loc_after"
-            cmp -s /tmp/front/assets/css/app.css "/tmp/css_$loc_after"
+            cmp -s "/tmp/html_${loc}_new" "/tmp/html_${loc}_after"
+            cmp -s /tmp/front/assets/js/app.js "/tmp/app_${loc}_after"
+            cmp -s /tmp/front/assets/css/app.css "/tmp/css_${loc}_after"
           done
           echo 'OK: ProductSubnav organizado y apertura exclusiva, menú principal intacto.'
           echo 'Sin cambios en API, .env, marcadores, JWT, ni MySQL.'

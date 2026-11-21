@@ -1,0 +1,10 @@
+RUTAHD2_PUBLICAR_SITIO_DEFINITIVO
+sha_front=91fa95367958c98bbc011bea72c036b92a20b729
+ci_verificado=44886541134_success
+sin_demo=true
+solo_sitio_principal=true
+redireccion_version_antigua=true
+respaldo_frontend=temporal_ftps
+rollback=si
+sin_sql=true
+jwt_activacion=false

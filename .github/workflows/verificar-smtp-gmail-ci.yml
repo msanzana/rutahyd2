@@ -1,0 +1,23 @@
+name: Verificar preparación SMTP Gmail sin secretos
+on:
+  push:
+    branches:
+      - feature/smtp-gmail-seguro-20261121
+    paths:
+      - tools/actualizar_env_smtp_gmail.py
+      - tests/configurar_smtp_gmail_env_test.py
+      - .github/workflows/verificar-smtp-gmail-ci.yml
+permissions:
+  contents: read
+jobs:
+  verificar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m py_compile tools/actualizar_env_smtp_gmail.py tests/configurar_smtp_gmail_env_test.py
+      - run: python3 tests/configurar_smtp_gmail_env_test.py
+      - run: |
+          grep -Fq 'workflow_dispatch:' .github/workflows/configurar-smtp-gmail-20261121.yml
+          grep -Fq 'RUTAHD_GMAIL_APP_PASSWORD' .github/workflows/configurar-smtp-gmail-20261121.yml
+          grep -Fq "MAIL_HOST" tools/actualizar_env_smtp_gmail.py

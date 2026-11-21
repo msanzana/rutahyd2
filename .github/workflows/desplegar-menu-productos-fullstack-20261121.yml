@@ -1,0 +1,171 @@
+name: Aplicar menú oficial y CRUD fullstack de Productos protegido
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/solicitudes/menu-productos-fullstack-20261121.txt']
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Obtener frontend probado
+        run: |
+          git clone --depth 1 --branch feature/catalogos-api-adapter-v2-20261120 https://github.com/msanzana/rutahyd2front.git /tmp/front
+          test "$(git -C /tmp/front rev-parse HEAD)" = "5b0c96f688046043f47a832a4ac32d1e185af5b5"
+          node --check /tmp/front/assets/js/catalogos-api.js
+          node --check /tmp/front/assets/js/admin-remoto.js
+          node --check /tmp/front/assets/js/productos-remotos.js
+          node --check /tmp/front/assets/js/app.js
+          git clone --depth 1 --branch feature/catalogos-api-productos-v2-20261120 https://github.com/msanzana/rutahyd2.git /tmp/backend
+          test "$(git -C /tmp/backend rev-parse HEAD)" = "84330132449cadfa9fe89d8c07a597f464d1ef41"
+          php -l /tmp/backend/app/Http/Controllers/ProductoComercialControlador.php
+          php -l /tmp/backend/routes/api.php
+          grep -Fq 'Consultas reales del servidor' /tmp/front/assets/js/admin-remoto.js
+      - name: Instalar FTPS
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Obtener HTML exacto publicado y guardia Laravel
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/orig_root.html
+          get /htdocs/violeta-demo/index.html -o /tmp/orig_violet.html
+          get /htdocs/catalogos-v2-preview/index.html -o /tmp/orig_preview.html
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_old
+          get /htdocs/api-v2/routes/api.php -o /tmp/routes_old
+          get /htdocs/assets/js/app.js -o /tmp/app_old
+          bye
+          EOF
+          lftp -f /tmp/read.lftp
+          grep -Fq 'Require all denied' /tmp/guard_old
+          test "$(git hash-object /tmp/routes_old)" = "2a1c3a4013db8fbadc9e5b8b7d2384d8d231efef"
+          test "$(git hash-object /tmp/app_old)" = "8f9682c4d82ee834932bb70b2b2544d0cd546fb1"
+      - name: Conservar 7 padres, insertar clasificaciones en Administración y producto remoto
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          source=Path('/tmp/front/index.html').read_text(encoding='utf-8')
+          a=source.index('<div class="sidebar-heading">CLASIFICACIONES</div>')
+          b=source.index('<button type="button" data-nav="perfiles"',a)
+          menus=source[a:b]
+          assert menus.count('data-admin-catalog=')==10
+          parents=('inicio','pedidos','clientes','productos','inventario','informes','administracion')
+          for loc in ('root','violet','preview'):
+            old=Path('/tmp/orig_'+loc+'.html').read_text(encoding='utf-8')
+            indexes=[old.index('data-nav="'+name+'"') for name in parents]
+            assert indexes==sorted(indexes) and len(set(indexes))==7
+            assert 'id="adminSubnav"' in old and 'data-admin-catalog' not in old
+            profile=re.search(r'<button[^>]*data-nav="perfiles"[^>]*>',old)
+            assert profile
+            updated=old[:profile.start()]+menus+old[profile.start():]
+            assert 'productos-remotos.js' not in updated
+            assert 'src="assets/js/app.js"' in updated
+            updated=updated.replace('<script src="assets/js/app.js"',
+              '<script src="assets/js/productos-remotos.js?v=20261121-4" defer></script>\n  <script src="assets/js/app.js"')
+            for module in ('catalogos-api','admin-remoto','app'):
+              updated,n=re.subn(r'src="assets/js/'+module+r'\.js(?:\?v=[^"]+)?"',
+                'src="assets/js/'+module+'.js?v=20261121-4"',updated)
+              assert n==1,(loc,module,n)
+            assert updated.count('data-admin-catalog=')==10
+            assert updated.count('productos-remotos.js?v=20261121-4')==1
+            indexes=[updated.index('data-nav="'+name+'"') for name in parents]
+            assert indexes==sorted(indexes)
+            Path('/tmp/new_'+loc+'.html').write_text(updated,encoding='utf-8')
+          print('Menú oficial de siete padres preservado; diez clasificaciones añadidas.')
+          PY
+      - name: Publicar JS y HTML con menú intacto
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/write.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/backend/app/Http/Controllers/ProductoComercialControlador.php -o /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php
+          put /tmp/backend/routes/api.php -o /htdocs/api-v2/routes/api.php
+          put /tmp/front/assets/js/productos-remotos.js -o /htdocs/assets/js/productos-remotos.js
+          put /tmp/front/assets/js/app.js -o /htdocs/assets/js/app.js
+          put /tmp/front/assets/js/catalogos-api.js -o /htdocs/assets/js/catalogos-api.js
+          put /tmp/front/assets/js/admin-remoto.js -o /htdocs/assets/js/admin-remoto.js
+          put /tmp/front/assets/js/productos-remotos.js -o /htdocs/violeta-demo/assets/js/productos-remotos.js
+          put /tmp/front/assets/js/app.js -o /htdocs/violeta-demo/assets/js/app.js
+          put /tmp/front/assets/js/catalogos-api.js -o /htdocs/violeta-demo/assets/js/catalogos-api.js
+          put /tmp/front/assets/js/admin-remoto.js -o /htdocs/violeta-demo/assets/js/admin-remoto.js
+          put /tmp/front/assets/js/productos-remotos.js -o /htdocs/catalogos-v2-preview/assets/js/productos-remotos.js
+          put /tmp/front/assets/js/app.js -o /htdocs/catalogos-v2-preview/assets/js/app.js
+          put /tmp/front/assets/js/catalogos-api.js -o /htdocs/catalogos-v2-preview/assets/js/catalogos-api.js
+          put /tmp/front/assets/js/admin-remoto.js -o /htdocs/catalogos-v2-preview/assets/js/admin-remoto.js
+          put /tmp/new_root.html -o /htdocs/index.html
+          put /tmp/new_violet.html -o /htdocs/violeta-demo/index.html
+          put /tmp/new_preview.html -o /htdocs/catalogos-v2-preview/index.html
+          bye
+          EOF
+          lftp -f /tmp/write.lftp
+      - name: Verificar integridad y bloqueo privado
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/check_root.html
+          get /htdocs/violeta-demo/index.html -o /tmp/check_violet.html
+          get /htdocs/catalogos-v2-preview/index.html -o /tmp/check_preview.html
+          get /htdocs/api-v2/routes/api.php -o /tmp/check_routes
+          get /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php -o /tmp/check_controller
+          get /htdocs/assets/js/productos-remotos.js -o /tmp/check_productos_root
+          get /htdocs/assets/js/app.js -o /tmp/check_app_root
+          get /htdocs/assets/js/catalogos-api.js -o /tmp/check_api_root
+          get /htdocs/assets/js/admin-remoto.js -o /tmp/check_admin_root
+          get /htdocs/violeta-demo/assets/js/productos-remotos.js -o /tmp/check_productos_violet
+          get /htdocs/violeta-demo/assets/js/app.js -o /tmp/check_app_violet
+          get /htdocs/violeta-demo/assets/js/catalogos-api.js -o /tmp/check_api_violet
+          get /htdocs/violeta-demo/assets/js/admin-remoto.js -o /tmp/check_admin_violet
+          get /htdocs/catalogos-v2-preview/assets/js/productos-remotos.js -o /tmp/check_productos_preview
+          get /htdocs/catalogos-v2-preview/assets/js/app.js -o /tmp/check_app_preview
+          get /htdocs/catalogos-v2-preview/assets/js/catalogos-api.js -o /tmp/check_api_preview
+          get /htdocs/catalogos-v2-preview/assets/js/admin-remoto.js -o /tmp/check_admin_preview
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_new
+          bye
+          EOF
+          lftp -f /tmp/verify.lftp
+          for loc in root violet preview; do
+            cmp -s "/tmp/new_$loc.html" "/tmp/check_$loc.html"
+            cmp -s /tmp/front/assets/js/catalogos-api.js "/tmp/check_api_$loc"
+            cmp -s /tmp/front/assets/js/admin-remoto.js "/tmp/check_admin_$loc"
+            cmp -s /tmp/front/assets/js/productos-remotos.js "/tmp/check_productos_$loc"
+            cmp -s /tmp/front/assets/js/app.js "/tmp/check_app_$loc"
+          done
+          cmp -s /tmp/guard_old /tmp/guard_new
+          cmp -s /tmp/backend/routes/api.php /tmp/check_routes
+          cmp -s /tmp/backend/app/Http/Controllers/ProductoComercialControlador.php /tmp/check_controller
+          echo 'OK: menú oficial, diez catálogos y CRUD Productos verificados en tres frontends y backend privado.'
+          echo 'No se modificó la base de datos ni se habilitó la API.'

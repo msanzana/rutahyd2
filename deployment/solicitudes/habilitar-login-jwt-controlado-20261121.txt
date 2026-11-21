@@ -6,3 +6,4 @@ checks=preflight_privado,frontend_oficial,jwt_anonimo_401,api_estado_200,rollbac
 mysql_modificaciones=NO
 firecrawl=NO
 contraseñas_en_repositorio=NO
+reintento=20261121_verificacion_marcador_por_descarga_y_http_503

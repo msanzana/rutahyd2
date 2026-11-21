@@ -93,14 +93,9 @@ jobs:
           set ftp:ssl-protect-data yes
           set ssl:verify-certificate yes
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
-          mkdir -p "$PREVIEW_PATH"
-          mkdir -p "$PREVIEW_PATH/assets"
-          mkdir -p "$PREVIEW_PATH/assets/js"
-          mkdir -p "$PREVIEW_PATH/assets/css"
-          mkdir -p "$PREVIEW_PATH/assets/img"
           mirror -R --verbose=0 /tmp/front/assets/js "$PREVIEW_PATH/assets/js"
           mirror -R --verbose=0 /tmp/front/assets/css "$PREVIEW_PATH/assets/css"
-          put /tmp/front/assets/img/prueba-rutahd2.webp -o "$PREVIEW_PATH/assets/img/prueba-rutahd2.webp"
+          mirror -R --verbose=0 --include-glob=prueba-rutahd2.webp /tmp/front/assets/img "$PREVIEW_PATH/assets/img"
           put /tmp/preview_index.html -o "$PREVIEW_PATH/index.html"
           put /tmp/backend/app/Http/Controllers/RecuperacionContrasenaControlador.php -o /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php
           put /tmp/backend/app/Http/Controllers/UsuariosControlador.php -o /htdocs/api-v2/app/Http/Controllers/UsuariosControlador.php

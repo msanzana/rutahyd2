@@ -1,0 +1,37 @@
+name: Validar catálogos V2 sin despliegue
+on:
+  push:
+    branches:
+      - feature/catalogos-api-productos-v2-20261120
+  pull_request:
+    branches:
+      - feature/backend-v2-es
+permissions:
+  contents: read
+jobs:
+  sintaxis:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+      - name: Comprobar controladores y rutas
+        run: |
+          php -l app/Http/Controllers/CatalogoComercialControlador.php
+          php -l app/Http/Controllers/ClasificacionProductoControlador.php
+          php -l app/Http/Controllers/ProductoComercialControlador.php
+          php -l tests/integracion_productos_crud.php
+          php -l routes/api.php
+          php -l app/Http/Controllers/SesionControlador.php
+          php -l app/Http/Middleware/AutenticarToken.php
+          php -l config/rutahd.php
+          php -l tools/generar_admin_sql.php
+      - name: Verificar compuerta de seguridad y SQL previos
+        run: |
+          grep -Fq "token.rutahd" routes/api.php
+          grep -Fq "permiso.rutahd:productos.gestionar" routes/api.php
+          test -f database/espanol/13_catalogos_comerciales_aditivos.sql
+          test -f database/espanol/14_productos_clasificacion_campos.sql
+          echo "Validación estática OK. No se ejecuta SQL ni se conecta a InfinityFree."

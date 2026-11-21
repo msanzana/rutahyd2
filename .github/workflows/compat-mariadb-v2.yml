@@ -1,0 +1,73 @@
+name: Compatibilidad MariaDB para producción V2
+on:
+  push:
+    branches: [feature/catalogos-api-productos-v2-20261120]
+    paths:
+      - '.github/workflows/compat-mariadb-v2.yml'
+      - 'database/espanol/**'
+      - 'app/Http/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  maria:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        mariadb: ['10.4', '11.4']
+    services:
+      db:
+        image: mariadb:${{ matrix.mariadb }}
+        env:
+          MARIADB_ROOT_PASSWORD: temporary_ci_do_not_use_prod
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -uroot -ptemporary_ci_do_not_use_prod --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, intl, xml, dom, curl, pdo_mysql, openssl, fileinfo
+          tools: composer:v2
+      - name: Instalar SQL 01, semillas, 12, 13, 14 y 16 en MariaDB efímera
+        run: |
+          set -e
+          mysql -h 127.0.0.1 -uroot -ptemporary_ci_do_not_use_prod < database/espanol/01_esquema_completo_34_tablas_es.sql
+          mysql -h 127.0.0.1 -uroot -ptemporary_ci_do_not_use_prod < database/espanol/05_semillas_es.sql
+          for f in 12_tokens_acceso_opcional.sql 13_catalogos_comerciales_aditivos.sql 14_productos_clasificacion_campos.sql 16_permisos_modulos_producto.sql; do
+            mysql -h 127.0.0.1 -uroot -ptemporary_ci_do_not_use_prod rutahyd2_es_local < "database/espanol/$f"
+          done
+          RESULT=$(mysql -h 127.0.0.1 -uroot -ptemporary_ci_do_not_use_prod -N -e "
+            SELECT
+             (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='rutahyd2_es_local' AND table_type='BASE TABLE'),
+             (SELECT COUNT(*) FROM rutahyd2_es_local.permisos WHERE codigo LIKE 'productos.catalogos.%'),
+             (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE table_schema='rutahyd2_es_local' AND table_name='productos' AND referenced_table_name IS NOT NULL AND column_name IN ('rubro_id','departamento_id','familia_id','linea_id','marca_id','modelo_id','tipo_unidad_id','gramaje_id','tipo_envasado_id','condicion_tributaria_id'));
+          ")
+          echo "Contadores (tablas/permisos/FK): $RESULT"
+          test "$RESULT" = "$(printf '45\t20\t10')"
+      - name: Ejecutar autenticación JWT y permisos sobre MariaDB
+        env:
+          APP_NAME: RutaHD2_CI
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          RUTAHD_JWT_SECRET: 'CI_ONLY_JWT_TEST_SIGNING_KEY_DO_NOT_USE_IN_PRODUCTION_2026'
+          APP_URL: 'http://127.0.0.1:8000'
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_DATABASE: rutahyd2_es_local
+          DB_USERNAME: root
+          DB_PASSWORD: temporary_ci_do_not_use_prod
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+        run: |
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/integracion_catalogos_api.php

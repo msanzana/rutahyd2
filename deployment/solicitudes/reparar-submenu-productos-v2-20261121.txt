@@ -1,0 +1,7 @@
+RUTAHD2_REPARAR_ARBOL_PRODUCTOS
+fecha=2026-11-21
+frontend_sha=482fe88b2c2fe06f3d5dc4fe0198117371a42f63
+comprobacion_menu=true
+preservar_menu_principal=true
+sin_datos_mysql=true
+sin_activar_api=true

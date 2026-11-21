@@ -1,0 +1,117 @@
+name: Vista previa del menú oficial y pantalla inicial
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/vista-menu-oficial-20261121.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  staging:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      PREVIEW_PATH: /htdocs/menu-oficial-login-v2-20261121
+      FRONT_SHA: 0a1d84846c9f594e3bb917a5a480dcbd50413ccd
+    steps:
+      - name: Obtener los ocho módulos oficiales validados
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch feature/menu-oficial-ocho-login-inicial-20261121 https://github.com/msanzana/rutahyd2front.git /tmp/front
+          test "$(git -C /tmp/front rev-parse HEAD)" = "$FRONT_SHA"
+          for f in /tmp/front/assets/js/*.js; do node --check "$f"; done
+          python3 - <<'PY'
+          from pathlib import Path
+          h=Path('/tmp/front/index.html').read_text('utf-8')
+          nav=h.split('<nav class="nav"',1)[1].split('</nav>',1)[0]
+          keys=['administracion','compras','ventas','proveedores','clientes','productos','bodega','cuentas_corrientes']
+          positions=[nav.index('data-nav="'+x+'" class="nav-link') for x in keys]
+          assert positions==sorted(positions)
+          assert nav.count('class="nav-link"')==8
+          assert h.count('data-catalog-key=')==10 and h.count('data-admin-catalog=')==10
+          assert 'id="loginDemo"' in h and 'modulos-oficiales.js' in h and 'menu-oficial.css' in h
+          assert h.count('assets/img/prueba-rutahd2.webp')==3
+          h=h.replace('assets/img/prueba-rutahd2.webp','/assets/img/prueba-rutahd2.webp')
+          h=h.replace('</head>','  <meta name="robots" content="noindex,nofollow">\n</head>')
+          Path('/tmp/preview.html').write_text(h,'utf-8')
+          PY
+      - name: Instalar FTPS
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Comprobar antes de escribir que producción sigue protegida
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/root_before.html
+          get /htdocs/violeta-demo/index.html -o /tmp/violet_before.html
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_before
+          bye
+          EOF
+          lftp -f /tmp/read.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/guard_before
+      - name: Copiar exclusivamente al directorio de vista previa
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/write.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          mkdir -p "$PREVIEW_PATH"
+          mirror -R --verbose=0 /tmp/front/assets/js "$PREVIEW_PATH/assets/js"
+          mirror -R --verbose=0 /tmp/front/assets/css "$PREVIEW_PATH/assets/css"
+          put /tmp/preview.html -o "$PREVIEW_PATH/index.html"
+          bye
+          EOF
+          lftp -f /tmp/write.lftp >/dev/null
+      - name: Verificar el preview por bytes y las páginas públicas intactas
+        run: |
+          set -euo pipefail
+          set +x
+          cat >/tmp/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$PREVIEW_PATH/index.html" -o /tmp/preview_after.html
+          get "$PREVIEW_PATH/assets/js/login-ui.js" -o /tmp/login_after.js
+          get "$PREVIEW_PATH/assets/js/modulos-oficiales.js" -o /tmp/modules_after.js
+          get "$PREVIEW_PATH/assets/css/menu-oficial.css" -o /tmp/css_after.css
+          get /htdocs/index.html -o /tmp/root_after.html
+          get /htdocs/violeta-demo/index.html -o /tmp/violet_after.html
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_after
+          bye
+          EOF
+          lftp -f /tmp/verify.lftp >/dev/null
+          cmp -s /tmp/preview.html /tmp/preview_after.html
+          cmp -s /tmp/front/assets/js/login-ui.js /tmp/login_after.js
+          cmp -s /tmp/front/assets/js/modulos-oficiales.js /tmp/modules_after.js
+          cmp -s /tmp/front/assets/css/menu-oficial.css /tmp/css_after.css
+          cmp -s /tmp/root_before.html /tmp/root_after.html
+          cmp -s /tmp/violet_before.html /tmp/violet_after.html
+          cmp -s /tmp/guard_before /tmp/guard_after
+          echo 'Vista previa oficial comprobada. HTML público, Laravel y MariaDB intactos.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'https://rutahyd2.free.nf/menu-oficial-login-v2-20261121/' >> "$GITHUB_STEP_SUMMARY"

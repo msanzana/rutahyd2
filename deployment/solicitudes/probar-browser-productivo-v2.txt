@@ -5,3 +5,4 @@ solo_get=true
 no_mysql=true
 revalidacion=20261121-produccion-main-png-jwt
 verificacion=2026-11-21-produccion-jwt-prod12
+verificar_api_jwt_200_y_401=2026-11-21-post-activacion-controlada

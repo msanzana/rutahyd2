@@ -1,0 +1,164 @@
+name: Publicar menú oficial de ocho módulos y pantalla de login
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/publicar-menu-oficial-login-20261121.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Validar version del frontend y crear HTML
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch feature/menu-oficial-ocho-login-inicial-20261121 https://github.com/msanzana/rutahyd2front.git /tmp/front
+          test "$(git -C /tmp/front rev-parse HEAD)" = '0a1d84846c9f594e3bb917a5a480dcbd50413ccd'
+          for f in /tmp/front/assets/js/*.js; do node --check "$f"; done
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('/tmp/front/index.html').read_text('utf-8')
+          assert s.count('data-catalog-key=')==10 and s.count('data-admin-catalog=')==10
+          assert 'subnav-heading' not in s and 'nav-depth-' not in s
+          assert s.count('id="loginDialog"')==1
+          nav=s.split('<nav class="nav"',1)[1].split('</nav>',1)[0]
+          keys=['administracion','compras','ventas','proveedores','clientes','productos','bodega','cuentas_corrientes']
+          positions=[nav.index('data-nav="'+x+'" class="nav-link') for x in keys]
+          assert positions==sorted(positions) and nav.count('class="nav-link"')==8
+          assert s.count('id="loginDemo"')==1
+          assert 'assets/js/modulos-oficiales.js' in s
+          assert 'assets/css/menu-oficial.css' in s
+          s=s.replace('href="assets/css/app.css"','href="assets/css/app.css?v=20261121-menuoficial7"')
+          s=s.replace('correcciones-ui.css?v=20261121-menuoficial7','correcciones-ui.css?v=20261121-menuoficial7')
+          s=s.replace('menu-oficial.css?v=20261121-2','menu-oficial.css?v=20261121-menuoficial7')
+          s=re.sub(r'src="assets/js/([a-z-]+)\.js"',r'src="assets/js/\1.js?v=20261121-menuoficial7"',s)
+          assert s.count('src="assets/js/login-ui.js?v=20261121-menuoficial7"')==1
+          Path('/tmp/release_index.html').write_text(s,'utf-8')
+          PY
+      - name: Instalar cliente FTPS
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Respaldar HTML JS CSS publicos y comprobar guardia Laravel
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          mkdir -p /tmp/old_root_js /tmp/old_violet_js /tmp/old_root_css /tmp/old_violet_css
+          cat >/tmp/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/root_before.html
+          get /htdocs/violeta-demo/index.html -o /tmp/violet_before.html
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_before
+          mirror /htdocs/assets/js /tmp/old_root_js
+          mirror /htdocs/assets/css /tmp/old_root_css
+          mirror /htdocs/violeta-demo/assets/js /tmp/old_violet_js
+          mirror /htdocs/violeta-demo/assets/css /tmp/old_violet_css
+          bye
+          EOF
+          lftp -f /tmp/read.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/guard_before
+          python3 - <<'PY'
+          from pathlib import Path
+          names=['inicio','pedidos','clientes','productos','inventario','informes','administracion']
+          for key in ('root','violet'):
+              s=Path('/tmp/'+key+'_before.html').read_text('utf-8')
+              assert s.count('data-catalog-key=')==10 and s.count('data-admin-catalog=')==10
+              x=[s.index('data-nav="'+n+'"') for n in names]
+              assert x==sorted(x)
+          PY
+      - name: Publicar recursos primero y HTML al final
+        run: |
+          set -euo pipefail
+          set +x
+          cat >/tmp/write.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          mirror -R --verbose=0 /tmp/front/assets/js /htdocs/assets/js
+          mirror -R --verbose=0 /tmp/front/assets/css /htdocs/assets/css
+          mirror -R --verbose=0 /tmp/front/assets/js /htdocs/violeta-demo/assets/js
+          mirror -R --verbose=0 /tmp/front/assets/css /htdocs/violeta-demo/assets/css
+          put /tmp/release_index.html -o /htdocs/index.html
+          put /tmp/release_index.html -o /htdocs/violeta-demo/index.html
+          bye
+          EOF
+          lftp -f /tmp/write.lftp >/dev/null
+      - name: Cotejar archivos y backend privado
+        run: |
+          set -euo pipefail
+          set +x
+          cat >/tmp/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/root_after.html
+          get /htdocs/violeta-demo/index.html -o /tmp/violet_after.html
+          get /htdocs/assets/js/login-ui.js -o /tmp/login_root_after
+          get /htdocs/assets/css/correcciones-ui.css -o /tmp/css_root_after
+          get /htdocs/assets/css/menu-oficial.css -o /tmp/menu_root_after
+          get /htdocs/assets/js/modulos-oficiales.js -o /tmp/modules_root_after
+          get /htdocs/violeta-demo/assets/js/login-ui.js -o /tmp/login_violet_after
+          get /htdocs/violeta-demo/assets/css/correcciones-ui.css -o /tmp/css_violet_after
+          get /htdocs/violeta-demo/assets/css/menu-oficial.css -o /tmp/menu_violet_after
+          get /htdocs/violeta-demo/assets/js/modulos-oficiales.js -o /tmp/modules_violet_after
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_after
+          bye
+          EOF
+          lftp -f /tmp/verify.lftp >/dev/null
+          cmp -s /tmp/release_index.html /tmp/root_after.html
+          cmp -s /tmp/release_index.html /tmp/violet_after.html
+          for key in root violet; do
+            cmp -s /tmp/front/assets/js/login-ui.js "/tmp/login_${key}_after"
+            cmp -s /tmp/front/assets/css/correcciones-ui.css "/tmp/css_${key}_after"
+            cmp -s /tmp/front/assets/css/menu-oficial.css "/tmp/menu_${key}_after"
+            cmp -s /tmp/front/assets/js/modulos-oficiales.js "/tmp/modules_${key}_after"
+          done
+          cmp -s /tmp/guard_before /tmp/guard_after
+          echo 'Interfaz publicada, menú plano, login y CSS comprobados. API protegida y MySQL sin cambios.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Restaurar archivos originales ante cualquier fallo
+        if: failure()
+        run: |
+          set +x
+          if [ -s /tmp/root_before.html ] && [ -s /tmp/violet_before.html ] && [ -n "$FTP_PASSWORD" ]; then
+            cat >/tmp/rollback.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          mirror -R --verbose=0 /tmp/old_root_js /htdocs/assets/js
+          mirror -R --verbose=0 /tmp/old_root_css /htdocs/assets/css
+          mirror -R --verbose=0 /tmp/old_violet_js /htdocs/violeta-demo/assets/js
+          mirror -R --verbose=0 /tmp/old_violet_css /htdocs/violeta-demo/assets/css
+          put /tmp/root_before.html -o /htdocs/index.html
+          put /tmp/violet_before.html -o /htdocs/violeta-demo/index.html
+          bye
+          EOF
+            lftp -f /tmp/rollback.lftp >/dev/null || echo "::error::No se pudo verificar restauración FTPS"
+          fi

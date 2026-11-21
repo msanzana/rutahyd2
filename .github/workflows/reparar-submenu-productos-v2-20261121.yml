@@ -1,0 +1,142 @@
+name: Reparar árbol de Productos sin tocar menú principal ni API
+on:
+  push:
+    branches: [main]
+    paths:
+      - deployment/solicitudes/reparar-submenu-productos-v2-20261121.txt
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Preparar versión exacta y validar JavaScript
+        run: |
+          git clone --depth 1 --branch feature/catalogos-api-adapter-v2-20261120 https://github.com/msanzana/rutahyd2front.git /tmp/front
+          test "$(git -C /tmp/front rev-parse HEAD)" = "482fe88b2c2fe06f3d5dc4fe0198117371a42f63"
+          node --check /tmp/front/assets/js/app.js
+          test "$(grep -c 'subnav-heading' /tmp/front/index.html)" -ge 3
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Leer solo menú oficial desplegado, estilos y guardias
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/html_root_before
+          get /htdocs/violeta-demo/index.html -o /tmp/html_violet_before
+          get /htdocs/assets/js/app.js -o /tmp/app_root_before
+          get /htdocs/violeta-demo/assets/js/app.js -o /tmp/app_violet_before
+          get /htdocs/assets/css/app.css -o /tmp/css_root_before
+          get /htdocs/violeta-demo/assets/css/app.css -o /tmp/css_violet_before
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_before
+          bye
+          EOF
+          lftp -f /tmp/read.lftp
+          grep -Fq 'Require all denied' /tmp/guard_before
+          for loc in root violet; do
+            test "$(git hash-object /tmp/app_$loc_before)" = "5a4877461532aa4e9596893291a4b74abeb9fe9d"
+            test "$(git hash-object /tmp/css_$loc_before)" = "7a0ba70e469ee75dbde6d477ca1d6cb59c9f7cd7"
+          done
+      - name: Reemplazar SOLO bloque de submenú de Productos conservando siete padres
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          source=Path('/tmp/front/index.html').read_text('utf-8')
+          seven=('inicio','pedidos','clientes','productos','inventario','informes','administracion')
+          start_marker='          <div id="productSubnav"'
+          end_marker='          </div>\n        </div>\n        <button type="button" data-nav="inventario"'
+          a=source.index(start_marker);b=source.index(end_marker,a)+len('          </div>')
+          source_submenu=source[a:b]
+          assert source_submenu.count('data-catalog-key=')==10
+          assert source_submenu.count('subnav-heading')==3
+          for loc in ('root','violet'):
+            old=Path('/tmp/html_'+loc+'_before').read_text('utf-8')
+            indexes=[old.index('data-nav="'+name+'"') for name in seven]
+            assert indexes==sorted(indexes) and len(set(indexes))==7
+            assert old.count('data-admin-catalog=')==10
+            start=old.index(start_marker)
+            end=old.index(end_marker,start)+len('          </div>')
+            before_sub=old[start:end]
+            assert before_sub.count('data-catalog-key=')==10
+            updated=old[:start]+source_submenu+old[end:]
+            updated,ncss=re.subn(r'href="assets/css/app\.css(?:\?v=[^"]+)?"',
+                  'href="assets/css/app.css?v=20261121-5"',updated)
+            updated,njs=re.subn(r'src="assets/js/app\.js(?:\?v=[^"]+)?"',
+                  'src="assets/js/app.js?v=20261121-5"',updated)
+            assert ncss==1 and njs==1
+            assert updated.count('data-admin-catalog=')==10
+            assert updated.count('data-catalog-key=')==10
+            new_indexes=[updated.index('data-nav="'+name+'"') for name in seven]
+            assert new_indexes==sorted(new_indexes)
+            # Respaldo de la versión exacta previa: el resto del HTML no se altera.
+            Path('/tmp/html_'+loc+'_new').write_text(updated,'utf-8')
+          print('OK: submenú Productos y árbol corregidos; siete entradas principales sin cambios.')
+          PY
+      - name: Publicar menú y lógica exclusivamente en frontend
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/upload.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/front/assets/js/app.js -o /htdocs/assets/js/app.js
+          put /tmp/front/assets/css/app.css -o /htdocs/assets/css/app.css
+          put /tmp/html_root_new -o /htdocs/index.html
+          put /tmp/front/assets/js/app.js -o /htdocs/violeta-demo/assets/js/app.js
+          put /tmp/front/assets/css/app.css -o /htdocs/violeta-demo/assets/css/app.css
+          put /tmp/html_violet_new -o /htdocs/violeta-demo/index.html
+          bye
+          EOF
+          lftp -f /tmp/upload.lftp
+      - name: Verificar cada archivo y constatar backend privado intacto
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/html_root_after
+          get /htdocs/violeta-demo/index.html -o /tmp/html_violet_after
+          get /htdocs/assets/js/app.js -o /tmp/app_root_after
+          get /htdocs/violeta-demo/assets/js/app.js -o /tmp/app_violet_after
+          get /htdocs/assets/css/app.css -o /tmp/css_root_after
+          get /htdocs/violeta-demo/assets/css/app.css -o /tmp/css_violet_after
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_after
+          bye
+          EOF
+          lftp -f /tmp/verify.lftp
+          cmp -s /tmp/guard_before /tmp/guard_after
+          for loc in root violet; do
+            cmp -s "/tmp/html_$loc_new" "/tmp/html_$loc_after"
+            cmp -s /tmp/front/assets/js/app.js "/tmp/app_$loc_after"
+            cmp -s /tmp/front/assets/css/app.css "/tmp/css_$loc_after"
+          done
+          echo 'OK: ProductSubnav organizado y apertura exclusiva, menú principal intacto.'
+          echo 'Sin cambios en API, .env, marcadores, JWT, ni MySQL.'

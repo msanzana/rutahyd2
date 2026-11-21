@@ -15,6 +15,7 @@ final class Usuario extends Authenticatable
     protected $fillable = [
         'rol_id',
         'nombre',
+        'rut',
         'correo_electronico',
         'hash_contrasena',
         'activo',

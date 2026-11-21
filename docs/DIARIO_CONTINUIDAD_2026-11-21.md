@@ -192,3 +192,6 @@ Portada y violeta-demo verificadas mediante navegador externo: al abrir se ve lo
 
 - Verificación posterior con navegador limpio: https://github.com/msanzana/rutahyd2/actions/runs/44958435601 confirmó **LOGO_FRONTAL src=hd-branding/logo-hd-site.png?v=20261121-2, completo=true, ancho=350**. PHP interno Laravel OK; gateway público 503 no_habilitada; SMTP todavía NO según auditoría. Por eso no afirmar que ya se puede iniciar sesión.
 - Método CID en la plantilla Blade coincide con documentación Laravel 13.x (mail, sección Inline Attachments): $message->embed(base_path('../hd-branding/logo-hd-site.png')). No se ha probado entrega real desde SMTP Laravel.
+
+- Preflight SMTP nuevo tras reparar alias Gmail: https://github.com/msanzana/rutahyd2/actions/runs/44958577283 FALLÓ antes de FTP: el secreto RUTAHD_GMAIL_APP_PASSWORD sigue vacío en GitHub Actions. Gmail conectado a ChatGPT sí puede enviar, pero Laravel no tiene esa contraseña de aplicación. No se modificó .env ni gateway.
+- Para correo automático: registrar en Repository Secrets de Github la contraseña de aplicación YA CREADA para neo.hiper.xavier@gmail.com bajo nombre exacto RUTAHD_GMAIL_APP_PASSWORD (nunca como variable ordinaria ni por chat). Después probar envío desde Laravel. Para login, confirmar si se importó DML de la contraseña temporal remitida previamente; no afirmar que ya funciona.

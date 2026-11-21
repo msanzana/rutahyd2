@@ -43,7 +43,7 @@ jobs:
           for file in 18_recuperacion_contrasenas.sql 19_rut_usuarios.sql; do
             test -s "/tmp/backend/database/espanol/$file"
           done
-          test "$(grep -o 'data-nav="administracion"' /tmp/front/index.html | wc -l)" -eq 1
+          test "$(grep -o 'data-nav="administracion"' /tmp/front/index.html | wc -l)" -eq 2
           ! grep -Eq 'src="assets/js/(app|catalogos)\.js' /tmp/front/index.html
           echo "Fuentes verificadas por SHA, PHP y JavaScript correctos."
       - name: Instalar cliente FTPS

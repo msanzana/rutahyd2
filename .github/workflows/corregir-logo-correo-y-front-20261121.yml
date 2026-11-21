@@ -71,6 +71,7 @@ jobs:
           get /htdocs/api-v2/.htaccess -o /tmp/lguard
           get /htdocs/api/index.php -o /tmp/lgateway
           get /htdocs/index.html -o /tmp/lindex_before
+          get /htdocs/hd-branding/logo-hd-site.png -o /tmp/lbrand_existing
           cls -1 -a /htdocs/api-v2/storage/app/private > /tmp/lmarkers
           cls -1 -a /htdocs/assets/img > /tmp/limage_before
           bye
@@ -78,6 +79,7 @@ jobs:
           lftp -f /tmp/lread.lftp >/dev/null
           grep -Fq 'Require all denied' /tmp/lguard
           grep -Fq 'rutahd2_api_ready' /tmp/lgateway
+          cmp -s /tmp/logo-hd-site.png /tmp/lbrand_existing || { echo '::error::Logo publicado no coincide con fuente'; exit 1; }
           cmp -s /tmp/frontend/index.html /tmp/lindex_before || { echo '::error::HTML en servidor no corresponde al frontend auditado; no sobrescribirlo'; exit 1; }
           if grep -Fxq rutahd2_api_ready /tmp/lmarkers; then
             echo "::error::API activa de forma inesperada: detener cambio de plantilla."
@@ -99,8 +101,6 @@ jobs:
           set ftp:ssl-protect-data yes
           set ssl:verify-certificate yes
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
-          mkdir -p /htdocs/hd-branding
-          put /tmp/logo-hd-site.png -o /htdocs/hd-branding/logo-hd-site.png
           put /tmp/backend_mail/resources/views/emails/corporativo.blade.php -o /htdocs/api-v2/resources/views/emails/corporativo.blade.php
           put /tmp/index-hd-fix.html -o /htdocs/index.html
           bye

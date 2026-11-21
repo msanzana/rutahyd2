@@ -4,3 +4,4 @@ FRONT_LOGO=true
 DB_ONLY_READ=true
 NO_CREDENTIALS=true
 VERIFICAR_LOGO_ACTUALIZADO=2026-11-21-3
+revalidacion=20261121-gateway-login-mysql

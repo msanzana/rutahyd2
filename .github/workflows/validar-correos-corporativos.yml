@@ -38,7 +38,7 @@ jobs:
           assert "now()->addMinutes(30)" in ctl
           for mark in ('$categoria','$titulo','$saludo','$parrafos','$accionUrl','$accionEtiqueta','$nota','$referencia'):
               assert mark in html and mark in txt, mark
-          assert "$message->embed(resource_path('mail/logo-hd-email.png'))" in html
+          assert "$message->embed(base_path('../hd-branding/logo-hd-site.png'))" in html
           assert '{{ $parrafo }}' in html and '{!!' not in html
           assert 'font-family:Arial' in html and 'background:#281342' in html
           print('Plantilla responsive, Blade seguro, HTML/texto y recuperación integrados.')

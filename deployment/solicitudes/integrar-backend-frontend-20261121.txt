@@ -4,3 +4,4 @@ FRONTEND_SOURCE=main
 NO_SQL=true
 NO_GATEWAY_ACTIVATION=true
 reintento_verificacion_menu=2
+reintento_preflight_verbose=3

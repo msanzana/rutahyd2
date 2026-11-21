@@ -1,0 +1,63 @@
+name: Auditar configuración privada Laravel sin leer secretos en logs
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/solicitudes/auditar-env-privado-v2-20261121.txt']
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Preparar FTPS
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Descargar temporalmente .env únicamente para auditoría segura
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/.env -o /tmp/private_env_check
+          get /htdocs/api-v2/.htaccess -o /tmp/guard
+          bye
+          EOF
+          lftp -f /tmp/read.lftp >/dev/null
+          test -s /tmp/private_env_check
+          grep -Fq 'Require all denied' /tmp/guard
+      - name: Verificar claves distintas y credencial DB sin imprimirlas
+        run: |
+          set +x
+          python3 - <<'PY'
+          import os,json,hmac,base64,pathlib
+          d={}
+          for line in pathlib.Path('/tmp/private_env_check').read_text().splitlines():
+            if not line or line.startswith('#'):continue
+            k,v=line.split('=',1)
+            d[k]=json.loads(v)
+          assert d['APP_ENV']=='production' and d['APP_DEBUG']=='false'
+          assert d['DB_HOST']=='sql307.infinityfree.com'
+          assert d['DB_DATABASE']=='if0_43460400_rutahyd2_es'
+          assert d['DB_USERNAME']=='if0_43460400'
+          assert d['FRONTEND_ORIGIN']=='https://rutahyd2.free.nf'
+          assert hmac.compare_digest(d['DB_PASSWORD'],os.environ['FTP_PASSWORD'])
+          assert len(base64.b64decode(d['APP_KEY'][7:]))==32
+          assert len(d['RUTAHD_JWT_SECRET'])>=64
+          assert d['RUTAHD_JWT_SECRET']!=d['APP_KEY']
+          print('CONFIRMADO: Archivo .env está instalado con secretos válidos e independientes.')
+          print('CONFIRMADO: DB_USERNAME, host y base españoles correctos; contraseña corresponde a la cuenta FTPS/hosting.')
+          PY
+          shred -u /tmp/private_env_check || rm -f /tmp/private_env_check
+          echo 'OK: No se activó API, no se consultaron tablas ni se revelaron secretos.' >> "$GITHUB_STEP_SUMMARY"

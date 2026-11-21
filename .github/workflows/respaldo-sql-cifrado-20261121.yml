@@ -66,7 +66,7 @@ jobs:
             $pdo->beginTransaction();
             $list=$pdo->query('SHOW FULL TABLES')->fetchAll(\PDO::FETCH_NUM);
             if(count($list)!==45)throw new RuntimeException('table_count');
-            $sql="-- Ruta H&D V2 respaldo SQL seguro UTF8\\nSET NAMES utf8mb4;\\nSET FOREIGN_KEY_CHECKS=0;\\n";
+            $sql="-- Ruta H&D V2 respaldo SQL seguro UTF8\nSET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS=0;\n";
             $tables=0; $rows=0;
             foreach($list as $entry){
               if(strtoupper((string)$entry[1])!=='BASE TABLE')throw new RuntimeException('view_detected');

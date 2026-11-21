@@ -8,3 +8,6 @@ api_gate_remains_closed=true
 no_mysql_writes=true
 
 retry=menu-check-2
+
+retry=main-and-violet-only
+preview_untouched=true

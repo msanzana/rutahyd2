@@ -29,7 +29,7 @@ def run_config(credential: str) -> tuple[subprocess.CompletedProcess[str], str]:
 
 
 def main() -> None:
-    fake = "abcde fghi jklm nopq"
+    fake = "abcd efgh ijkl mnop"
     p, result = run_config(fake)
     assert p.returncode == 0, p.stderr
     assert 'MAIL_USERNAME="neo.hiper.xavier@gmail.com"' in result

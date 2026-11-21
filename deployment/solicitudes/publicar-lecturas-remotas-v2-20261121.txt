@@ -2,3 +2,6 @@ DEPLOY_FRONT_REMOTE_READS
 frontend=1f1e1eed96e6ae7aeaefffb1db0943f0b2164b0d
 safe_mode=true
 no_db_changes=true
+revision=20261121-3
+frontend=e751ad27673f52f754aa73adb3715e3b2601b06e
+proteccion_antibot_same_origin=true

@@ -37,6 +37,12 @@ jobs:
           assert s.count('id="loginDemo"')==1
           assert 'assets/js/modulos-oficiales.js' in s
           assert 'assets/css/menu-oficial.css' in s
+          import base64
+          assert s.count('assets/img/prueba-rutahd2.webp')==3
+          logo=Path('/tmp/front/assets/img/prueba-rutahd2.webp').read_bytes()
+          assert 10000<len(logo)<150000 and logo[:4]==b'RIFF' and logo[8:12]==b'WEBP'
+          image='data:image/webp;base64,'+base64.b64encode(logo).decode('ascii')
+          s=s.replace('assets/img/prueba-rutahd2.webp',image)
           s=s.replace('href="assets/css/app.css"','href="assets/css/app.css?v=20261121-menuoficial7"')
           s=s.replace('correcciones-ui.css?v=20261121-menuoficial7','correcciones-ui.css?v=20261121-menuoficial7')
           s=s.replace('menu-oficial.css?v=20261121-2','menu-oficial.css?v=20261121-menuoficial7')

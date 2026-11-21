@@ -78,6 +78,8 @@ jobs:
           original=Path('/tmp/front/index.html').read_text('utf-8')
           assert original.count('</head>')==1
           output=original.replace('</head>','  <meta name="robots" content="noindex,nofollow">\n</head>')
+          output=output.replace('src="assets/img/prueba-rutahd2.webp"','src="/assets/img/prueba-rutahd2.webp"')
+          assert 'src="/assets/img/prueba-rutahd2.webp"' in output
           Path('/tmp/preview_index.html').write_text(output,'utf-8')
           PY
       - name: Publicar SOLO vista previa y archivos dentro de Laravel protegido
@@ -95,7 +97,6 @@ jobs:
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
           mirror -R --verbose=0 /tmp/front/assets/js "$PREVIEW_PATH/assets/js"
           mirror -R --verbose=0 /tmp/front/assets/css "$PREVIEW_PATH/assets/css"
-          mirror -R --verbose=0 --include-glob=prueba-rutahd2.webp /tmp/front/assets/img "$PREVIEW_PATH/assets/img"
           put /tmp/preview_index.html -o "$PREVIEW_PATH/index.html"
           put /tmp/backend/app/Http/Controllers/RecuperacionContrasenaControlador.php -o /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php
           put /tmp/backend/app/Http/Controllers/UsuariosControlador.php -o /htdocs/api-v2/app/Http/Controllers/UsuariosControlador.php

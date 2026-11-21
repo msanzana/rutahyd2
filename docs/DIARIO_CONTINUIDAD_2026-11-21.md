@@ -141,3 +141,8 @@ Portada y violeta-demo verificadas mediante navegador externo: al abrir se ve lo
 - CI de preparación aprobada: https://github.com/msanzana/rutahyd2/actions/runs/44946232892
 - Intento de aplicación en producción: https://github.com/msanzana/rutahyd2/actions/runs/44946293518 **DETENIDO ANTES DE ACCESO FTPS** por ausencia del secreto Actions RUTAHD_GMAIL_APP_PASSWORD. No se modificó .env ni se envió correo desde Laravel.
 - Para continuar: titular registra el valor de la contraseña de aplicación, exclusivamente en GitHub -> Settings -> Secrets and variables -> Actions -> New repository secret, con nombre RUTAHD_GMAIL_APP_PASSWORD. Nunca mostrar contraseña en chat ni commits. Después reejecutar por workflow_dispatch o nueva solicitud. Comprobar recepción desde servidor antes de crear administrador.
+
+## Reintento secreto Gmail — 21-11-2026
+- Usuario informó haber guardado contraseña de aplicación. Se reintentó la ejecución anterior https://github.com/msanzana/rutahyd2/actions/runs/44946293518, pero esa ejecución podría tomar snapshot anterior de secrets.
+- Se creó **ejecución nueva** para evitar snapshot anterior: https://github.com/msanzana/rutahyd2/actions/runs/44946787786 . **Falló en el preflight**: la variable `RUTAHD_GMAIL_APP_PASSWORD` llegó vacía incluso en corrida nueva. `INFINITYFREE_FTP_PASSWORD` sí estaba disponible (enmascarada). No se ejecutó FTPS ni se cambió `.env` ni MySQL.
+- Bloqueo preciso: confirmar en GitHub Settings > Secrets and variables > Actions > Repository secrets que exista `RUTAHD_GMAIL_APP_PASSWORD` (no como variable ordinaria ni secreto del ambiente sin seleccionar, y con el nombre exacto). No compartir valor por chat ni logs. Una vez corregido, **disparar ejecución NUEVA**, no rerun anterior.

@@ -1,0 +1,218 @@
+name: Respaldo cifrado Ruta H&D2 MariaDB, sin escrituras SQL
+on:
+  push:
+    branches: [main]
+    paths:
+      - deployment/solicitudes/respaldo-sql-productivo-20261121.txt
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 24
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar herramientas de respaldo
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y lftp
+          python3 -m pip install --break-system-packages -q cryptography
+          mkdir -p /tmp/rutahd-backup-check
+          cd /tmp/rutahd-backup-check
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+
+      - name: Preparar sonda PHP de lectura con autenticación fuerte y expiración
+        run: |
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import pathlib,secrets,time,os
+          name='rutahd2_backup_'+secrets.token_hex(16)+'.php'
+          token=secrets.token_hex(32)
+          source=r'''<?php
+          declare(strict_types=1);
+          ini_set('display_errors','0');
+          header('Content-Type: application/json; charset=utf-8');
+          header('Cache-Control: no-store');
+          if($_SERVER['REQUEST_METHOD']!=='GET'
+             || time()>__EXPIRES__
+             || !hash_equals('__TOKEN__',(string)($_SERVER['HTTP_X_RUTAHD_DIAGNOSTIC']??''))){
+             http_response_code(404);exit;
+          }
+          try {
+            $root=__DIR__.'/api-v2';
+            require_once $root.'/vendor/autoload.php';
+            \Dotenv\Dotenv::createImmutable($root)->safeLoad();
+            if(($_ENV['DB_HOST']??'')!=='sql307.infinityfree.com'
+              || ($_ENV['DB_DATABASE']??'')!=='if0_43460400_rutahyd2_es'){
+              throw new RuntimeException('database_destination');
+            }
+            $dsn='mysql:host='.$_ENV['DB_HOST'].';port=3306;dbname='.$_ENV['DB_DATABASE'].';charset=utf8mb4';
+            $pdo=new \PDO($dsn,(string)$_ENV['DB_USERNAME'],(string)$_ENV['DB_PASSWORD'],[
+              \PDO::ATTR_ERRMODE=>\PDO::ERRMODE_EXCEPTION,\PDO::ATTR_TIMEOUT=>7,
+              \PDO::ATTR_EMULATE_PREPARES=>false
+            ]);
+            $pdo->exec('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+            $pdo->beginTransaction();
+            $list=$pdo->query('SHOW FULL TABLES')->fetchAll(\PDO::FETCH_NUM);
+            if(count($list)!==45)throw new RuntimeException('table_count');
+            $sql="-- Ruta H&D V2 respaldo SQL seguro UTF8\\nSET NAMES utf8mb4;\\nSET FOREIGN_KEY_CHECKS=0;\\n";
+            $tables=0; $rows=0;
+            foreach($list as $entry){
+              if(strtoupper((string)$entry[1])!=='BASE TABLE')throw new RuntimeException('view_detected');
+              $name=(string)$entry[0];
+              $ident=chr(96).str_replace(chr(96),chr(96).chr(96),$name).chr(96);
+              $create=$pdo->query('SHOW CREATE TABLE '.$ident)->fetch(\PDO::FETCH_NUM);
+              if(!$create||!isset($create[1]))throw new RuntimeException('create_table_missing');
+              $sql.="\n".$create[1].";\n";$tables++;
+              $stmt=$pdo->query('SELECT * FROM '.$ident);
+              while($row=$stmt->fetch(\PDO::FETCH_ASSOC)){
+                $columns=array_keys($row);
+                $fieldNames=array_map(fn($v)=>chr(96).str_replace(chr(96),chr(96).chr(96),$v).chr(96),$columns);
+                $values=array_map(fn($v)=>$v===null?'NULL':$pdo->quote((string)$v),array_values($row));
+                $sql.='INSERT INTO '.$ident.' ('.implode(',',$fieldNames).') VALUES ('.implode(',',$values).");\n";
+                $rows++;
+              }
+            }
+            $pdo->commit();
+            $sql.="SET FOREIGN_KEY_CHECKS=1;\n";
+            echo json_encode(['ok'=>true,'tablas'=>$tables,'filas'=>$rows,
+                 'gzip_b64'=>base64_encode(gzencode($sql,9))],JSON_UNESCAPED_SLASHES);
+          }catch(\Throwable $e){
+            http_response_code(503);
+            echo json_encode(['ok'=>false,'error_clase'=>get_class($e)]);
+          }
+          '''
+          php=source.replace('__EXPIRES__',str(int(time.time()+900))).replace('__TOKEN__',token)
+          pathlib.Path('/tmp/rutahd2_backup_probe.php').write_text(php)
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+            f.write('PROBE_NAME='+name+'\nPROBE_TOKEN='+token+'\n')
+          print('Sonda temporal de solo lectura con token aleatorio, caducidad 15 minutos.')
+          PY
+          php -l /tmp/rutahd2_backup_probe.php
+
+      - name: Subir sonda solo para esta auditoría
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/upbk.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/rutahd2_backup_probe.php -o "/htdocs/$PROBE_NAME"
+          bye
+          EOF
+          lftp -f /tmp/upbk.lftp >/dev/null
+
+      - name: Recuperar respaldo por HTTPS desde el origen usando navegador real
+        working-directory: /tmp/rutahd-backup-check
+        run: |
+          set +x
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import fs from 'node:fs';
+          const file=process.env.PROBE_NAME,secret=process.env.PROBE_TOKEN;
+          if(!/^rutahd2_backup_[a-f0-9]{32}\.php$/.test(file)||!secret||secret.length!==64)process.exit(1);
+          const browser=await chromium.launch({headless:true});
+          try {
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:45000});
+            await page.waitForTimeout(11000);
+            const response=await page.evaluate(async({file,secret})=>{
+              const c=new AbortController(),h=setTimeout(()=>c.abort(),30000);
+              try {
+                const r=await fetch('/'+file,{
+                  method:'GET',cache:'no-store',signal:c.signal,
+                  headers:{'X-RutaHD-Diagnostic':secret,Accept:'application/json'}
+                });
+                const d=await r.json();
+                return {http:r.status,data:d};
+              }finally{clearTimeout(h);}
+            },{file,secret});
+            if(response.http!==200||response.data.ok!==true||response.data.tablas!==45)throw Error('Backup no disponible o esquema distinto');
+            const buf=Buffer.from(response.data.gzip_b64,'base64');
+            if(buf.length<500)throw Error('Backup incompleto');
+            fs.writeFileSync('/tmp/rutahd2_sql_dump.gz',buf,{mode:0o600});
+            console.log('BACKUP_OBTENIDO: tablas='+response.data.tablas+' filas='+response.data.filas+' gzip_bytes='+buf.length);
+          }finally{await browser.close();}
+          JS
+
+      - name: Verificar DDL y cifrar respaldo recuperable con clave pública
+        run: |
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import base64,gzip,hashlib,json,os,re,secrets,pathlib
+          from cryptography.hazmat.primitives import serialization,hashes
+          from cryptography.hazmat.primitives.asymmetric import padding
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+          p=pathlib.Path('/tmp/rutahd2_sql_dump.gz')
+          compressed=p.read_bytes()
+          sql=gzip.decompress(compressed)
+          assert sql.startswith(b'-- Ruta H&D V2 respaldo SQL')
+          tables=set(re.findall(rb'CREATE TABLE\s+'+bytes([96])+rb'([^'+bytes([96])+rb']+)'+bytes([96]),sql,re.I))
+          assert len(tables)==45, ('DDL incorrecto',len(tables))
+          for table in ('usuarios','roles','tokens_acceso'):
+              assert table.encode() in tables
+          pub=serialization.load_pem_public_key(pathlib.Path('deployment/keys/respaldo-sql-20261121-public.pem').read_bytes())
+          key=AESGCM.generate_key(bit_length=256);nonce=secrets.token_bytes(12)
+          ciphertext=AESGCM(key).encrypt(nonce,compressed,None)
+          encrypted_key=pub.encrypt(key,padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
+          obj={
+            'format':'RutaHD2-AES256-GCM-RSA3072-OAEP-SHA256-v1',
+            'date':'2026-11-21',
+            'nonce_b64':base64.b64encode(nonce).decode(),
+            'encrypted_key_b64':base64.b64encode(encrypted_key).decode(),
+            'ciphertext_b64':base64.b64encode(ciphertext).decode(),
+            'sql_gzip_sha256':hashlib.sha256(compressed).hexdigest(),
+            'create_table_count':len(tables),
+          }
+          out=pathlib.Path('rutahyd2_es_backup_2026-11-21.cifrado.json')
+          out.write_text(json.dumps(obj,separators=(',',':')),encoding='utf-8')
+          out.chmod(0o600)
+          print('BACKUP_VALIDADO_Y_CIFRADO: tablas='+str(len(tables))+' sql_bytes='+str(len(sql))+' archivo_cifrado_bytes='+str(out.stat().st_size))
+          PY
+          rm -f /tmp/rutahd2_sql_dump.gz
+
+      - name: Guardar respaldo cifrado en artefacto externo descargable
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahyd2-es-respaldo-cifrado-20261121
+          path: rutahyd2_es_backup_2026-11-21.cifrado.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Borrar sonda temporal siempre
+        if: always()
+        run: |
+          set +x
+          if [[ -n "$PROBE_NAME" ]]; then
+            cat >/tmp/deletebk.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 35
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          rm "/htdocs/$PROBE_NAME"
+          bye
+          EOF
+            lftp -f /tmp/deletebk.lftp >/dev/null || echo "::warning::Comprobar borrado de sonda caducada."
+          fi
+          rm -f /tmp/rutahd2_backup_probe.php /tmp/upbk.lftp /tmp/deletebk.lftp /tmp/rutahd2_sql_dump.gz
+          echo 'Ninguna operación de escritura en MySQL; API no habilitada.' >> "$GITHUB_STEP_SUMMARY"

@@ -58,16 +58,29 @@ jobs:
                   const controller=new AbortController();
                   const timeout=setTimeout(()=>controller.abort(),12000);
                   try {
-                    const result=await fetch('/api/v1/estado',{signal:controller.signal,headers:{Accept:'application/json'}});
-                    return {status:result.status,content_type:result.headers.get('content-type')||''};
+                    const result=await fetch('/api/v1/estado',{signal:controller.signal,cache:'no-store',headers:{Accept:'application/json'}});
+                    const type=result.headers.get('content-type')||'';
+                    const state=type.includes('json')?await result.json():{};
+                    const protectedStatus=async(path,headers={})=>{
+                      const response=await fetch(path,{cache:'no-store',headers:{Accept:'application/json',...headers}});
+                      return response.status;
+                    };
+                    return {status:result.status,content_type:type,estado:state.estado,
+                      servicio:state.servicio,perfil:result.status===200?await protectedStatus('/api/v1/perfil'):null,
+                      usuarios:result.status===200?await protectedStatus('/api/v1/usuarios'):null,
+                      jwt_invalido:result.status===200?await protectedStatus('/api/v1/perfil',{Authorization:'Bearer invalido'}):null};
                   } finally{clearTimeout(timeout);}
                 });
                 console.log('API_HTTP:',api.status);
                 console.log('API_JSON:',api.content_type.includes('json')?'SI':'NO');
-                if(api.status===503 && api.content_type.includes('json')){
-                  console.log('API_CERRADA_CON_SEGURIDAD=SI');
+                if(api.status===503 && api.content_type.includes('json')&&api.estado==='no_habilitada'){
+                  console.log('API_MODO=CERRADA_SEGURO');
+                } else if(api.status===200 && api.content_type.includes('json')&&
+                  api.estado==='disponible'&&api.servicio==='Ruta H&D2 API'&&
+                  api.perfil===401&&api.usuarios===401&&api.jwt_invalido===401){
+                  console.log('API_MODO=PRODUCCION_JWT_PROTEGIDA');
                 } else {
-                  console.log('API_CERRADA_CON_SEGURIDAD=NO_O_NO_VERIFICABLE');
+                  console.log('API_MODO=INCONSISTENTE');
                   process.exitCode=1;
                 }
               } catch(e) {

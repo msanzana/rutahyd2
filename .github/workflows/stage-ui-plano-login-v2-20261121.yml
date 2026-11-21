@@ -1,0 +1,131 @@
+name: Publicar vista previa de menú plano y login sin habilitar API
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/stage-ui-plano-login-v2-20261121.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      PREVIEW_PATH: /htdocs/ui-plana-login-v2-20261121
+    steps:
+      - name: Obtener versión frontend exacta
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch feature/ui-menu-plano-login-20261121 https://github.com/msanzana/rutahyd2front.git /tmp/front
+          test "$(git -C /tmp/front rev-parse HEAD)" = '37087a7a04331a407cc8558ae980310a956d7f5e'
+          node --check /tmp/front/assets/js/login-ui.js
+          node --check /tmp/front/assets/js/catalogos-api.js
+          node --check /tmp/front/assets/js/perfiles.js
+          grep -Fq 'id="loginDialog"' /tmp/front/index.html
+          test "$(grep -o 'data-catalog-key=' /tmp/front/index.html | wc -l)" -eq 10
+          test "$(grep -o 'data-admin-catalog=' /tmp/front/index.html | wc -l)" -eq 10
+          test "$(grep -o 'nav-depth-' /tmp/front/index.html | wc -l)" -eq 0
+          test -s /tmp/front/assets/css/correcciones-ui.css
+      - name: Instalar FTPS
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Verificar que el frontend público y Laravel mantienen sus guardias
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/root_before
+          get /htdocs/violeta-demo/index.html -o /tmp/violet_before
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_before
+          bye
+          EOF
+          lftp -f /tmp/read.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/guard_before
+          python3 - <<'PY'
+          from pathlib import Path
+          names=['inicio','pedidos','clientes','productos','inventario','informes','administracion']
+          for place in ('root','violet'):
+              data=Path('/tmp/'+place+'_before').read_text('utf-8')
+              assert data.count('data-catalog-key=')==10
+              assert data.count('data-admin-catalog=')==10
+              a=[data.index('data-nav="'+n+'"') for n in names]
+              assert a==sorted(a)
+          print('Menú público sin alteraciones previo a la vista previa.')
+          PY
+      - name: Crear HTML de vista previa que reutiliza logo alojado
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          source=Path('/tmp/front/index.html').read_text('utf-8')
+          assert source.count('assets/img/prueba-rutahd2.webp')==2
+          source=source.replace('assets/img/prueba-rutahd2.webp','/assets/img/prueba-rutahd2.webp')
+          assert source.count('</head>')==1
+          source=source.replace('</head>','  <meta name="robots" content="noindex,nofollow">\n</head>')
+          Path('/tmp/preview.html').write_text(source,'utf-8')
+          PY
+      - name: Publicar aislado sin modificar frontend principal ni MariaDB
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/write.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          mkdir -p "$PREVIEW_PATH"
+          mirror -R --verbose=0 /tmp/front/assets/js "$PREVIEW_PATH/assets/js"
+          mirror -R --verbose=0 /tmp/front/assets/css "$PREVIEW_PATH/assets/css"
+          put /tmp/preview.html -o "$PREVIEW_PATH/index.html"
+          bye
+          EOF
+          lftp -f /tmp/write.lftp >/dev/null
+      - name: Comparar archivos y garantizar inmutabilidad del sitio público
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "$PREVIEW_PATH/index.html" -o /tmp/preview_after
+          get "$PREVIEW_PATH/assets/css/correcciones-ui.css" -o /tmp/css_after
+          get "$PREVIEW_PATH/assets/js/login-ui.js" -o /tmp/login_after
+          get "$PREVIEW_PATH/assets/js/app.js" -o /tmp/app_after
+          get /htdocs/index.html -o /tmp/root_after
+          get /htdocs/violeta-demo/index.html -o /tmp/violet_after
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_after
+          bye
+          EOF
+          lftp -f /tmp/verify.lftp >/dev/null
+          cmp -s /tmp/preview.html /tmp/preview_after
+          cmp -s /tmp/front/assets/css/correcciones-ui.css /tmp/css_after
+          cmp -s /tmp/front/assets/js/login-ui.js /tmp/login_after
+          cmp -s /tmp/front/assets/js/app.js /tmp/app_after
+          cmp -s /tmp/root_before /tmp/root_after
+          cmp -s /tmp/violet_before /tmp/violet_after
+          cmp -s /tmp/guard_before /tmp/guard_after
+          echo 'Vista previa verificada; sitios públicos, backend protegido y MySQL sin cambios.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'URL https://rutahyd2.free.nf/ui-plana-login-v2-20261121/' >> "$GITHUB_STEP_SUMMARY"

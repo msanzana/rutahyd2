@@ -33,6 +33,12 @@ if (
     exit;
 }
 
+// Apache sirve este archivo como /api/index.php, pero Laravel necesita recibir
+// la ruta completa /api/v1/... (su router ya aplica el prefijo /api).
+// Sin normalizar SCRIPT_NAME, Symfony puede recortar /api y devolver 404.
+$_SERVER['SCRIPT_NAME'] = '/index.php';
+$_SERVER['PHP_SELF'] = '/index.php';
+
 // Mantener el punto de entrada desacoplado del directorio de frontend.
 define('LARAVEL_START', microtime(true));
 require $autoload;

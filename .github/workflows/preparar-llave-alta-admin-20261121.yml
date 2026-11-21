@@ -1,0 +1,93 @@
+name: Preparar clave privada cifrada para alta administradora sin exponer datos
+on:
+  push:
+    branches: [main]
+    paths:
+      - deployment/solicitudes/preparar-llave-alta-20261121.txt
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  preparar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Instalar FTPS y biblioteca de cifrado
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+          python3 -m pip install --break-system-packages -q cryptography
+      - name: Obtener temporalmente secreto de entorno sin registrarlo
+        run: |
+          set +x
+          umask 077
+          cat > /tmp/llave-read.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 40
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/.env -o /tmp/rutahd_private_for_wrap
+          get /htdocs/api-v2/.htaccess -o /tmp/rutahd_guard_for_wrap
+          cls -1 -a /htdocs/api-v2/storage/app/private > /tmp/rutahd_markers_for_wrap
+          bye
+          EOF
+          lftp -f /tmp/llave-read.lftp >/dev/null
+          test -s /tmp/rutahd_private_for_wrap
+          grep -Fq 'Require all denied' /tmp/rutahd_guard_for_wrap
+          if grep -Fxq rutahd2_api_ready /tmp/rutahd_markers_for_wrap; then
+            echo "::error::La API aparece activa; detener operación sin modificar datos."
+            exit 1
+          fi
+      - name: Generar llave RSA y proteger privada con secreto JWT existente
+        run: |
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import os,json,pathlib,secrets,base64
+          from cryptography.hazmat.primitives import serialization,hashes
+          from cryptography.hazmat.primitives.asymmetric import rsa
+          from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+          env={}
+          for line in pathlib.Path('/tmp/rutahd_private_for_wrap').read_text().splitlines():
+            if line.strip() and not line.strip().startswith('#') and '=' in line:
+              key,value=line.split('=',1)
+              try:value=json.loads(value)
+              except ValueError:value=value.strip(' "\x27')
+              env[key]=value
+          assert env.get('APP_ENV')=='production'
+          assert env.get('DB_DATABASE')=='if0_43460400_rutahyd2_es'
+          secret=env.get('RUTAHD_JWT_SECRET')
+          assert isinstance(secret,str) and len(secret)>=64
+          key=rsa.generate_private_key(public_exponent=65537,key_size=3072)
+          priv=key.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption())
+          pub=key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo)
+          salt=secrets.token_bytes(32);nonce=secrets.token_bytes(12)
+          derived=HKDF(algorithm=hashes.SHA256(),length=32,salt=salt,info=b'rutahd2-private-admin-bootstrap-20261121-v1').derive(secret.encode())
+          ciphertext=AESGCM(derived).encrypt(nonce,priv,b'rutahd2-bootstrap-private')
+          data={'scheme':'HKDF-SHA256-AES256-GCM-v1','salt':base64.b64encode(salt).decode(),
+                'nonce':base64.b64encode(nonce).decode(),'ciphertext':base64.b64encode(ciphertext).decode()}
+          pathlib.Path('rutahyd2_onboarding_public.pem').write_bytes(pub)
+          pathlib.Path('rutahyd2_onboarding_private_wrapped.json').write_text(json.dumps(data))
+          print('Claves de provisión generadas, pública exportable, privada cifrada con JWT secreto existente.')
+          PY
+          shred -u /tmp/rutahd_private_for_wrap || rm -f /tmp/rutahd_private_for_wrap
+          rm -f /tmp/llave-read.lftp /tmp/rutahd_guard_for_wrap /tmp/rutahd_markers_for_wrap
+      - name: Retener solo pública y privada cifrada en artefacto temporal
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahyd2-llave-de-alta-cifrada-20261121
+          path: |
+            rutahyd2_onboarding_public.pem
+            rutahyd2_onboarding_private_wrapped.json
+          if-no-files-found: error
+          retention-days: 7

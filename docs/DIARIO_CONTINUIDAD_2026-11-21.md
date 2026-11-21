@@ -107,3 +107,9 @@ Portada y violeta-demo verificadas mediante navegador externo: al abrir se ve lo
 - Pruebas de sintaxis y validador RUT aprobadas: https://github.com/msanzana/rutahyd2/actions/runs/44888377005
 - **NO se ha creado aún la cuenta ni enviado ningún correo**. No se ejecutó SQL19, ni se importó SQL18 ni se activó la API. La cuenta no puede anunciarse como existente hasta contar con acceso de escritura seguro a `if0_43460400_rutahyd2_es` y comprobar SMTP y respaldo.
 - Orden necesario: respaldo externo validado -> migración si hace falta -> configurar SMTP -> alta privada del administrador -> confirmar recepción/enlace e inicio JWT -> activar marcador `rutahd2_api_ready` -> verificar CRUD real con permisos.
+
+## Aclaración de herramienta operativa — 21-11-2026
+- El usuario confirma que la navegación y automatización web actual de Ruta H&D se está realizando con **Firecrawl Hangar**: https://hangar.firecrawl.dev/. Se debe priorizar ese entorno y las herramientas Firecrawl disponibles para cualquier interacción web autorizada; no usar otros conectores de datos para escribir en la base Ruta H&D.
+- Este diario previamente documentaba verificaciones de navegador y transferencias FTPS por GitHub Actions, pero no incluía literalmente la dirección de Hangar; esta entrada la registra expresamente.
+- En esta revisión, el navegador remoto Firecrawl no pudo iniciar sesión y la lectura anónima de la URL devolvió HTTP 404. Esto NO prueba indisponibilidad del entorno autenticado del usuario; hace falta acceso de sesión autorizado para acciones dentro de Hangar.
+- Regla de seguridad vigente: la navegación mediante Hangar no equivale a disponer de permisos SQL. Crear el administrador únicamente tras verificar acceso a la base correcta, respaldo, estructura, SMTP y mecanismo seguro de contraseña; mantener API bloqueada hasta completar pruebas reales.

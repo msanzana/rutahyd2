@@ -228,7 +228,7 @@ Esta instrucción sustituye las recomendaciones anteriores del diario que priori
 - El workflow `publicar-produccion-sin-demo-20261121.yml` se corrigió para desplegar el **frontend main actual**, no una SHA antigua de `feature`. Incluye exigencia de modo productivo, versión nueva de scripts/estilos, ruta PNG de logo oficial `hd-branding/logo-hd-site.png`, respaldo previo, cotejo por bytes y rollback.
 - **Publicación exitosa**: https://github.com/msanzana/rutahyd2/actions/runs/44959751680 . SHA frontend desplegada y verificada por flujo: `cb3c5c30547c0fd16bcf4eae88a02673a626dc57`. Se publicaron únicamente interfaz y recursos JS/CSS; protección y backend intactos. No se ejecutó DDL, DML ni se creó marcador JWT.
 - Se actualizó el README del frontend, eliminando descripciones obsoletas de demo y documentando la integración y sus bloqueos reales.
-- Se preparó y solicitó smoke browser no autenticado de la portada definitiva: https://github.com/msanzana/rutahyd2/actions/runs/44959951853 . Consultar conclusión de esta corrida antes de certificar prueba de navegador final.
+- **Smoke browser productivo aprobado**: https://github.com/msanzana/rutahyd2/actions/runs/44959951853 . Chromium verificó HTTP 200 de portada, ocho padres oficiales en orden, login inicial abierto, ausencia del botón demo y del script legado, app productiva cargada, logo PNG con ancho natural 350 y API pública HTTP 503 JSON (cerrada intencionalmente).
 
 ### Pendiente para cerrar la conexión de verdad
 1. Reconciliar el método de correo que el titular confirma con la configuración SMTP que ve la sonda del `.env` de Laravel, sin cambiar lo que funciona.

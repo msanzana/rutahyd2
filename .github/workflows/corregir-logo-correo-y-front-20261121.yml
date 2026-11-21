@@ -17,7 +17,7 @@ jobs:
       FTP_HOST: ftpupload.net
       FTP_USER: if0_43460400
       FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
-      MAIL_SHA: 26af91e7c1c9513220fec4036edd358c703358a1
+      MAIL_SHA: fc9f635855ef9b9a984cfbe90a1629ad4ad399d4
       FRONT_SHA: 70b8d07650c5cc69983eb706f5cbab0cc8d5006d
     steps:
       - name: Preparar fuentes fijadas y comprobar plantilla
@@ -28,7 +28,7 @@ jobs:
           git clone --depth 1 --branch main -q https://github.com/msanzana/rutahyd2front.git /tmp/frontend
           test "$(git -C /tmp/backend_mail rev-parse HEAD)" = "$MAIL_SHA"
           test "$(git -C /tmp/frontend rev-parse HEAD)" = "$FRONT_SHA"
-          grep -Fq "embed(resource_path('mail/logo-hd-email.png'))" /tmp/backend_mail/resources/views/emails/corporativo.blade.php
+          grep -Fq "embed(base_path('../hd-branding/logo-hd-site.png'))" /tmp/backend_mail/resources/views/emails/corporativo.blade.php
           test -s /tmp/frontend/assets/img/logo-hd-transparente.webp
           test -s /tmp/frontend/assets/img/prueba-rutahd2.webp
           php -l /tmp/backend_mail/app/Mail/CorreoCorporativo.php
@@ -101,8 +101,6 @@ jobs:
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
           mkdir -p /htdocs/hd-branding
           put /tmp/logo-hd-site.png -o /htdocs/hd-branding/logo-hd-site.png
-          mkdir -p /htdocs/api-v2/resources/mail
-          put /tmp/logo-hd-email.png -o /htdocs/api-v2/resources/mail/logo-hd-email.png
           put /tmp/backend_mail/resources/views/emails/corporativo.blade.php -o /htdocs/api-v2/resources/views/emails/corporativo.blade.php
           put /tmp/index-hd-fix.html -o /htdocs/index.html
           bye
@@ -123,7 +121,6 @@ jobs:
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
           get /htdocs/hd-branding/logo-hd-site.png -o /tmp/public_main_logo
           get /htdocs/index.html -o /tmp/lindex_after
-          get /htdocs/api-v2/resources/mail/logo-hd-email.png -o /tmp/private_email_logo
           get /htdocs/api-v2/resources/views/emails/corporativo.blade.php -o /tmp/private_email_blade
           get /htdocs/api-v2/.htaccess -o /tmp/lguard_after
           get /htdocs/api/index.php -o /tmp/lgateway_after
@@ -132,7 +129,6 @@ jobs:
           lftp -f /tmp/lverify.lftp >/dev/null
           cmp -s /tmp/logo-hd-site.png /tmp/public_main_logo
           cmp -s /tmp/index-hd-fix.html /tmp/lindex_after
-          cmp -s /tmp/logo-hd-email.png /tmp/private_email_logo
           cmp -s /tmp/backend_mail/resources/views/emails/corporativo.blade.php /tmp/private_email_blade
           cmp -s /tmp/lguard /tmp/lguard_after
           cmp -s /tmp/lgateway /tmp/lgateway_after
@@ -140,7 +136,7 @@ jobs:
           {
             echo '### Corrección de logotipos H&D'
             echo '- Logo PNG del frontend publicado en /htdocs/hd-branding y referencia HTML corregida byte a byte.'
-            echo '- El PNG interno para correo CID se encuentra dentro del backend protegido.'
+            echo '- Laravel incrusta como CID el PNG alojado en /htdocs/hd-branding, sin dependencias externas.'
             echo '- El Blade embed insertará el logo PNG como recurso inline en SMTP Laravel.'
             echo '- No se modificó .env, base de datos ni gateway.'
           } >> "$GITHUB_STEP_SUMMARY"

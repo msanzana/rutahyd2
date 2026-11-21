@@ -1,0 +1,45 @@
+name: Comprobar plantilla de correos corporativos Ruta HD V2
+on:
+  push:
+    branches:
+      - feature/email-corporativo-v2-20261121
+    paths:
+      - app/Mail/CorreoCorporativo.php
+      - app/Http/Controllers/RecuperacionContrasenaControlador.php
+      - resources/views/emails/**
+      - .github/workflows/validar-correos-corporativos.yml
+permissions:
+  contents: read
+jobs:
+  probar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validar sintaxis PHP
+        run: |
+          php -l app/Mail/CorreoCorporativo.php
+          php -l app/Http/Controllers/RecuperacionContrasenaControlador.php
+      - name: Verificar coherencia y condiciones de seguridad sin enviar mensajes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          php=Path('app/Mail/CorreoCorporativo.php').read_text()
+          ctl=Path('app/Http/Controllers/RecuperacionContrasenaControlador.php').read_text()
+          html=Path('resources/views/emails/corporativo.blade.php').read_text()
+          txt=Path('resources/views/emails/corporativo-texto.blade.php').read_text()
+          assert 'extends Mailable' in php
+          assert 'new Content(' in php and "view: 'emails.corporativo'" in php and "text: 'emails.corporativo-texto'" in php
+          assert "PHP_URL_SCHEME) !== 'https'" in php
+          assert "PHP_URL_HOST) !== $originHost" in php
+          assert 'Mail::raw' not in ctl
+          assert 'CorreoCorporativo::recuperacion($url)' in ctl
+          assert "hash('sha256', $token)" in ctl
+          assert "now()->addMinutes(30)" in ctl
+          for mark in ('$categoria','$titulo','$saludo','$parrafos','$accionUrl','$accionEtiqueta','$nota','$referencia'):
+              assert mark in html and mark in txt, mark
+          assert 'https://raw.githubusercontent.com/msanzana/rutahyd2front/main/assets/img/logo-hd-transparente.webp' in html
+          assert '{{ $parrafo }}' in html and '{!!' not in html
+          assert 'font-family:Arial' in html and 'background:#281342' in html
+          print('Plantilla responsive, Blade seguro, HTML/texto y recuperación integrados.')
+          PY

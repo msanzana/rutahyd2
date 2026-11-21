@@ -1,0 +1,27 @@
+name: Verificar alta segura administrador con RUT sin datos productivos
+on:
+  push:
+    branches: [feature/alta-admin-rut-segura-20261121]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Revisar sintaxis PHP del aprovisionamiento
+        run: |
+          php -l app/Support/RutChileno.php
+          php -l app/Models/Usuario.php
+          php -l app/Console/Commands/CrearAdministrador.php
+          php -l app/Http/Controllers/UsuariosControlador.php
+      - name: Probar dígito verificador y normalización RUT
+        run: php tests/validar_rut_usuarios.php
+      - name: Comprobar migración y flujo sin contraseña compartida
+        run: |
+          grep -Fq 'ADD COLUMN rut VARCHAR(12) NULL' database/espanol/19_rut_usuarios.sql
+          grep -Fq 'UNIQUE KEY uq_usuarios_rut' database/espanol/19_rut_usuarios.sql
+          grep -Fq 'RecuperacionContrasenaControlador::enviarEnlace' app/Console/Commands/CrearAdministrador.php
+          grep -Fq "config('mail.default')!=='smtp'" app/Console/Commands/CrearAdministrador.php
+          grep -Fq 'DB::transaction' app/Console/Commands/CrearAdministrador.php

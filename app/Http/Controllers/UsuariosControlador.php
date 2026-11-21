@@ -34,7 +34,7 @@ final class UsuariosControlador extends Controller
             'usuarios' => DB::table('usuarios')
                 ->join('roles','roles.id','=','usuarios.rol_id')
                 ->orderBy('usuarios.nombre')
-                ->get(['usuarios.id','usuarios.nombre','usuarios.correo_electronico',
+                ->get(['usuarios.id','usuarios.nombre','usuarios.rut','usuarios.correo_electronico',
                     'usuarios.activo','usuarios.rol_id','roles.codigo as rol_codigo',
                     'roles.nombre as perfil']),
             'roles' => Rol::where('codigo','!=','administrador')->orderBy('nombre')

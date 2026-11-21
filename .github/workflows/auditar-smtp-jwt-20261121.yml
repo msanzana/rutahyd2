@@ -1,0 +1,73 @@
+name: Auditar requisitos privados del login sin mostrar secretos
+on:
+  push:
+    branches: [main]
+    paths:
+      - deployment/solicitudes/auditar-smtp-jwt-20261121.txt
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Instalar conexión FTPS
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Obtener .env temporal sin registrar su contenido
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat > /tmp/auditar.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/.env -o /tmp/env_audit
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_audit
+          bye
+          EOF
+          lftp -f /tmp/auditar.lftp >/dev/null
+          test -s /tmp/env_audit
+          grep -Fq 'Require all denied' /tmp/guard_audit
+      - name: Emitir solo resultados booleanos, eliminar archivos sensibles
+        run: |
+          set -euo pipefail
+          set +x
+          python3 - <<'PY'
+          import pathlib,os,json
+          p=pathlib.Path('/tmp/env_audit')
+          cfg={}
+          for line in p.read_text().splitlines():
+              if not line.strip() or line.lstrip().startswith('#') or '=' not in line:continue
+              k,v=line.split('=',1)
+              try:v=json.loads(v)
+              except ValueError:v=v.strip().strip("'").strip('"')
+              cfg[k.strip()]=str(v)
+          required=('MAIL_HOST','MAIL_PORT','MAIL_USERNAME','MAIL_PASSWORD','MAIL_FROM_ADDRESS')
+          checks={
+           'backend_env_production':cfg.get('APP_ENV')=='production',
+           'db_destino_es_correcto':cfg.get('DB_DATABASE')=='if0_43460400_rutahyd2_es',
+           'smtp_habilitado':cfg.get('MAIL_MAILER','').lower()=='smtp',
+           'smtp_campos_completos':all(cfg.get(x,'').strip() not in ('','null','none') for x in required),
+           'url_https_configurada':cfg.get('APP_URL','').startswith('https://rutahyd2.free.nf'),
+           'jwt_secret_presente':len(cfg.get('RUTAHD_JWT_SECRET',''))>=32,
+           'backend_directorio_protegido':'Require all denied' in pathlib.Path('/tmp/guard_audit').read_text(),
+          }
+          print('AUDITORIA_SIN_SECRETOS')
+          for k,v in checks.items():print(f'{k}={"SI" if v else "NO"}')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write('## Validación segura de entorno Laravel\n')
+              for k,v in checks.items():f.write(f'- {k}: {"Sí" if v else "No"}\n')
+          PY
+          shred -u /tmp/env_audit 2>/dev/null || rm -f /tmp/env_audit
+          rm -f /tmp/auditar.lftp /tmp/guard_audit

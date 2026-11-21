@@ -176,3 +176,9 @@ Portada y violeta-demo verificadas mediante navegador externo: al abrir se ve lo
 - Auditoría privada productiva read-only repetida: https://github.com/msanzana/rutahyd2/actions/runs/44956252590, resultado `smtp_habilitado=NO`, `smtp_campos_completos=NO`; `.env` Laravel continúa sin SMTP. JWT y destino DB productivo correctos.
 - **Acción manual necesaria:** en Gmail del titular, Configuración > Ver todos los ajustes > Cuentas e importación > Enviar correo electrónico como: fijar `neo.hiper.xavier@gmail.com` como predeterminado o reparar/eliminar alias externo defectuoso `msanzana@helpcom.cl`. Evitar reenviar contraseña hasta corregirlo.
 - API permanece deshabilitada. No se ha aplicado por esta revisión ningún SQL ni contraseña nueva.
+
+## Gmail: remitente corregido y entregas confirmadas — 21-11-2026
+- Tras corrección de la configuración «Enviar correo electrónico como» por el titular, se envió prueba desde el Gmail conectado: mensaje Gmail ID `1a20037eba453c58`, dirección real en encabezado From: `neo.hiper.xavier@gmail.com`. **Recibido en carpeta Bandeja de entrada de Outlook** de la cuenta destino a las 22:26:39Z.
+- Se reenvió por instrucción previa del titular una contraseña temporal al mismo destinatario mediante Gmail, mensaje `1a20038cfe4fcfdd`. **Recibido en Outlook** a las 22:27:37Z, sin rebotes nuevos detectados. Contraseña no repetida aquí, ni guardada en GitHub.
+- El DML privado local `rutahyd2_admin_restaurar_contrasena_privado_20261121.sql` fue revisado localmente: UPDATE usuarios presente, hash Argon2id corresponde a la clave temporal enviada y verificación `cuentas_actualizadas` existente. **No consta que el usuario haya ejecutado ese DML**, por lo que no afirmar que contraseña temporal ya funciona.
+- El SMTP de Laravel `.env` sigue sin credencial según última auditoría, aunque el conector Gmail de ChatGPT ya envía/recibe correctamente. El gateway público sigue cerrado hasta pruebas JWT y recuperación real.

@@ -1,0 +1,138 @@
+name: Diagnosticar PHP y MariaDB real con sonda efímera
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/solicitudes/preflight-php-mysql-v2-20261121.txt']
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 19
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Instalar FTPS y Chromium
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+          mkdir -p /tmp/rutahd-smoke && cd /tmp/rutahd-smoke
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Preparar sonda PHP con token aleatorio y expiración
+        run: |
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import secrets,os,time,pathlib
+          name='rutahd2_diag_'+secrets.token_hex(16)+'.php'
+          token=secrets.token_hex(32)
+          php=r'''<?php
+          declare(strict_types=1);
+          ini_set('display_errors','0');
+          header('Cache-Control: no-store');
+          header('Content-Type: application/json; charset=utf-8');
+          if($_SERVER['REQUEST_METHOD']!=='GET'||time()>__EXPIRY__||
+             !hash_equals('__TOKEN__',(string)($_SERVER['HTTP_X_RUTAHD_DIAGNOSTIC']??''))){
+             http_response_code(404);exit;
+          }
+          try {
+             $base=__DIR__.'/api-v2';
+             require_once $base.'/vendor/autoload.php';
+             \Dotenv\Dotenv::createImmutable($base)->safeLoad();
+             if(($_ENV['DB_HOST']??'')!=='sql307.infinityfree.com'||
+                ($_ENV['DB_DATABASE']??'')!=='if0_43460400_rutahyd2_es')throw new RuntimeException('config');
+             $dsn='mysql:host='.$_ENV['DB_HOST'].';port=3306;dbname='.$_ENV['DB_DATABASE'].';charset=utf8mb4';
+             $pdo=new \PDO($dsn,(string)($_ENV['DB_USERNAME']??''),(string)($_ENV['DB_PASSWORD']??''),[
+                \PDO::ATTR_ERRMODE=>\PDO::ERRMODE_EXCEPTION,\PDO::ATTR_TIMEOUT=>6
+             ]);
+             $tablas=(int)$pdo->query("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type='BASE TABLE'")->fetchColumn();
+             $roles=(int)$pdo->query('SELECT COUNT(*) FROM roles')->fetchColumn();
+             $usuarios=(int)$pdo->query('SELECT COUNT(*) FROM usuarios')->fetchColumn();
+             $jwt=class_exists(\Firebase\JWT\JWT::class);
+             $argon=defined('PASSWORD_ARGON2ID')&&in_array(PASSWORD_ARGON2ID,password_algos(),true);
+             $ok=$tablas===45&&$roles===5&&$jwt;
+             http_response_code($ok?200:503);
+             echo json_encode(['ok'=>$ok,'db'=>'connected','tablas'=>$tablas,'roles'=>$roles,'usuarios'=>$usuarios,'jwt_lib'=>$jwt,'argon2id'=>$argon]);
+          } catch(\Throwable $e) {
+             http_response_code(503);
+             echo json_encode(['ok'=>false,'stage'=>'php_or_database','error_class'=>get_class($e)]);
+          }
+          '''
+          php=php.replace('__TOKEN__',token).replace('__EXPIRY__',str(int(time.time()+900)))
+          p=pathlib.Path('/tmp/rutahd_probe.php');p.write_text(php);p.chmod(0o600)
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+             f.write('PROBE_NAME='+name+'\nPROBE_TOKEN='+token+'\n')
+          print('Preparada sonda de solo lectura con token de 256 bits y TTL de 15 minutos.')
+          PY
+          php -l /tmp/rutahd_probe.php
+      - name: Subir sonda de comprobación con nombre aleatorio
+        run: |
+          set +x
+          umask 077
+          cat >/tmp/upload-probe.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/rutahd_probe.php -o "/htdocs/$PROBE_NAME"
+          bye
+          EOF
+          lftp -f /tmp/upload-probe.lftp >/dev/null
+      - name: Ejecutar consulta inocua PHP y PDO usando navegador real
+        working-directory: /tmp/rutahd-smoke
+        run: |
+          set +x
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const file=process.env.PROBE_NAME,secret=process.env.PROBE_TOKEN;
+          if(!/^rutahd2_diag_[0-9a-f]{32}\.php$/.test(file)||!secret||secret.length!==64)process.exit(1);
+          const browser=await chromium.launch({headless:true});
+          try {
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:45000});
+            await page.waitForTimeout(12000);
+            const result=await page.evaluate(async ({file,secret})=>{
+              const controller=new AbortController(),tm=setTimeout(()=>controller.abort(),16000);
+              try {
+                const r=await fetch('/'+file,{headers:{'X-RutaHD-Diagnostic':secret,Accept:'application/json'},cache:'no-store',signal:controller.signal});
+                const content=(r.headers.get('content-type')||'').includes('json')?await r.json():{};
+                return {http:r.status,ok:content.ok===true,db:content.db,tablas:content.tablas,roles:content.roles,
+                  usuarios:content.usuarios,jwt_lib:content.jwt_lib,argon2id:content.argon2id,
+                  error_class:typeof content.error_class==='string'?content.error_class:'none'};
+              }finally{clearTimeout(tm);}
+            },{file,secret});
+            console.log('DIAGNOSTICO_PUBLICABLE',JSON.stringify(result));
+            if(result.http!==200||!result.ok||result.db!=='connected'||result.tablas!==45||result.roles!==5||!result.jwt_lib)process.exitCode=1;
+            await page.close();
+          }finally{await browser.close();}
+          JS
+      - name: Eliminar la sonda después de la prueba incluso si hubo error
+        if: always()
+        run: |
+          set +x
+          if [ -n "$PROBE_NAME" ]; then
+            cat >/tmp/remove-probe.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 35
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          rm "/htdocs/$PROBE_NAME"
+          bye
+          EOF
+            lftp -f /tmp/remove-probe.lftp >/dev/null || echo "::warning::Sonda expira en 15 minutos; comprobar limpieza."
+          fi
+          rm -f /tmp/rutahd_probe.php /tmp/upload-probe.lftp /tmp/remove-probe.lftp
+          echo 'API no fue habilitada; ninguna escritura en MySQL.'

@@ -7,3 +7,4 @@ reintento_con_secreto_actualizado=2026-11-21-2
 revisar_secret_tras_correccion_remitente=2026-11-21-login
 confirmacion_usuario_secret_repository=2026-11-21
 solicitud_aplicar_smtp_produccion=2026-11-21-post-ddl19
+nuevo_dispatch_secret_confirmado=2026-11-21-usuario-revision-2

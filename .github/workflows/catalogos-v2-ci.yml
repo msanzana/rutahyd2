@@ -21,6 +21,8 @@ jobs:
         run: |
           php -l app/Http/Controllers/CatalogoComercialControlador.php
           php -l app/Http/Controllers/ClasificacionProductoControlador.php
+          php -l app/Http/Controllers/ProductoComercialControlador.php
+          php -l tests/integracion_productos_crud.php
           php -l routes/api.php
           php -l app/Http/Controllers/SesionControlador.php
           php -l app/Http/Middleware/AutenticarToken.php

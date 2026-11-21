@@ -5,3 +5,4 @@ comprobacion_menu=true
 preservar_menu_principal=true
 sin_datos_mysql=true
 sin_activar_api=true
+retry=bash-path-interpolation-fixed

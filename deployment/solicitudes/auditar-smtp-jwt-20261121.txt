@@ -2,3 +2,4 @@ RUTA_HYD2_AUDITORIA_SOLO_LECTURA
 fecha=2026-11-21
 no_exponer_secretos=true
 sin_escrituras=true
+revision_entrega_correo=2026-11-21T19:05-03:00

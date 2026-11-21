@@ -1,0 +1,8 @@
+RUTAHD2_FULLSTACK_MENU_OFICIAL
+fecha=2026-11-21
+backend_sha=84330132449cadfa9fe89d8c07a597f464d1ef41
+frontend_sha=1181eec0e4991f9255332957ab8b133f35f90364
+productos_crud=true
+catalogos=10
+api_gate_remains_closed=true
+no_mysql_writes=true

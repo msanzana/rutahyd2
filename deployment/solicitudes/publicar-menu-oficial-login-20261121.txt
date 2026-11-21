@@ -1,0 +1,9 @@
+PUBLICAR_MENU_OFICIAL_Y_LOGIN
+origen_sha=0a1d84846c9f594e3bb917a5a480dcbd50413ccd
+vista_previa=44885248237_success
+pruebas=44884897384_34_ok
+logo_integrado=data_webp_b64
+respaldo_previo=html_js_css_ftps
+rollback_automatico=true
+mysql_sin_cambios=true
+jwt_sin_activar=true

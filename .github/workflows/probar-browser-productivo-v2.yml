@@ -36,13 +36,23 @@ jobs:
               const title=await page.title();
               const parents=await page.locator('.sidebar .nav > .nav-link, .sidebar .nav > .nav-group')
                 .evaluateAll(elements=>elements.map(el=>el.dataset.nav||el.querySelector('.nav-link')?.dataset.nav));
-              const expected=['inicio','pedidos','clientes','productos','inventario','informes','administracion'];
+              const expected=['administracion','compras','ventas','proveedores','clientes','productos','bodega','cuentas_corrientes'];
               const correct=JSON.stringify(parents)===JSON.stringify(expected);
               console.log('HTTP_FRONT:',navigation.status());
               console.log('TITULO_PRESENTE:',title.includes('Ruta')?'SI':'NO');
-              console.log('SIETE_PADRES_ORIGINALES:',correct?'SI':'NO');
+              console.log('OCHO_PADRES_OFICIALES:',correct?'SI':'NO');
               console.log('PADRES_ENCONTRADOS:',parents.length);
               if(!correct)process.exitCode=1;
+              const productivo=await page.evaluate(()=>({
+                login:document.getElementById('loginDialog')?.open===true,
+                demo:document.getElementById('loginDemo')!==null,
+                app:!!document.querySelector('script[src*="app-produccion.js"]'),
+                legacy:!!document.querySelector('script[src*="assets/js/app.js"]'),
+                logo:document.querySelector('.brand-logo')?.naturalWidth||0,
+                logo_png:(document.querySelector('.brand-logo')?.getAttribute('src')||'').includes('hd-branding/logo-hd-site.png')
+              }));
+              console.log('PRODUCCION_VALIDADA:',JSON.stringify(productivo));
+              if(!productivo.login||productivo.demo||!productivo.app||productivo.legacy||productivo.logo<=0||!productivo.logo_png)process.exitCode=1;
               try {
                 const api=await page.evaluate(async()=>{
                   const controller=new AbortController();

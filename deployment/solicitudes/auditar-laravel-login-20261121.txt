@@ -6,3 +6,4 @@ NO_CREDENTIALS=true
 VERIFICAR_LOGO_ACTUALIZADO=2026-11-21-3
 revalidacion=20261121-gateway-login-mysql
 post_dml_admin=2026-11-21-confirmacion_usuario
+verificacion_perfil_anonimo_401=2026-11-21

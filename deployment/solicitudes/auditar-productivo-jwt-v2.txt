@@ -4,3 +4,4 @@ tipo=solo_lectura
 sin_sql=true
 sin_cambios_remotos=true
 probar_http_sin_sesion=true
+revalidacion_20261121=integracion_front_backend_solo_lectura

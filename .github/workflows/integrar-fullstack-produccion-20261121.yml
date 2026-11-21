@@ -1,0 +1,153 @@
+name: Integrar frontend productivo y Laravel privado sin habilitar API
+on:
+  push:
+    branches: [main]
+    paths:
+      - deployment/solicitudes/integrar-backend-frontend-20261121.txt
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACKEND_SHA: f624dd0f1352c4a9a504cab78b4636f37ec10ce5
+      FRONTEND_SHA: 70b8d07650c5cc69983eb706f5cbab0cc8d5006d
+    steps:
+      - name: Comprobar fuentes y contratos antes de cambiar archivos
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          git clone -q --depth 1 --branch feature/catalogos-api-productos-v2-20261120 https://github.com/msanzana/rutahyd2.git /tmp/backend
+          git clone -q --depth 1 --branch main https://github.com/msanzana/rutahyd2front.git /tmp/front
+          test "$(git -C /tmp/backend rev-parse HEAD)" = "$BACKEND_SHA"
+          test "$(git -C /tmp/front rev-parse HEAD)" = "$FRONTEND_SHA"
+          for file in \
+            /tmp/backend/routes/api.php \
+            /tmp/backend/bootstrap/app.php \
+            /tmp/backend/app/Http/Controllers/SesionControlador.php \
+            /tmp/backend/app/Http/Controllers/RecuperacionContrasenaControlador.php \
+            /tmp/backend/app/Http/Controllers/UsuariosControlador.php \
+            /tmp/backend/app/Console/Commands/CrearAdministrador.php \
+            /tmp/backend/config/mail.php \
+            /tmp/backend/app/Support/RutChileno.php; do
+            php -l "$file" >/dev/null
+          done
+          for file in /tmp/front/assets/js/*.js; do node --check "$file"; done
+          for file in 18_recuperacion_contrasenas.sql 19_rut_usuarios.sql; do
+            test -s "/tmp/backend/database/espanol/$file"
+          done
+          test "$(grep -o 'data-nav="administracion"' /tmp/front/index.html | wc -l)" -eq 1
+          ! grep -Eq 'src="assets/js/(app|catalogos)\.js' /tmp/front/index.html
+          echo "Fuentes verificadas por SHA, PHP y JavaScript correctos."
+      - name: Instalar cliente FTPS
+        run: sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Auditar protección y API cerrada
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_before
+          get /htdocs/api/index.php -o /tmp/gateway_before
+          get /htdocs/index.html -o /tmp/frontend_before
+          cls -1 -a /htdocs/api-v2 > /tmp/backend_files
+          cls -1 -a /htdocs/api-v2/storage/app/private > /tmp/backend_markers
+          bye
+          EOF
+          lftp -f /tmp/read.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/guard_before
+          grep -Fq 'rutahd2_api_ready' /tmp/gateway_before
+          grep -Fxq '.env' /tmp/backend_files
+          if grep -Fxq rutahd2_api_ready /tmp/backend_markers; then
+            echo "::error::API activa; no desplegar cambios de autenticación sin ventana de mantenimiento."
+            exit 1
+          fi
+          echo "Backend privado, base intacta, API cerrada."
+      - name: Publicar backend Laravel completo y frontend principal por FTPS
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/deploy.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 50
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          mirror -R --verbose=0 /tmp/backend/app /htdocs/api-v2/app
+          mirror -R --verbose=0 /tmp/backend/routes /htdocs/api-v2/routes
+          mirror -R --verbose=0 /tmp/backend/config /htdocs/api-v2/config
+          mirror -R --verbose=0 /tmp/backend/database/espanol /htdocs/api-v2/database/espanol
+          put /tmp/backend/bootstrap/app.php -o /htdocs/api-v2/bootstrap/app.php
+          mirror -R --verbose=0 /tmp/front/assets/js /htdocs/assets/js
+          mirror -R --verbose=0 /tmp/front/assets/css /htdocs/assets/css
+          put /tmp/front/index.html -o /htdocs/index.html
+          bye
+          EOF
+          lftp -f /tmp/deploy.lftp >/dev/null
+      - name: Verificar archivos críticos y guardias sin secretos
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_after
+          get /htdocs/api/index.php -o /tmp/gateway_after
+          get /htdocs/api-v2/routes/api.php -o /tmp/routes_after
+          get /htdocs/api-v2/bootstrap/app.php -o /tmp/bootstrap_after
+          get /htdocs/api-v2/config/mail.php -o /tmp/mail_after
+          get /htdocs/api-v2/app/Console/Commands/CrearAdministrador.php -o /tmp/admin_after
+          get /htdocs/api-v2/database/espanol/18_recuperacion_contrasenas.sql -o /tmp/ddl18_after
+          get /htdocs/api-v2/database/espanol/19_rut_usuarios.sql -o /tmp/ddl19_after
+          get /htdocs/index.html -o /tmp/frontend_after
+          get /htdocs/assets/js/login-produccion.js -o /tmp/login_after
+          get /htdocs/assets/js/app-produccion.js -o /tmp/app_after
+          get /htdocs/assets/js/catalogos-api.js -o /tmp/catalog_after
+          bye
+          EOF
+          lftp -f /tmp/verify.lftp >/dev/null
+          cmp -s /tmp/guard_before /tmp/guard_after
+          cmp -s /tmp/gateway_before /tmp/gateway_after
+          cmp -s /tmp/backend/routes/api.php /tmp/routes_after
+          cmp -s /tmp/backend/bootstrap/app.php /tmp/bootstrap_after
+          cmp -s /tmp/backend/config/mail.php /tmp/mail_after
+          cmp -s /tmp/backend/app/Console/Commands/CrearAdministrador.php /tmp/admin_after
+          cmp -s /tmp/backend/database/espanol/18_recuperacion_contrasenas.sql /tmp/ddl18_after
+          cmp -s /tmp/backend/database/espanol/19_rut_usuarios.sql /tmp/ddl19_after
+          cmp -s /tmp/front/index.html /tmp/frontend_after
+          cmp -s /tmp/front/assets/js/login-produccion.js /tmp/login_after
+          cmp -s /tmp/front/assets/js/app-produccion.js /tmp/app_after
+          cmp -s /tmp/front/assets/js/catalogos-api.js /tmp/catalog_after
+          php -l /tmp/routes_after
+          php -l /tmp/bootstrap_after
+          echo 'FULLSTACK_ARCHIVOS_VERIFICADOS=SI'
+          {
+            echo '## Integración de archivos verificada por comparación byte a byte'
+            echo '- Backend PHP protegido: controladores, modelos, rutas, configuración y DDL instalados como archivos'
+            echo '- Frontend: login JWT y módulos oficiales de producción publicados'
+            echo '- No ejecutados DDL ni DML'
+            echo '- .env, vendor y guardias del gateway no modificados; API intencionalmente cerrada'
+          } >> "$GITHUB_STEP_SUMMARY"

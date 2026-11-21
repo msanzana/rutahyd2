@@ -35,3 +35,20 @@ No ejecutar cambios de esquema, habilitar el gateway o cargar credenciales hasta
 - Identificación de la captura de menú original y lista exacta de padres.
 - Identificador de respaldo, tamaño, método de verificación y ubicación protegida (sin divulgar secretos).
 - SHA desplegado de frontend y backend y resultado de pruebas autorizadas.
+
+## Continuación verificada — 21-11-2026
+- Auditoría privada .env exitosa: https://github.com/msanzana/rutahyd2/actions/runs/44880838282
+- Sonda PHP-PDO-MariaDB real exitosa y eliminada: https://github.com/msanzana/rutahyd2/actions/runs/44880836046. HTTP 200, 45 tablas, 5 roles, 0 usuarios, JWT y Argon2id disponibles. No escribió datos.
+- PR backend #5 fusionada a rama feature/catalogos-api-productos-v2-20261120; PR frontend #2 fusionada a feature/catalogos-api-adapter-v2-20261120.
+- CI de backend usuarios y frontend aprobada: https://github.com/msanzana/rutahyd2/actions/runs/44880651659 y https://github.com/msanzana/rutahyd2front/actions/runs/44880402524
+- Staging FTPS completado y verificado por bytes: https://github.com/msanzana/rutahyd2/actions/runs/44881482698. Vista previa /usuarios-v2-preview-20261121/, controladores Usuarios/Recuperacion, rutas, config mail y SQL18 alojados en backend privado. Las páginas públicas y .htaccess Laravel quedaron intactos.
+- Comprobación externa de preview en navegador: siete padres, diez clasificaciones de Productos, diez clasificaciones agrupadas en Administración. Usuarios y Perfiles ocultos sin sesión administrativa.
+- API de producción todavía devuelve HTTP 503 y estado no_habilitada.
+
+### Bloqueos y próximos pasos
+1. Respaldo íntegro con verificación fuera del hosting; todavía no realizado.
+2. Contrastar nombres y orden del menú principal con imagen oficial original, todavía pendiente.
+3. SQL18 instalado como archivo en hosting, NO ejecutado en MySQL. Verificar antes de aplicar.
+4. Crear administrador inicial con contraseña nueva por procedimiento administrativo privado. La última sonda comprobó cero usuarios.
+5. Configurar SMTP en entorno protegido y verificar entrega y recuperación real.
+6. Verificar JWT real, permisos, CRUD y reversión antes de crear marcador rutahd2_api_ready. No se habilitó la API.

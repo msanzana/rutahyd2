@@ -16,3 +16,4 @@ revision=3_recuperacion_retorno_login
 sha_front=39dd803b9853cecc550ac4fab1b99f667580c951
 ci=44887294926_success
 solicitud=20261121-release-main-produccion-permanente-v11
+solicitud=20261121-produccion-jwt-401-403-v12

@@ -65,3 +65,16 @@ No ejecutar cambios de esquema, habilitar el gateway o cargar credenciales hasta
 - Persisten bloqueos: base productiva sin administrador verificado, API HTTP 503 no_habilitada, SMTP/recuperación sin prueba real, SQL18 sin ejecutar y respaldo externo no certificado.
 - Menú principal oficial no cotejado con la imagen histórica de otro chat, no accesible como archivo en esta sesión. Conservar siete padres actualmente publicados hasta recibir imagen original y aplicar nombres exactos.
 - Clientes/Pedidos siguen con localStorage de demo; no afirmar fullstack hasta completar su API.
+
+## Menú principal OFICIAL — verificado a partir de imagen del usuario, 21-11-2026
+Fuente primaria: imagen entregada en esta conversación, con ocho padres y sin otros padres.
+Orden EXACTO: 1. Administración; 2. Compras; 3. Ventas; 4. Proveedores; 5. Clientes; 6. Productos; 7. Bodega; 8. Cuentas corrientes.
+Inicio queda accesible por logotipo, pero NO es un ítem principal. Pedidos, Inventario e Informes se retiraron como padres del sidebar. Productos y Administración conservan subítems planos, sin encabezados de tercer nivel.
+Frontend rama feature/menu-oficial-ocho-login-inicial-20261121, PR #4 fusionado en la rama de integración. CI: 34 pruebas aprobadas y 1 omitida: https://github.com/msanzana/rutahyd2front/actions/runs/44884897384
+Login inicial a pantalla completa con correo y contraseña. Solicita el estado de /api/v1/estado antes de habilitar envío de credenciales. La demo se abre mediante acción explícita y nunca es equivalente a una sesión real.
+Consulta frontend hacia Laravel programada para Compras (ordenes_compra), Ventas (ventas), Proveedores, Clientes y Bodega (bodegas), mediante API Bearer JWT; los recursos se renderizan con datos exclusivamente recibidos desde API. Cuentas corrientes NO posee aún endpoint y muestra aviso explícito.
+Problema de logo FTPS resuelto incrustando el WebP oficial en HTML para el despliegue (data URI); navegador confirmó naturalWidth=350 en login, barra lateral y portada.
+Vista previa: https://rutahyd2.free.nf/menu-oficial-login-v2-20261121/ ; FTP validado https://github.com/msanzana/rutahyd2/actions/runs/44885248237
+Publicación productiva estática completada con respaldo y verificación por bytes: https://github.com/msanzana/rutahyd2/actions/runs/44885390909
+Portada y violeta-demo verificadas mediante navegador externo: al abrir se ve login inicial; al elegir demo se muestran los ocho padres exactos, sin elementos antiguos; logos cargan correctamente.
+**Bloqueo real de backend:** /api/v1/estado continúa respondiendo HTTP 503, estado no_habilitada. No se activó JWT productivo ni se ejecutó SQL. Última auditoría de MariaDB encontró 45 tablas, 5 roles y 0 usuarios; faltan respaldo externo íntegro, SQL18 según corresponda, nuevo administrador aprovisionado en privado, SMTP y ensayos autenticados. No utilizar la contraseña compartida en chat.

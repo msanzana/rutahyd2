@@ -1,0 +1,5 @@
+RUTAHD2_CONFIG_PRIVADA
+fecha=2026-11-21
+sin_claves_en_git=true
+sin_marker=true
+sin_sql=true

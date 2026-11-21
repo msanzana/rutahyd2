@@ -15,7 +15,12 @@ function assertOk(bool $value,string $message): void {
 }
 function reqApi(string $method,string $uri,array $payload=[],?string $token=null): array {
     global $kernel;
-    $server=['HTTP_ACCEPT'=>'application/json','CONTENT_TYPE'=>'application/json'];
+    // Cada llamada simula un cliente de prueba independiente, para no agotar
+    // el throttle HTTP durante el ejercicio repetido del token de recuperación.
+    static $solicitudNumero=1;
+    $ip='192.0.2.'.(($solicitudNumero++ % 240)+1);
+    $server=['HTTP_ACCEPT'=>'application/json','CONTENT_TYPE'=>'application/json',
+        'REMOTE_ADDR'=>$ip];
     if($token!==null)$server['HTTP_AUTHORIZATION']='Bearer '.$token;
     $request=Request::create($uri,$method,[],[],[],$server,
         in_array($method,['POST','PUT','PATCH'],true)

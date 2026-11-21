@@ -1,0 +1,5 @@
+FULLSTACK_PRODUCCION=true
+BACKEND_SOURCE=feature/catalogos-api-productos-v2-20261120
+FRONTEND_SOURCE=main
+NO_SQL=true
+NO_GATEWAY_ACTIVATION=true

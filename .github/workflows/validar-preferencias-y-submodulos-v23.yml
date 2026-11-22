@@ -1,0 +1,71 @@
+name: CI DDL23 preferencias y submodulos sin tocar produccion
+on:
+  push:
+    branches: [feature/proveedores-productos-barcodes-20261122]
+    paths:
+      - 'database/espanol/23_preferencias_usuarios_permisos_submodulos_ddl.sql'
+      - 'app/Services/PermisosSubmodulos.php'
+      - 'app/Http/Middleware/AutorizarSubmodulo.php'
+      - 'app/Http/Controllers/PreferenciasUsuarioControlador.php'
+      - 'app/Http/Controllers/PerfilesCatalogosControlador.php'
+      - 'app/Http/Controllers/SesionControlador.php'
+      - 'routes/api.php'
+      - 'bootstrap/app.php'
+      - '.github/workflows/validar-preferencias-y-submodulos-v23.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: ci_only
+          MARIADB_DATABASE: rutahd_v23_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mariadb-admin ping -h localhost -pci_only"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sintaxis PHP de servicios y controladores
+        run: |
+          set -euo pipefail
+          php -v
+          for f in app/Services/PermisosSubmodulos.php app/Http/Middleware/AutorizarSubmodulo.php \
+            app/Http/Controllers/PreferenciasUsuarioControlador.php \
+            app/Http/Controllers/PerfilesCatalogosControlador.php \
+            app/Http/Controllers/SesionControlador.php \
+            app/Http/Controllers/EntidadesComercialesControlador.php \
+            app/Http/Controllers/RecursoControlador.php routes/api.php bootstrap/app.php; do
+            php -l "$f"
+          done
+      - name: Probar DDL23 dos veces solo en MariaDB temporal
+        env:
+          MYSQL_PWD: ci_only
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq mariadb-client
+          cat >/tmp/preparar_ci.sql <<'SQL'
+          USE rutahd_v23_ci;
+          CREATE TABLE roles (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            codigo VARCHAR(40) NOT NULL UNIQUE
+          ) ENGINE=InnoDB;
+          CREATE TABLE usuarios (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            rol_id BIGINT UNSIGNED NOT NULL,
+            nombre VARCHAR(160) NOT NULL,
+            CONSTRAINT fk_ci_usuario_rol FOREIGN KEY(rol_id) REFERENCES roles(id)
+          ) ENGINE=InnoDB;
+          INSERT INTO roles (id,codigo) VALUES (1,'administrador'),(2,'ventas');
+          INSERT INTO usuarios (id,rol_id,nombre) VALUES (1,1,'QA 1'),(2,2,'QA 2');
+          SQL
+          mariadb -h127.0.0.1 -uroot rutahd_v23_ci < /tmp/preparar_ci.sql
+          mariadb -h127.0.0.1 -uroot rutahd_v23_ci < database/espanol/23_preferencias_usuarios_permisos_submodulos_ddl.sql
+          mariadb -h127.0.0.1 -uroot rutahd_v23_ci < database/espanol/23_preferencias_usuarios_permisos_submodulos_ddl.sql
+          mariadb -h127.0.0.1 -uroot rutahd_v23_ci -e "INSERT INTO preferencias_usuarios(usuario_id,tema_interfaz) VALUES(2,'oscuro'); INSERT INTO roles_submodulos(rol_id,submodulo,ver,gestionar) VALUES(2,'productos_listado',1,0); SELECT * FROM preferencias_usuarios; SELECT * FROM roles_submodulos;"
+          test "$(mariadb -N -h127.0.0.1 -uroot rutahd_v23_ci -e "SELECT count(*) FROM information_schema.tables WHERE table_schema='rutahd_v23_ci' AND table_name IN('preferencias_usuarios','roles_submodulos')")" = '2'

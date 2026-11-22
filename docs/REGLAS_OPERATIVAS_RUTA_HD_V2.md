@@ -35,3 +35,12 @@ Origen: instrucción expresa del titular del proyecto.
 - Mantener Anterior/Siguiente, puntos suspensivos para secuencias extensas y máximo 25 registros por página. La navegación remota siempre debe consultar el número de página real en Laravel, sin reutilizar filas de otra página.
 - Los checkboxes de selección múltiple (p. ej., permisos Ver/Gestionar) muestran esquinas suavemente **redondeadas**, marca de verificación legible, foco accesible y soporte de teclado. Los activadores binarios independientes mantienen sus switches corporativos.
 - Interfaces compactas y responsive, con contraste violeta y estados deshabilitado/foco perceptibles.
+
+## Regla de estados, tooltips y precios — v34
+- **No presentar botones Eliminar/Borrar en tablas de registros.** Usar switches compactos de estado (activar/desactivar) únicamente cuando existe operación reversible respaldada por Laravel; confirmar la desactivación, revertir visualmente ante error y preservar historial. No exponer por accidente rutas destructivas al usuario. La galería de fotografías mantiene su administración independiente y requiere confirmación al eliminar una foto.
+- Respetar registros protegidos: administradores, Lista Base y clasificaciones tributarias invariantes no se desactivan mediante switches.
+- Los botones de guardado se titulan «Guardar» (sin «en MySQL»); en fichas de Producto usar «Precio» como encabezado visual sin alterar el significado tributario del valor almacenado.
+- En Productos, etiquetas de precios por lista y códigos de barras aparecen en pila vertical dentro de cada celda; el ancho de la tabla se ajusta al contenido con desplazamiento horizontal adaptable.
+- Tooltips de acciones con texto personalizado **debajo del botón**, portados fuera de tablas para evitar recortes por overflow o columnas sticky; navegación por teclado con foco visible.
+- Los listados no deben exhibir avisos tecnológicos persistentes como «CRUD real con JWT» o «Producto actualizado en MariaDB»; los mensajes de error sí deben conservarse.
+- El switch de activo en Lista de precios utiliza diseño violeta compacto específico (42 × 24 px) que prevalece sobre reglas genéricas de inputs.

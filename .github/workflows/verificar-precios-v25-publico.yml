@@ -1,0 +1,128 @@
+name: Verificación pública precios v25 (API simulada)
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/verificar-precios-v25-publico.txt]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Instalar navegador
+        run: |
+          mkdir -p /tmp/rutaprecios25 && cd /tmp/rutaprecios25
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Revisar mantenimiento, producto y precio de venta en escritorio y móvil
+        working-directory: /tmp/rutaprecios25
+        run: |
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          const reply=(route,data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
+          const base={id:1,codigo:'BASE',nombre:'LISTA BASE',activo:true,es_base:true};
+          const special={id:2,codigo:'MAYOR',nombre:'Mayoristas',activo:true,es_base:false};
+          const categories={
+            rubros:[{id:1,nombre:'Alimentos',activo:true}],
+            departamentos:[{id:2,nombre:'Abarrotes',parentId:1,activo:true}],
+            familias:[{id:3,nombre:'Conservas',parentId:2,activo:true}],
+            lineas:[{id:4,nombre:'Vegetales',parentId:3,activo:true,minimoMargenPrecioVenta:'15.0000'}],
+            marcas:[{id:5,nombre:'Marca HD',activo:true}],
+            modelos:[{id:6,nombre:'Tradicional',parentId:5,activo:true}],
+            tipos_unidad:[{id:7,nombre:'Unidad',activo:true}],
+            tipos_envasado:[{id:8,nombre:'Lata',activo:true}],
+            condiciones_tributarias:[{id:9,nombre:'Exento',activo:true}],
+            tipos_codigos_barras:[{id:10,nombre:'EAN13',activo:true}]
+          };
+          const product={id:9,sku:'SKU-9',nombre:'Conserva HD',activo:true,costoNeto:'100',
+            clasificacion:{rubroId:1,departamentoId:2,familiaId:3,lineaId:4,marcaId:5,
+              modeloId:6,tipoUnidadId:7,tipoEnvasadoId:8,condicionTributariaId:9},
+            presentacion:{id:12,nombre:'Unidad',unidadesPorEnvase:1,precioNeto:130,tasaIva:0},
+            precios:[{listaPrecioId:1,precioVenta:130,margenPorcentaje:30,activo:true}],
+            codigosVenta:[],minimoMargenPrecioVenta:'15'};
+          try{
+            for(const width of [1440,390]){
+              const page=await browser.newPage({viewport:{width,height:900},locale:'es-CL'});
+              let realWrites=0;
+              await page.route('**/api/v1/**',route=>{
+                const req=route.request(),url=new URL(req.url()),path=url.pathname;
+                if(path==='/api/v1/estado')return reply(route,{estado:'disponible',servicio:'Ruta H&D2 API'});
+                if(path==='/api/v1/sesion'&&req.method()==='POST')return reply(route,{
+                  token:'fixture.jwt.signature',token_type:'Bearer',
+                  usuario:{id:1,nombre:'Inspector precios',rol:'administrador',
+                    permisos:['productos.gestionar','clientes.gestionar','ventas.gestionar']}
+                });
+                if(req.method()!=='GET'){realWrites++;return reply(route,{},403);}
+                if(path.startsWith('/api/v1/catalogos/'))return reply(route,{items:categories[path.split('/').at(-1)]||[]});
+                if(path==='/api/v1/listas-precios')return reply(route,{data:[base,special],last_page:1,total:2});
+                if(path==='/api/v1/productos')return reply(route,{data:[product],last_page:1,total:1});
+                if(path==='/api/v1/productos/9')return reply(route,product);
+                if(path==='/api/v1/ventas/clientes-disponibles')return reply(route,{data:[{
+                  id:5,codigo:'C5',nombre:'Comercio demo',rut:'11111111-1',activo:true
+                }],last_page:1,total:1});
+                if(path==='/api/v1/ventas/productos-disponibles')return reply(route,{
+                  data:[{id:9,sku:'SKU-9',nombre:'Conserva HD',activo:true,tasa_iva:0}],
+                  last_page:1,total:1
+                });
+                if(path==='/api/v1/ventas/precio-cliente')return reply(route,{
+                  cliente_id:5,producto_id:9,lista_precio_nombre:'Mayoristas',lista_precio_id:2,precio_venta:120
+                });
+                if(path.startsWith('/api/v1/recursos/'))return reply(route,{data:[],last_page:1,total:0});
+                return reply(route,{},404);
+              });
+              await page.goto('https://rutahyd2.free.nf/?smoke=precios25',{waitUntil:'domcontentloaded',timeout:55000});
+              await page.waitForTimeout(8500);
+              for(const asset of [
+                'script[src*="listas-precios.js?v=20261122-prices25"]',
+                'script[src*="ventas-precios.js?v=20261122-prices25"]',
+                'link[href*="listados-tema-v20.css?v=20261122-prices25"]'
+              ]){
+                if(await page.locator(asset).count()!==1)throw Error('Recurso v25 ausente: '+asset);
+              }
+              await page.locator('#loginSubmit:not([disabled])').waitFor({timeout:25000});
+              await page.locator('#loginEmail').fill('ci@example.invalid');
+              await page.locator('#loginPassword').fill('NO-CREDENCIAL-REAL');
+              await page.locator('#loginSubmit').click();
+              await page.locator('#loginDialog[open]').waitFor({state:'hidden'});
+              if(width<900)await page.locator('#menuToggle').click();
+              await page.locator('.nav-link[data-nav="productos"]').click();
+              await page.locator('#productosRealesListado').getByText('Conserva HD').waitFor();
+              await page.locator('#productosRealesListado').getByRole('button',{name:'Editar'}).click();
+              const dlg=page.locator('dialog.product-editor-dialog[open]');
+              await dlg.waitFor();
+              if(!(await dlg.textContent()).includes('Precios'))throw Error('Falta sección Precios');
+              if((await dlg.textContent()).includes('Presentación, precio e IVA'))throw Error('Nombre de sección anterior');
+              if(await dlg.locator('#productoCostoNeto').inputValue()!=='100')throw Error('Costo no encontrado');
+              await page.screenshot({path:'/tmp/rutaprecios25/productos-'+width+'.png'});
+              const position=await dlg.evaluate(el=>{const box=el.getBoundingClientRect();
+                return {left:box.left,right:box.right,overflow:el.scrollWidth>el.clientWidth+2};
+              });
+              if(position.left<0||position.right>width+1||position.overflow)throw Error('Popup fuera de pantalla '+JSON.stringify(position));
+              await dlg.getByRole('button',{name:'Cerrar ventana'}).click();
+              await page.locator('.nav-link[data-nav="ventas"]').click();
+              const sale=page.locator('#salePriceModule');
+              await sale.waitFor();
+              await sale.getByLabel('Cliente',{exact:true}).selectOption('5');
+              await sale.getByLabel('Producto',{exact:true}).selectOption('9');
+              await sale.locator('.sale-effective-price').getByText(/Mayoristas/).waitFor();
+              if(!(await sale.locator('.sale-effective-price').textContent()).includes('$120'))
+                throw Error('Tarifa especial no aplicada');
+              if(realWrites)throw Error('Se enviaron escrituras reales');
+              console.log('PRECIOS25_LIVE',JSON.stringify({width,tariff:'Mayoristas',dialog:position}));
+              await page.close();
+            }
+          }finally{await browser.close();}
+          JS
+      - name: Evidencias de formularios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capturas-precios-v25
+          path: /tmp/rutaprecios25/productos-*.png
+          retention-days: 7
+          if-no-files-found: ignore

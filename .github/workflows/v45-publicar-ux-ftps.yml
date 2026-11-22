@@ -92,10 +92,10 @@ jobs:
           assert '<img' in text and 'ubicacionesSubnav' in text and 'giros-sii-v39.js' in text
           for js in scripts:
             script=js.rsplit('/',1)[-1]
-            pattern=r'(<script\\s+src="assets/js/'+re.escape(script)+r'\\?v=)[^"]+(")'
-            text,count=re.subn(pattern,r'\\g<1>20261122-v45prod\\2',text)
+            pattern=r'(<script\s+src="assets/js/'+re.escape(script)+r'\?v=)[^"]+(")'
+            text,count=re.subn(pattern,r'\g<1>20261122-v45prod\2',text)
             assert count==1,script+' en index productivo no reconocido'
-          marker=r'(<link rel="stylesheet" href="assets/css/carga-global-v42[.]css\\?v=[^"]+">)'
+          marker=r'(<link rel="stylesheet" href="assets/css/carga-global-v42[.]css\?v=[^"]+">)'
           extra='\n  <link rel="stylesheet" href="assets/css/interfaz-mix-validacion-v45.css?v=20261122-v45prod">'
           text,count=re.subn(marker,lambda m:m.group(1)+extra,text)
           assert count==1,'No se identificó CSS de preloader V42'

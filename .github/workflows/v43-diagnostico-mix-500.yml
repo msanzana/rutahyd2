@@ -70,7 +70,7 @@ jobs:
                   klass=re.search(r'(QueryException|PDOException|TypeError|RuntimeException|ErrorException|ParseError)',chunk)
                   # Para eventos PHP recientes, extraer SOLO la clase del aviso y
                   # un origen técnico normalizado; nunca imprimir el mensaje original.
-                  recent=bool(dt and dt.group(1)>='2026-11-22 15:00:00')
+                  recent=bool(date and date.group(1)>='2026-11-22 15:00:00')
                   category='no_clasificado'
                   for key,pattern in [
                       ('undefined_property',r'Undefined property'),

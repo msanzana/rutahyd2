@@ -54,7 +54,7 @@ jobs:
           grep -Fq 'data-nav="listas_precios"' /tmp/front/index.html
           grep -Fq 'validacion-ui.js?v=20261122-filters22' /tmp/front/index.html
           grep -Fq 'productos-remotos.js?v=20261122-status34' /tmp/front/index.html
-          grep -Fq 'switches-v32.css?v=20261122-page33' /tmp/front/index.html
+          grep -Fq 'switches-v32.css?v=20261122-status34' /tmp/front/index.html
           test -s /tmp/front/assets/css/switches-v32.css
           test -s /tmp/front/assets/css/controles-v33.css
           grep -Fq 'productos-estados-v34.css?v=20261122-status34' /tmp/front/index.html

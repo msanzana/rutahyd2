@@ -150,3 +150,16 @@ sql=NO_EJECUTAR
 backend=NO_MODIFICAR
 firecrawl=PROHIBIDO
 rollback=habilitado
+
+release=20261122-v31-galeria-preview-ficha-consulta-paginacion25
+frontend_sha=3d7a2ac76905347e7e9ef36fa7a6ae317c979b69
+frontend_ci=https://github.com/msanzana/rutahyd2front/actions/runs/44996564047-success-69
+scope=frontend-js-css-html-only
+galeria=preview_local_multiples_fotos,boton_cerrar,paginacion_25_miniaturas
+producto_ficha=solo_lectura,precios_por_lista,margenes,codigos_barras,clasificaciones
+listados=paginacion_maximo_25_por_pagina,server_listas_precios,local_catalogos_usuarios_perfiles
+mariadb=no_modificar
+backend=no_modificar
+datos_reales=no_escrituras_de_prueba
+firecrawl=prohibido
+rollback=habilitado

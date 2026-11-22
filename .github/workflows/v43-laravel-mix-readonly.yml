@@ -1,4 +1,4 @@
-name: V43 - ejecutar método Laravel mix en lectura segura
+name: V43 - auditoría posterior a DDL23 sin information_schema
 on:
   push:
     branches: [diagnostico/v43-mix-500-20261122]
@@ -69,10 +69,27 @@ jobs:
                 \App\Http\Middleware\AutorizarSubmodulo::class;
               $out['clase_submodulo']=class_exists(\App\Http\Middleware\AutorizarSubmodulo::class);
               $out['servicio_submodulo']=class_exists(\App\Services\PermisosSubmodulos::class);
-              $out['ddl23_roles_submodulos']=\Illuminate\Support\Facades\DB::getSchemaBuilder()->hasTable('roles_submodulos');
-              $out['ddl23_preferencias']=\Illuminate\Support\Facades\DB::getSchemaBuilder()->hasTable('preferencias_usuarios');
-              $out['ok']=$response->getStatusCode()===200 && isset($json['data']) 
-                && $out['alias_submodulo'] && $out['clase_submodulo'] && $out['servicio_submodulo'];
+              // Regla operativa: solo SHOW TABLES/SHOW COLUMNS y SELECT; jamás information_schema
+              // ni Schema::hasTable(), que podría consultar metadatos prohibidos.
+              $db=\Illuminate\Support\Facades\DB::connection();
+              $out['ddl23_roles_submodulos']=count($db->select("SHOW TABLES LIKE 'roles_submodulos'"))===1;
+              $out['ddl23_preferencias']=count($db->select("SHOW TABLES LIKE 'preferencias_usuarios'"))===1;
+              $required=[
+                'roles_submodulos'=>['rol_id','submodulo','ver','gestionar','actualizado_en'],
+                'preferencias_usuarios'=>['usuario_id','tema_interfaz','actualizado_en'],
+              ];
+              foreach($required as $table=>$columns){
+                  if(!($out['ddl23_'.$table]??false)){
+                      $out['estructura_'.$table]=false;
+                      continue;
+                  }
+                  $found=array_map(fn($r)=>$r->Field,$db->select('SHOW COLUMNS FROM '.$table));
+                  $out['estructura_'.$table]=count(array_diff($columns,$found))===0;
+              }
+              $out['ok']=$response->getStatusCode()===200 && isset($json['data'])
+                && $out['alias_submodulo'] && $out['clase_submodulo'] && $out['servicio_submodulo']
+                && $out['ddl23_roles_submodulos'] && $out['ddl23_preferencias']
+                && $out['estructura_roles_submodulos'] && $out['estructura_preferencias_usuarios'];
               $out['http']=$response->getStatusCode();
               $out['items']=count($json['data']??[]);
               $out['total_tipo']=gettype($json['total']??null);
@@ -145,7 +162,7 @@ jobs:
               throw new Error('Auditoría Laravel no respondió como se esperaba');
           }finally{await browser.close();}
           JS
-          echo 'Sonda ejecutada directamente en controlador mix Laravel; no POST del CRUD, SQL de solo lectura.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Verificación DDL23 y mix con SHOW TABLES, SHOW COLUMNS, SELECT; sin consultar information_schema ni escribir datos.' >> "$GITHUB_STEP_SUMMARY"
       - name: Retirar siempre la sonda y limpiar el runner
         if: always()
         run: |

@@ -25,3 +25,7 @@ fuente_frontend_sha=3b23f0b1bf2888a5c48d94b27ae931a08d0016d5
 backend_ci=44969447525
 backend_produccion=44969647774
 frontend_ci=44969510463
+release=20261122-product-popup-ancho-1100-responsive-hotfix-v16
+frontend_ci=44973099694
+backend=no_modificar
+bdd=no_modificar

@@ -18,3 +18,4 @@ ci=44887294926_success
 solicitud=20261121-release-main-produccion-permanente-v11
 solicitud=20261121-produccion-jwt-401-403-v12
 release=20261121-recovery-fix-v13-correo-login
+release=20261122-recuperacion-query-infinityfree-formulario-v14

@@ -32,9 +32,9 @@ Los enlaces anteriores enviados por correo siguen siendo del formato fragmento; 
 ## Pruebas y cierre
 
 - CI del frontend (JWT, recuperación móvil, enlaces antiguos y nuevos, sin demo): revisar https://github.com/msanzana/rutahyd2front/actions
-- Publicación frontend: https://github.com/msanzana/rutahyd2/actions/runs/44966479180
-- Publicación backend: https://github.com/msanzana/rutahyd2/actions/runs/44966567780
-- Smoke externo con primer clic frío y token sintético: programar después del despliegue.
+- **Publicación frontend APROBADA:** https://github.com/msanzana/rutahyd2/actions/runs/44966479180
+- **Publicación backend APROBADA:** https://github.com/msanzana/rutahyd2/actions/runs/44966773942 . Primera ejecución FTPS rename falló y se revirtió: https://github.com/msanzana/rutahyd2/actions/runs/44966567780
+- **Smoke externo primer clic en navegador sin cookies APROBADO:** https://github.com/msanzana/rutahyd2/actions/runs/44966681348 . Formulario visible; login oculto; token borrado de la URL; diseño grid y meta no-referrer presentes.
 - **La contraseña del usuario no ha sido cambiada desde estos workflows**. La validación de recuperación REAL corresponde al usuario por un nuevo correo de la aplicación; nunca revelar la contraseña.
 
 Regla del proyecto: **no Firecrawl**, y cambios estructurales únicamente con SQL **DDL**.

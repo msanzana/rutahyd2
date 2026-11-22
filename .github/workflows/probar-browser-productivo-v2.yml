@@ -129,5 +129,26 @@ jobs:
             if(!after.visible||after.loginVisible||!after.hasPassword||after.tokenInUrl)
               process.exitCode=1;
             await recoveryPage.close();
+            // Un navegador sin cookies debe poder abrir el NUEVO formato ?recuperar= en el primer clic.
+            const coldRecovery=await browser.newPage({locale:'es-CL'});
+            coldRecovery.on('pageerror',e=>console.log('ERROR_NUEVA_RECUPERACION_JS',e.message));
+            await coldRecovery.goto(endpoint+'?recuperar='+'f'.repeat(64),{
+              waitUntil:'domcontentloaded',timeout:45000
+            });
+            await coldRecovery.waitForTimeout(2400);
+            const fresh=await coldRecovery.evaluate(()=>({
+              visible:document.querySelector('.recovery-dialog')?.open===true,
+              loginVisible:document.querySelector('#loginDialog')?.open===true,
+              hasPassword:!!document.querySelector('#recovery-password'),
+              active:window.RutaHDRecuperacion?.isActive?.()===true,
+              tokenInAddress:location.href.includes('recuperar=')||location.href.includes('ffffffff'),
+              referrer:document.querySelector('meta[name="referrer"]')?.content,
+              layout:document.querySelector('.recovery-layout')?
+                getComputedStyle(document.querySelector('.recovery-layout')).display:null
+            }));
+            console.log('RECUPERACION_QUERY_PRIMER_CLICK',JSON.stringify(fresh));
+            if(!fresh.visible||fresh.loginVisible||!fresh.hasPassword||!fresh.active||
+              fresh.tokenInAddress||fresh.referrer!=='no-referrer'||fresh.layout!=='grid')process.exitCode=1;
+            await coldRecovery.close();
           } finally {await browser.close();}
           JS

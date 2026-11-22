@@ -2,6 +2,7 @@
 declare(strict_types=1);
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\SesionControlador;
+use App\Http\Controllers\PreferenciasUsuarioControlador;
 use App\Http\Controllers\RecursoControlador;
 use App\Http\Controllers\EntidadesComercialesControlador;
 use App\Http\Controllers\VentaControlador;
@@ -30,45 +31,45 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::delete('/catalogos/{catalogo}/{id}',[CatalogoComercialControlador::class,'eliminar'])->whereNumber('id');
     // CRUD de productos reales. Precio y envase residen en presentaciones_productos,
     // stock se gestiona exclusivamente en Inventario; DELETE es baja lógica.
-    Route::get('/productos',[ProductoComercialControlador::class,'listar'])->middleware('permiso.rutahd:productos.gestionar');
-    Route::post('/productos',[ProductoComercialControlador::class,'crear'])->middleware('permiso.rutahd:productos.gestionar');
-    Route::get('/productos/{id}',[ProductoComercialControlador::class,'ver'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
-    Route::put('/productos/{id}',[ProductoComercialControlador::class,'actualizar'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
-    Route::delete('/productos/{id}',[ProductoComercialControlador::class,'desactivar'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
-    Route::get('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'ver'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
-    Route::patch('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'guardar'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
+    Route::get('/productos',[ProductoComercialControlador::class,'listar'])->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos.listado,ver');
+    Route::post('/productos',[ProductoComercialControlador::class,'crear'])->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos.listado,gestionar');
+    Route::get('/productos/{id}',[ProductoComercialControlador::class,'ver'])->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos.listado,ver')->whereNumber('id');
+    Route::put('/productos/{id}',[ProductoComercialControlador::class,'actualizar'])->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos.listado,gestionar')->whereNumber('id');
+    Route::delete('/productos/{id}',[ProductoComercialControlador::class,'desactivar'])->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos.listado,gestionar')->whereNumber('id');
+    Route::get('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'ver'])->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos.listado,ver')->whereNumber('id');
+    Route::patch('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'guardar'])->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos.listado,gestionar')->whereNumber('id');
 
     // Catálogo de productos de cada proveedor. No modifica inventario, costos históricos ni recepciones.
     Route::get('/proveedores-productos',[ProductosProveedoresControlador::class,'listar'])
-        ->middleware('permiso.rutahd:compras.gestionar');
+        ->middleware('permiso.rutahd:compras.gestionar')->middleware('submodulo.rutahd:proveedores.productos,ver');
     Route::post('/proveedores-productos',[ProductosProveedoresControlador::class,'crear'])
-        ->middleware('permiso.rutahd:compras.gestionar');
+        ->middleware('permiso.rutahd:compras.gestionar')->middleware('submodulo.rutahd:proveedores.productos,gestionar');
     Route::get('/proveedores-productos/{id}',[ProductosProveedoresControlador::class,'ver'])
-        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+        ->middleware('permiso.rutahd:compras.gestionar')->middleware('submodulo.rutahd:proveedores.productos,ver')->whereNumber('id');
     Route::put('/proveedores-productos/{id}',[ProductosProveedoresControlador::class,'actualizar'])
-        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+        ->middleware('permiso.rutahd:compras.gestionar')->middleware('submodulo.rutahd:proveedores.productos,gestionar')->whereNumber('id');
     Route::delete('/proveedores-productos/{id}',[ProductosProveedoresControlador::class,'desactivar'])
-        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+        ->middleware('permiso.rutahd:compras.gestionar')->middleware('submodulo.rutahd:proveedores.productos,gestionar')->whereNumber('id');
 
     // Cada relación proveedor-producto posee códigos de identificación de compra.
     Route::get('/proveedores-productos/{vinculoId}/codigos-compra',[CodigosBarrasProductoControlador::class,'listarCompra'])
-        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('vinculoId');
+        ->middleware('permiso.rutahd:compras.gestionar')->middleware('submodulo.rutahd:proveedores.productos,ver')->whereNumber('vinculoId');
     Route::post('/proveedores-productos/{vinculoId}/codigos-compra',[CodigosBarrasProductoControlador::class,'crearCompra'])
-        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('vinculoId');
+        ->middleware('permiso.rutahd:compras.gestionar')->middleware('submodulo.rutahd:proveedores.productos,gestionar')->whereNumber('vinculoId');
     Route::put('/proveedores-productos/{vinculoId}/codigos-compra/{id}',[CodigosBarrasProductoControlador::class,'actualizarCompra'])
-        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('vinculoId')->whereNumber('id');
+        ->middleware('permiso.rutahd:compras.gestionar')->middleware('submodulo.rutahd:proveedores.productos,gestionar')->whereNumber('vinculoId')->whereNumber('id');
     Route::delete('/proveedores-productos/{vinculoId}/codigos-compra/{id}',[CodigosBarrasProductoControlador::class,'desactivarCompra'])
-        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('vinculoId')->whereNumber('id');
+        ->middleware('permiso.rutahd:compras.gestionar')->middleware('submodulo.rutahd:proveedores.productos,gestionar')->whereNumber('vinculoId')->whereNumber('id');
 
     // Venta: producto + tipo EAN/DUN/CODE + código y unidades. Nunca hay proveedor.
     Route::get('/productos/{productoId}/codigos-venta',[CodigosBarrasProductoControlador::class,'listarVenta'])
-        ->middleware('permiso.rutahd:productos.gestionar')->whereNumber('productoId');
+        ->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos.listado,ver')->whereNumber('productoId');
     Route::post('/productos/{productoId}/codigos-venta',[CodigosBarrasProductoControlador::class,'crearVenta'])
-        ->middleware('permiso.rutahd:productos.gestionar')->whereNumber('productoId');
+        ->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos.listado,gestionar')->whereNumber('productoId');
     Route::put('/productos/{productoId}/codigos-venta/{id}',[CodigosBarrasProductoControlador::class,'actualizarVenta'])
-        ->middleware('permiso.rutahd:productos.gestionar')->whereNumber('productoId')->whereNumber('id');
+        ->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos.listado,gestionar')->whereNumber('productoId')->whereNumber('id');
     Route::delete('/productos/{productoId}/codigos-venta/{id}',[CodigosBarrasProductoControlador::class,'desactivarVenta'])
-        ->middleware('permiso.rutahd:productos.gestionar')->whereNumber('productoId')->whereNumber('id');
+        ->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos.listado,gestionar')->whereNumber('productoId')->whereNumber('id');
 
     Route::get('/perfiles/catalogos',[PerfilesCatalogosControlador::class,'listar']);
     Route::get('/perfiles/usuarios',[PerfilesCatalogosControlador::class,'usuarios']);
@@ -79,6 +80,8 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::put('/perfiles/usuarios/{id}/rol',[PerfilesCatalogosControlador::class,'asignarPerfil'])->whereNumber('id');
     Route::put('/perfiles/{id}/catalogos',[PerfilesCatalogosControlador::class,'actualizar'])->whereNumber('id');
     Route::get('/perfil',[SesionControlador::class,'perfil']);
+    Route::get('/perfil/preferencias',[PreferenciasUsuarioControlador::class,'ver']);
+    Route::put('/perfil/preferencias',[PreferenciasUsuarioControlador::class,'guardar']);
     Route::delete('/sesion',[SesionControlador::class,'salir']);
     // Consultas paginadas solo de recursos admitidos y con permiso por rol.
     Route::get('/recursos/{recurso}',[RecursoControlador::class,'listar']);

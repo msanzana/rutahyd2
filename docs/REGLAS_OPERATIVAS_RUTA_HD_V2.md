@@ -52,3 +52,10 @@ Origen: instrucción expresa del titular del proyecto.
 - Al iniciar sesión o al restaurarla, todos los **submenús principales parten contraídos** (Administración, Productos, Proveedores) y el menú móvil se cierra. Solo las interacciones del usuario los expanden nuevamente.
 - Sobre el menú oficial incluir un **buscador compacto de opciones y subopciones**, tolerante a tildes y palabras omitidas, con búsqueda por varios términos y navegación de teclado. Construir resultados desde las opciones oficiales y filtrarlos por permisos JWT/ACL; nunca mostrar opciones ocultas por permisos ni inventar rutas.
 - Mantener paleta violeta, densidad legible, accesibilidad y responsive. Firecrawl continúa prohibido; para cambios de esquema solo DDL manual en phpMyAdmin.
+
+## Regla de costo promedio ponderado en Productos — V37 (2026-11-22)
+- El producto mantiene `costo_neto` comercial editable; a su lado aparece `costo_promedio_ponderado` como campo **solo lectura** y con diseño corporativo responsive.
+- La ficha de consulta también expone el costo promedio junto al costo neto, sin recalcularlo en frontend.
+- DDL28 `database/espanol/28_costo_promedio_ponderado_productos_ddl.sql` crea la columna `DECIMAL(15,4) NOT NULL DEFAULT 0.0000`. Los productos existentes y futuros parten en 0 hasta la implementación de recepciones.
+- Prohibido aceptar `costoPromedioPonderado` en POST/PUT de Productos; la actualización automática corresponderá a la futura recepción de mercadería y su metodología de costo/stock, que **NO está implementada** en V37.
+- El DDL lo ejecuta únicamente el titular en phpMyAdmin con respaldo previo. No anunciar valor persistente en producción ni publicar funcionalidad como completa antes de confirmar DDL28 y despliegue del API compatible.

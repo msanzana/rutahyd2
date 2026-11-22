@@ -43,6 +43,8 @@ final class CatalogoComercialControlador extends Controller
             'activo' => (bool) $fila->activo,
             'parentId' => $esquema['parent'] ? $fila->{$esquema['parent_column']} : null,
             'codigo' => $catalogo === 'tipos_codigos_barras' ? $fila->codigo : null,
+            'minimoMargenPrecioVenta' => $catalogo === 'lineas'
+                ? (string)$fila->minimo_margen_precio_venta : null,
         ];
     }
 
@@ -97,6 +99,9 @@ final class CatalogoComercialControlador extends Controller
             'nombre' => ['required', 'string', 'max:100'],
             'activo' => ['required', 'boolean'],
             'parentId' => [$esquema['parent'] ? 'required' : 'nullable', 'nullable', 'integer', 'min:1'],
+            'minimoMargenPrecioVenta' => $catalogo === 'lineas'
+                ? ['sometimes','numeric','min:0','max:999999']
+                : ['prohibited'],
         ])->validate();
         $nombre = trim($datos['nombre']);
         abort_if($nombre === '', 422, 'El nombre es obligatorio');
@@ -138,6 +143,23 @@ final class CatalogoComercialControlador extends Controller
 
         $campos = ['nombre' => $nombre, 'activo' => $activo ? 1 : 0];
         if ($esquema['parent']) $campos[$esquema['parent_column']] = $padre;
+        if ($catalogo === 'lineas') {
+            $nuevoMinimo = (float)($datos['minimoMargenPrecioVenta']
+                ??$actual?->minimo_margen_precio_venta??0);
+            if($actual && $nuevoMinimo>(float)$actual->minimo_margen_precio_venta){
+                $incumple=DB::table('productos as p')
+                    ->join('listas_precios_detalle as d','d.producto_id','=','p.id')
+                    ->where('p.linea_id',$id)->where('d.activo',1)
+                    ->where('d.costo','>',0)
+                    ->where(fn($query)=>$query
+                        ->whereNull('d.margen_porcentaje')
+                        ->orWhere('d.margen_porcentaje','<',$nuevoMinimo))
+                    ->exists();
+                abort_if($incumple,422,
+                    'No puedes aumentar el margen mínimo: existen productos activos con precios inferiores');
+            }
+            $campos['minimo_margen_precio_venta']=$nuevoMinimo;
+        }
         if ($catalogo === 'tipos_codigos_barras' && $id === null) {
             $codigo = mb_strtoupper(preg_replace('/[^A-Za-z0-9]+/', '', $nombre));
             abort_unless($codigo !== '' && strlen($codigo)<=40,422,'Código de tipo inválido');

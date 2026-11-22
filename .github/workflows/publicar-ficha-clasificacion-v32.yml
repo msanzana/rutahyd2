@@ -1,0 +1,141 @@
+name: Publicar corrección de nombres de clasificación en ficha de Producto v32
+on:
+  push:
+    branches: [main]
+    paths:
+      - deployment/solicitudes/publicar-ficha-clasificacion-v32.txt
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      OLD_SHA: 8bc6863b1f33a62fabd8952467f428a75414a355
+      SOURCE_SHA: 9b17bb1b55245170e4947ef55dea4774a8c6eb5c
+      TARGET: app/Http/Controllers/ProductoComercialControlador.php
+    steps:
+      - name: Validar parche acotado y sintaxis PHP sin base de datos
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          git clone -q --depth 1 --branch feature/proveedores-productos-barcodes-20261122 https://github.com/msanzana/rutahyd2.git /tmp/hdv32src
+          test "$(git -C /tmp/hdv32src rev-parse HEAD)" = "$SOURCE_SHA"
+          git -C /tmp/hdv32src fetch -q --depth 1 origin "$OLD_SHA"
+          umask 077
+          mkdir -p /tmp/hdv32
+          git -C /tmp/hdv32src show "$OLD_SHA:$TARGET" > /tmp/hdv32/old.php
+          cp "/tmp/hdv32src/$TARGET" /tmp/hdv32/new.php
+          python3 - <<'PY'
+          from pathlib import Path
+          before=Path('/tmp/hdv32/old.php').read_text()
+          after=Path('/tmp/hdv32/new.php').read_text()
+          block='''        // La ficha individual debe incluir exactamente los mismos nombres
+                  // que el listado. Sin ello el frontend marca registros reales
+                  // como "Sin clasificar" cuando solo conoce el identificador.
+                  $data['clasificacionNombres']=[];
+                  foreach(self::CLASIFICACIONES as $campo=>$config){
+                      $valor=$data['clasificacion'][$campo]??null;
+                      $data['clasificacionNombres'][$campo]=$valor===null
+                          ? null : DB::table($config[0])->where('id',$valor)->value('nombre');
+                  }
+          '''
+          # Asegurar que el cambio se limita a un único bloque de lectura.
+          assert after.count("        $data['clasificacionNombres']=[];")==1
+          anchor="        $data['clasificacionNombres']=[];"
+          start=after.index("        // La ficha individual debe incluir")
+          end=after.index("        $data['totalPresentaciones']",start)
+          assert after[:start]+after[end:]==before, 'Se detectaron cambios adicionales no autorizados'
+          assert "public function ver(int $id)" in after
+          print('PARCHE_VERIFICADO: nombres de clasificaciones exclusivamente en GET /productos/{id}')
+          PY
+          php -l /tmp/hdv32/new.php
+      - name: Instalar cliente FTPS
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+      - name: Respaldar y comparar versión previa del controlador protegido
+        run: |
+          set -euo pipefail
+          set +x
+          cat >/tmp/hdv32/get.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php -o /tmp/hdv32/live-before.php
+          get /htdocs/api-v2/.htaccess -o /tmp/hdv32/guard-before
+          get /htdocs/api/index.php -o /tmp/hdv32/gateway-before
+          bye
+          EOF
+          lftp -f /tmp/hdv32/get.lftp >/dev/null
+          cmp -s /tmp/hdv32/old.php /tmp/hdv32/live-before.php || { echo "::error::Backend remoto divergente; detener despliegue"; exit 1; }
+          grep -Fq 'Require all denied' /tmp/hdv32/guard-before
+          grep -Fq 'rutahd2_api_ready' /tmp/hdv32/gateway-before
+      - name: Publicar exclusivamente controlador Producto sin SQL
+        run: |
+          set -euo pipefail
+          set +x
+          touch /tmp/hdv32/upload-started
+          cat >/tmp/hdv32/put.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/hdv32/new.php -o /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php
+          bye
+          EOF
+          lftp -f /tmp/hdv32/put.lftp >/dev/null
+      - name: Cotejar bytes publicados, protección JWT y gateway
+        run: |
+          set -euo pipefail
+          set +x
+          cat >/tmp/hdv32/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php -o /tmp/hdv32/live-after.php
+          get /htdocs/api-v2/.htaccess -o /tmp/hdv32/guard-after
+          get /htdocs/api/index.php -o /tmp/hdv32/gateway-after
+          bye
+          EOF
+          lftp -f /tmp/hdv32/verify.lftp >/dev/null
+          cmp -s /tmp/hdv32/new.php /tmp/hdv32/live-after.php
+          cmp -s /tmp/hdv32/guard-before /tmp/hdv32/guard-after
+          cmp -s /tmp/hdv32/gateway-before /tmp/hdv32/gateway-after
+          php -l /tmp/hdv32/live-after.php
+          echo "Nombre comercial de clasificación incluido en ficha GET. Backend Laravel protegido e intacto en lo demás." >> "$GITHUB_STEP_SUMMARY"
+      - name: Restaurar versión de partida si falla publicación
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/hdv32/upload-started ] && [ -s /tmp/hdv32/live-before.php ]; then
+            cat >/tmp/hdv32/rollback.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/hdv32/live-before.php -o /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php
+          bye
+          EOF
+            lftp -f /tmp/hdv32/rollback.lftp >/dev/null || echo "::error::Rollback requiere revisión FTPS"
+          fi
+      - name: Destruir copias privadas del runner
+        if: always()
+        run: rm -rf /tmp/hdv32 /tmp/hdv32src

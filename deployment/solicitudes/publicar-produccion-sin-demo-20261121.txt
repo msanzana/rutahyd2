@@ -163,3 +163,15 @@ backend=no_modificar
 datos_reales=no_escrituras_de_prueba
 firecrawl=prohibido
 rollback=habilitado
+
+release=20261122-v32-switches-clasificacion-ficha-lista-precio-http500
+frontend_sha=1f761dbc28d5a49c6d47f1aec15c39d968d7a87f
+ci=https://github.com/msanzana/rutahyd2front/actions/runs/44997738267-71-success
+scope=frontend-js-css-html-only
+switches=todos-checkbox-visibles-de-la-app;campo-nativo-accesible;corporativo-violeta
+producto_ficha=clasificacion-con-nombres-desde-laravel-con-fallback-front
+precios=mensajes-error-seguros-500-preservan-formulario
+database=NO-EJECUTAR-SQL;DDL27-pendiente-phpmyadmin
+backend=YA-PUBLICADO-clasificacion-v32-no-modificar
+firecrawl=PROHIBIDO
+rollback=habilitado

@@ -17,7 +17,7 @@ jobs:
       FTP_HOST: ftpupload.net
       FTP_USER: if0_43460400
       FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
-      FRONT_SHA: 6b704a56764b46e10c72a0d7a4aaf63ea759f10d
+      FRONT_SHA: 09bc1936d307b5881ef6fce9dc791c2bcf1e0b1a
       FRONT_BEFORE_SHA: 84f211f82f3f9dac1d00545649e10d0c9f590cbc
     steps:
       - name: Leer código aprobado sin credenciales publicadas

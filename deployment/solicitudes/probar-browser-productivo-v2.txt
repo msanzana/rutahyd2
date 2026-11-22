@@ -10,3 +10,4 @@ smoke_recuperacion_contra_produccion=20261121-v13
 diagnostico_de_recovery_prod=20261122-redirect-check
 probar_segundo_click_misma_cookie=20261122
 smoke_enlace_query_primer_click_frio=20261122-v14
+smoke_22_nov_2026_sesion_front_v15_y_apache_authorization=si

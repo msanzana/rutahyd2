@@ -1,0 +1,163 @@
+name: Publicar CRUD clientes proveedores bodegas con rollback
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/publicar-crud-entidades-20261122.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 23
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACKEND_SHA: b3af158d4c5248b13d03be3e9d1c83fd3744fd10
+      BASE_SHA: f624dd0f1352c4a9a504cab78b4636f37ec10ce5
+    steps:
+      - name: Comprobar fuente versionada, PHP y whitelist
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          git clone --depth 1 --branch feature/crud-clientes-proveedores-bodegas-20261122 https://github.com/msanzana/rutahyd2.git /tmp/backend
+          test "$(git -C /tmp/backend rev-parse HEAD)" = "$BACKEND_SHA"
+          git -C /tmp/backend fetch -q --depth 1 origin "$BASE_SHA"
+          git -C /tmp/backend show "$BASE_SHA":routes/api.php > /tmp/routes_baseline.php
+          php -l /tmp/backend/routes/api.php
+          php -l /tmp/backend/app/Http/Controllers/EntidadesComercialesControlador.php
+          grep -Fq "clientes|proveedores|bodegas" /tmp/backend/routes/api.php
+          grep -Fq 'eliminacion' /tmp/backend/app/Http/Controllers/EntidadesComercialesControlador.php
+          ! grep -Fq "DB::table('ventas')" /tmp/backend/app/Http/Controllers/EntidadesComercialesControlador.php
+      - name: Instalar FTPS y Chromium
+        run: |
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+          mkdir -p /tmp/hd-crud-smoke && cd /tmp/hd-crud-smoke
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Respaldar rutas actuales y comprobar Laravel privado
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/read-crud.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/routes/api.php -o /tmp/routes_before.php
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_before
+          get /htdocs/api/index.php -o /tmp/gateway_before
+          get /htdocs/api-v2/storage/app/private/rutahd2_api_ready -o /tmp/ready_before
+          bye
+          EOF
+          lftp -f /tmp/read-crud.lftp >/dev/null
+          php -l /tmp/routes_before.php
+          cmp -s /tmp/routes_baseline.php /tmp/routes_before.php
+          grep -Fq 'Require all denied' /tmp/guard_before
+          grep -Fq 'rutahd2_api_ready' /tmp/gateway_before
+          test -s /tmp/ready_before
+          echo 'Preflight: rutas sin modificaciones inesperadas, JWT activo, controlador aislado.'
+      - name: Publicar controlador nuevo y finalmente rutas
+        run: |
+          set -euo pipefail
+          set +x
+          touch /tmp/crud_uploaded
+          cat >/tmp/write-crud.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/backend/app/Http/Controllers/EntidadesComercialesControlador.php -o /htdocs/api-v2/app/Http/Controllers/EntidadesComercialesControlador.php
+          put /tmp/backend/routes/api.php -o /htdocs/api-v2/routes/api.php
+          bye
+          EOF
+          lftp -f /tmp/write-crud.lftp >/dev/null
+      - name: Verificar bytes remotos y seguridad desde navegador real
+        working-directory: /tmp/hd-crud-smoke
+        run: |
+          set -euo pipefail
+          set +x
+          cat >/tmp/verify-crud.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/routes/api.php -o /tmp/routes_after.php
+          get /htdocs/api-v2/app/Http/Controllers/EntidadesComercialesControlador.php -o /tmp/controller_after.php
+          get /htdocs/api-v2/.htaccess -o /tmp/guard_after
+          get /htdocs/api/index.php -o /tmp/gateway_after
+          bye
+          EOF
+          lftp -f /tmp/verify-crud.lftp >/dev/null
+          cmp -s /tmp/backend/routes/api.php /tmp/routes_after.php
+          cmp -s /tmp/backend/app/Http/Controllers/EntidadesComercialesControlador.php /tmp/controller_after.php
+          cmp -s /tmp/guard_before /tmp/guard_after
+          cmp -s /tmp/gateway_before /tmp/gateway_after
+          php -l /tmp/routes_after.php
+          php -l /tmp/controller_after.php
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try {
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:45000});
+            await page.waitForTimeout(12000);
+            const outcomes=await page.evaluate(async()=>{
+              async function check(path,method='GET',fake=false){
+                const response=await fetch('/api/v1/'+path,{
+                  method,cache:'no-store',credentials:'same-origin',
+                  headers:{Accept:'application/json',...(method==='POST'||method==='PUT'?{'Content-Type':'application/json'}:{}),
+                    ...(fake?{Authorization:'Bearer aaaa.bbbb.cccc'}:{})},
+                  ...(method==='POST'||method==='PUT'?{body:'{}'}:{})
+                });
+                return response.status;
+              }
+              return {
+                health:await check('estado'),
+                clientList:await check('recursos/clientes'),
+                clientPost:await check('recursos/clientes','POST'),
+                providerPut:await check('recursos/proveedores/1','PUT'),
+                warehouseDelete:await check('recursos/bodegas/1','DELETE'),
+                invalidJwt:await check('recursos/clientes','POST',true),
+                noSalesWrite:await check('recursos/ventas','POST'),
+              };
+            });
+            console.log('CRUD_PRODUCCION_SEGURIDAD',JSON.stringify(outcomes));
+            if(outcomes.health!==200||outcomes.clientList!==401||outcomes.clientPost!==401||
+              outcomes.providerPut!==401||outcomes.warehouseDelete!==401||
+              outcomes.invalidJwt!==401||outcomes.noSalesWrite!==405)
+              throw new Error('El servidor no mantiene todos los permisos esperados');
+          }finally{await browser.close();}
+          JS
+          echo 'Nuevo controlador desplegado: CRUD clientes/proveedores/bodegas autenticados.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'HTTP público comprobado sin credenciales ni escrituras. No se ejecutó SQL.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Restaurar rutas y retirar controlador nuevo si falla
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/crud_uploaded ] && [ -s /tmp/routes_before.php ]; then
+            cat >/tmp/rollback-crud.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/routes_before.php -o /htdocs/api-v2/routes/api.php
+          rm /htdocs/api-v2/app/Http/Controllers/EntidadesComercialesControlador.php
+          bye
+          EOF
+            lftp -f /tmp/rollback-crud.lftp >/dev/null || echo "::error::Rollback no confirmado; revisar rutas manualmente."
+          fi
+      - name: Limpiar respaldos locales
+        if: always()
+        run: |
+          set +x
+          rm -f /tmp/*-crud.lftp /tmp/routes_*.php /tmp/controller_after.php /tmp/guard_before /tmp/guard_after /tmp/gateway_before /tmp/gateway_after /tmp/ready_before

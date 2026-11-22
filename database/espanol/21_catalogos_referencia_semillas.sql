@@ -34,11 +34,9 @@ INSERT IGNORE INTO tipos_codigos_barras (codigo,nombre,activo) VALUES
 
 -- Permisos para administrar el nuevo catálogo; el administrador
 -- dispone de acceso por su rol. No se concede masivamente a otros roles.
-INSERT INTO permisos (codigo,nombre,descripcion)
-SELECT 'productos.catalogos.tipos_codigos_barras.ver','Ver tipos de códigos de barras',
-       'Consultar tipos de códigos de barras'
+INSERT INTO permisos (codigo,descripcion)
+SELECT 'productos.catalogos.tipos_codigos_barras.ver','Consultar tipos de códigos de barras'
 WHERE NOT EXISTS(SELECT 1 FROM permisos WHERE codigo='productos.catalogos.tipos_codigos_barras.ver');
-INSERT INTO permisos (codigo,nombre,descripcion)
-SELECT 'productos.catalogos.tipos_codigos_barras.gestionar','Gestionar tipos de códigos de barras',
-       'Crear y editar tipos de códigos de barras'
+INSERT INTO permisos (codigo,descripcion)
+SELECT 'productos.catalogos.tipos_codigos_barras.gestionar','Crear y editar tipos de códigos de barras'
 WHERE NOT EXISTS(SELECT 1 FROM permisos WHERE codigo='productos.catalogos.tipos_codigos_barras.gestionar');

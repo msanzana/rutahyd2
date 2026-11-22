@@ -731,3 +731,15 @@ El titular pidió reemplazar los triggers propuestos por **funciones de backend 
 - Frontend V39 simplifica ficha Proveedor dejando sólo identificación/RUT/giro/código SII/dirección/ciudad/correo único/teléfono/plazo; modal actividad SII, RUT inline, iconos de acciones globales accesibles y selector `RutaHDBuscadorProductos.open` single/multiple con filtros preset, inmutables, categorías y rangos. Implementado en mix proveedor y ventas con fuente dependiente de la lista asignada al cliente; otros documentos (guías, NC, OT, OC) quedan listos para integrarse a medida que se implemente su editor real.
 - **Validación aislada exitosa, NO equivale a prueba en producción:** 35 Playwright https://github.com/msanzana/rutahyd2front/actions/runs/45060267724 ; Laravel/PHP + 674 códigos + 15 DROP + MOD11 https://github.com/msanzana/rutahyd2/actions/runs/45060464446 . En todo CI se prohibe SQL productivo y Firecrawl.
 - Especificación integral: `docs/ESPECIFICACION_V39_RUT_GIROS_BUSCADOR.md` dentro de rama V39.
+
+
+### Hotfix de textos comerciales en V38 — 2026-11-22
+
+- El titular pidió retirar de TODOS los módulos las frases de infraestructura de producción (ej.: «CONEXIÓN SEGURA», «Administración MySQL», «Los cambios se guardan en MariaDB bajo control de permisos», «Consultar MySQL»), sustituyéndolas por encabezados y avisos comerciales.
+- Los textos se corrigieron en frontend V39, conservando las funciones que aún requieren DDL33/DDL34; PR frontend #12.
+- **Limpieza productiva V38 desplegada OK** sin publicar V39 funcional: https://github.com/msanzana/rutahyd2/actions/runs/45061360747.
+- Auditoría FTPS previa de solo lectura https://github.com/msanzana/rutahyd2/actions/runs/45061142421 confirmó 13 JS productivos idénticos a fuente V38 (SHA `a36bc7b81d653061ed3b2646091d31a2d5c9fbbc`), sin divergencias.
+- Se publicaron 13 JS con copy empresarial y `index.html` actualizado para bust de caché. Se tomó respaldo previo de los archivos con artefacto `rutahd-v38-respaldo-antes-de-limpieza-textos`, retención 30 días; integridad posterior de los 14 archivos y protecciones de gateway/.htaccess comprobadas por bytes.
+- Smoke Playwright de producción: logo oficial y tercer nivel de ubicaciones OK; texto principal «Consulta y administra tus registros.»; JS Administración sin «Administración MySQL» ni MariaDB; `/api/v1/estado` HTTP 200, ubicación privada HTTP 401 sin JWT, `admin-remoto.js?v=20261122-copyprod38` HTTP 200. No se escribió SQL ni se modificaron permisos, .env, rutas, V39 o datos.
+- El ajuste es permanente en V39 también: encabezados simples, gestión de catálogos, consulta de registros y mensajes de guardado más claros. Conservar al publicar la versión siguiente.
+- **Pendiente original V39:** importar manualmente DDL33 y DDL34 (giros SII); solo después auditar, desplegar V39, y luego aplicar DDL35 con respaldo. Este hotfix NO adelanta dichas migraciones.

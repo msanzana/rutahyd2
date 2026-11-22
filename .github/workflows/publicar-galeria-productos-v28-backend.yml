@@ -1,0 +1,205 @@
+name: Publicar galería v28, ordenación y validación de productos (sin ejecutar DDL)
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/publicar-galeria-productos-v28-backend.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 24
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      SOURCE_SHA: 8bc6863b1f33a62fabd8952467f428a75414a355
+      V25_SOURCE: 4aee794027f79d2bb4fb11012ba920cd14a85d35
+      V25_SELLER: 282a558fbc2f4a44521018c18106286676e24afe
+      LEGACY_BASE: 88635dae023c2507a5c80b475b4fa7b6958984bb
+    steps:
+      - name: Construir paquete aislado sin cambiar otras rutas
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          git clone -q --depth 1 --branch feature/proveedores-productos-barcodes-20261122 https://github.com/msanzana/rutahyd2.git /tmp/productphotos
+          test "$(git -C /tmp/productphotos rev-parse HEAD)" = "$SOURCE_SHA"
+          git -C /tmp/productphotos fetch -q --depth 1 origin "$V25_SOURCE" "$V25_SELLER" "$LEGACY_BASE"
+          mkdir -p /tmp/photo28
+          git -C /tmp/productphotos show "$V25_SOURCE:app/Http/Controllers/ProductoComercialControlador.php" > /tmp/photo28/product_before.php
+          cp /tmp/productphotos/app/Http/Controllers/ProductoComercialControlador.php /tmp/photo28/product_after.php
+          cp /tmp/productphotos/app/Http/Controllers/FotosProductoControlador.php /tmp/photo28/photo_after.php
+          git -C /tmp/productphotos show "$LEGACY_BASE:routes/api.php" > /tmp/photo28/base_routes.php
+          git -C /tmp/productphotos show "$V25_SOURCE:routes/api.php" > /tmp/photo28/v25_routes.php
+          git -C /tmp/productphotos show "$V25_SELLER:routes/api.php" > /tmp/photo28/seller_routes.php
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/photo28')
+          old=p.joinpath('base_routes.php').read_text()
+          v25=p.joinpath('v25_routes.php').read_text()
+          seller=p.joinpath('seller_routes.php').read_text()
+          latest=Path('/tmp/productphotos/routes/api.php').read_text()
+          anchor='use App\\Http\\Controllers\\ProductoComercialControlador;'
+          assert old.count(anchor)==1
+          for imp in [
+              'use App\\Http\\Controllers\\ListasPreciosControlador;',
+              'use App\\Http\\Controllers\\ListasPreciosClientesControlador;'
+          ]:old=old.replace(anchor,anchor+'\n'+imp)
+          start=v25.index('    // Listas de precios: precio base y listas especiales.')
+          end=v25.index('    // Catálogo de productos de cada proveedor.',start)
+          old=old.replace('    // Catálogo de productos de cada proveedor.',
+            v25[start:end]+'    // Catálogo de productos de cada proveedor.')
+          quote="    Route::get('/ventas/precio-cliente',[ListasPreciosClientesControlador::class,'cotizar']);"
+          old=old.replace(quote,
+            "    Route::get('/ventas/clientes-disponibles',[ListasPreciosClientesControlador::class,'clientesVenta']);\n"
+            "    Route::get('/ventas/productos-disponibles',[ListasPreciosClientesControlador::class,'productosVenta']);\n"
+            +quote)
+          assert "ventas/clientes-disponibles" in seller
+          assert 'submodulo.rutahd' not in old
+          p.joinpath('routes_before.php').write_text(old)
+          imp='use App\\Http\\Controllers\\FotosProductoControlador;'
+          start=latest.index('    // Fotos de productos - solo JWT')
+          end=latest.index('    // Listas de precios:',start)
+          photos=latest[start:end]
+          assert photos.count("Route::get('/productos/{productoId}/fotos'")==1
+          final=old.replace(anchor,anchor+'\n'+imp)
+          marker='    // Listas de precios: precio base y listas especiales.'
+          final=final.replace(marker,photos+marker)
+          assert 'submodulo.rutahd' not in final
+          assert final.count("Route::post('/productos/{productoId}/fotos'")==1
+          p.joinpath('routes_after.php').write_text(final)
+          PY
+          for f in /tmp/photo28/*_after.php; do php -l "$f"; done
+          node -e "const fs=require('fs');const s=fs.readFileSync('/tmp/photo28/product_after.php','utf8');if(!s.includes('Schema::hasTable(\x27productos_fotos\x27)'))process.exit(1)"
+          echo 'Sin DDL ni triggers. Publicación preparada para activar la galería cuando se importe DDL25.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Instalar cliente FTPS y Chromium para revisar autorización
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          mkdir -p /tmp/photo28/browser && cd /tmp/photo28/browser
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Respaldar y exigir versión exacta de los archivos productivos
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/photo28/download.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/routes/api.php -o /tmp/photo28/remote_routes_before.php
+          get /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php -o /tmp/photo28/remote_product_before.php
+          get /htdocs/api-v2/.htaccess -o /tmp/photo28/guard_before
+          get /htdocs/api/index.php -o /tmp/photo28/gateway_before
+          bye
+          EOF
+          lftp -f /tmp/photo28/download.lftp >/dev/null
+          cmp -s /tmp/photo28/routes_before.php /tmp/photo28/remote_routes_before.php ||
+            { echo "::error::Rutas divergentes en producción. No se sobreescribe.";exit 1; }
+          cmp -s /tmp/photo28/product_before.php /tmp/photo28/remote_product_before.php ||
+            { echo "::error::Controlador Productos divergente. No se sobreescribe.";exit 1; }
+          grep -Fq 'Require all denied' /tmp/photo28/guard_before
+          grep -Fq 'rutahd2_api_ready' /tmp/photo28/gateway_before
+      - name: Publicar controladores primero y rutas al final
+        run: |
+          set -euo pipefail
+          set +x
+          touch /tmp/photo28/started_upload
+          cat >/tmp/photo28/upload.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/photo28/photo_after.php -o /htdocs/api-v2/app/Http/Controllers/FotosProductoControlador.php
+          put /tmp/photo28/product_after.php -o /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php
+          put /tmp/photo28/routes_after.php -o /htdocs/api-v2/routes/api.php
+          bye
+          EOF
+          lftp -f /tmp/photo28/upload.lftp >/dev/null
+      - name: Verificar bytes, protección del gateway y endpoints de fotos
+        run: |
+          set -euo pipefail
+          set +x
+          cat >/tmp/photo28/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/routes/api.php -o /tmp/photo28/remote_routes_after.php
+          get /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php -o /tmp/photo28/remote_product_after.php
+          get /htdocs/api-v2/app/Http/Controllers/FotosProductoControlador.php -o /tmp/photo28/remote_photo_after.php
+          get /htdocs/api-v2/.htaccess -o /tmp/photo28/guard_after
+          get /htdocs/api/index.php -o /tmp/photo28/gateway_after
+          bye
+          EOF
+          lftp -f /tmp/photo28/verify.lftp >/dev/null
+          cmp -s /tmp/photo28/routes_after.php /tmp/photo28/remote_routes_after.php
+          cmp -s /tmp/photo28/product_after.php /tmp/photo28/remote_product_after.php
+          cmp -s /tmp/photo28/photo_after.php /tmp/photo28/remote_photo_after.php
+          cmp -s /tmp/photo28/guard_before /tmp/photo28/guard_after
+          cmp -s /tmp/photo28/gateway_before /tmp/photo28/gateway_after
+          cd /tmp/photo28/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const p=await browser.newPage();
+            await p.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:55000});
+            const statuses=await p.evaluate(async()=>{
+              const cases=[
+                ['GET','estado',200],
+                ['GET','productos/1/fotos',401],
+                ['GET','productos/1/fotos/1',401],
+                ['POST','productos/1/fotos',401],
+                ['DELETE','productos/1/fotos/1',401],
+                ['GET','productos?orden=rubro&direccion=asc',401]
+              ];
+              return Promise.all(cases.map(async([method,path,expected])=>{
+                const r=await fetch('/api/v1/'+path,{
+                  method,headers:{Accept:'application/json'},cache:'no-store'
+                });return {method,path,status:r.status,expected};
+              }));
+            });
+            console.log('FOTOS28_PUBLIC_JWT',JSON.stringify(statuses));
+            if(statuses.some(x=>x.status!==x.expected))
+              throw Error('Fallo de protección JWT o estado público');
+          }finally{await browser.close();}
+          JS
+          echo 'Controlador de fotos, listado y rutas cotejados; JWT preservado. DDL25 no se importó automáticamente.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Restaurar controlador y rutas anteriores ante fallo
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/photo28/started_upload ] && [ -s /tmp/photo28/remote_product_before.php ]; then
+            cat >/tmp/photo28/rollback.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/photo28/remote_product_before.php -o /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php
+          put /tmp/photo28/remote_routes_before.php -o /htdocs/api-v2/routes/api.php
+          rm /htdocs/api-v2/app/Http/Controllers/FotosProductoControlador.php
+          bye
+          EOF
+            lftp -f /tmp/photo28/rollback.lftp >/dev/null ||
+              echo "::error::Rollback incompleto: revisar FTPS"
+          fi
+      - name: Destruir artefactos privados temporales
+        if: always()
+        run: |
+          rm -rf /tmp/productphotos /tmp/photo28

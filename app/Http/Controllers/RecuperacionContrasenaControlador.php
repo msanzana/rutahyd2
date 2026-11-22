@@ -35,8 +35,10 @@ final class RecuperacionContrasenaControlador extends Controller
 
         $base = rtrim((string)config('app.url'), '/');
         abort_unless(str_starts_with($base, 'https://'), 503, 'URL HTTPS no configurada');
-        // El fragmento # evita enviar el token al servidor web al abrir el sitio.
-        $url = $base . '/#recuperar?token=' . $token;
+        // InfinityFree elimina fragmentos # en el desafío inicial (?i=1).
+        // Query de un solo uso: el frontend lo quita de la URL inmediatamente.
+        // No usar scripts externos ni cabeceras Referer con este enlace.
+        $url = $base . '/?recuperar=' . $token;
         try {
             Mail::to($usuario->correo_electronico)->send(
                 CorreoCorporativo::recuperacion($url)

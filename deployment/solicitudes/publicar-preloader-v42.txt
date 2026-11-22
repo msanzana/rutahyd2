@@ -1,0 +1,23 @@
+Ruta H&D V42 · Publicación del preloader modal global
+Fecha: 2026-11-22
+
+Solicitud expresa: popup profesional al centro con animación de espera
+mientras abre o consulta cualquier módulo CRUD y buscador.
+
+Frontend:
+- assets/js/carga-global-v42.js + assets/css/carga-global-v42.css
+- assets/js/catalogos-api.js incluye start/finally sobre GET, POST, PUT,
+  DELETE y carga binaria, sin alterar rutas, payload ni autorización.
+- Popup nativo <dialog> top-layer sobre otros CRUD, etiqueta aria-live,
+  indicador animado violeta, fondo difuminado y responsive.
+- Retraso antipalpitación 130 ms, mínimo visible 240 ms, contador de
+  solicitudes simultáneas y cierre seguro en errores y finalización.
+- index.html sólo nuevas referencias y caché en catalogos-api.
+
+Pruebas aisladas en Playwright: 42/42 aprobadas
+https://github.com/msanzana/rutahyd2front/actions/runs/45068993470
+
+Autorizar deploy mínimo de 4 archivos (API JS, nuevo JS, nuevo CSS, HTML)
+con comparación exacta de fuente V41 desplegada, preservación de hotfix giros,
+logo, navegación, permisos, gateway y .htaccess, respaldo y rollback.
+No ejecutar DDL ni SQL, ni modificar datos o .env.

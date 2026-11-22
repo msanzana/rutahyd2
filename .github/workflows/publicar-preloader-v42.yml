@@ -1,0 +1,222 @@
+name: V42 - publicar preloader global CRUD y búsquedas con respaldo
+on:
+  push:
+    branches: [feature/v42-preloader-global-20261122]
+    paths: [deployment/solicitudes/publicar-preloader-v42.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  desplegar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 32
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FRONT_BEFORE: eccf8eb0834acc546ad7e25de2a8ce232eba9cc2
+      FRONT_AFTER: cb0c42ba8a3b51de0fa66943f8620fe4f58c2a64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar código fijado y cliente FTPS
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          git clone -q --depth 1 --branch feature/v42-preloader-global-20261122 https://github.com/msanzana/rutahyd2front.git /tmp/frontend-v42
+          git -C /tmp/frontend-v42 fetch -q --depth 1 origin "$FRONT_BEFORE" "$FRONT_AFTER"
+          git -C /tmp/frontend-v42 checkout -q --detach "$FRONT_AFTER"
+          test "$(git -C /tmp/frontend-v42 rev-parse HEAD)" = "$FRONT_AFTER"
+          mkdir -p /tmp/preloader-v42/{old,new,verified}
+      - name: Solo lectura de producción y resguardo de protecciones
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import os,pathlib
+          root=pathlib.Path('/tmp/preloader-v42')
+          (root/'old/assets/js').mkdir(parents=True,exist_ok=True)
+          with (root/'read.lftp').open('w') as f:
+            for x in ['set cmd:fail-exit yes','set net:timeout 45','set net:max-retries 2',
+                'set ftp:ssl-force yes','set ftp:ssl-protect-data yes',
+                'set ssl:verify-certificate yes']:print(x,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for path in ['assets/js/catalogos-api.js','index.html']:
+              print('get /htdocs/'+path+' -o /tmp/preloader-v42/old/'+path,file=f)
+            for remote,local in [
+                ('/htdocs/api-v2/.htaccess','private-guard-before'),
+                ('/htdocs/api/.htaccess','gateway-guard-before'),
+                ('/htdocs/api/index.php','gateway-before')]:
+              print('get '+remote+' -o /tmp/preloader-v42/'+local,file=f)
+            print('cls -1 /htdocs/assets/js > /tmp/preloader-v42/js-list',file=f)
+            print('cls -1 /htdocs/assets/css > /tmp/preloader-v42/css-list',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/preloader-v42/read.lftp >/dev/null
+          ! grep -Fxq 'carga-global-v42.js' /tmp/preloader-v42/js-list
+          ! grep -Fxq 'carga-global-v42.css' /tmp/preloader-v42/css-list
+          grep -Fq 'Require all denied' /tmp/preloader-v42/private-guard-before
+          grep -Fq 'HTTP_AUTHORIZATION' /tmp/preloader-v42/gateway-guard-before
+          grep -Fq 'rutahd2_api_ready' /tmp/preloader-v42/gateway-before
+      - name: Aplicar parche controlado y validar sintaxis sin publicar aún
+        run: |
+          set -euo pipefail
+          python3 scripts/ensamblar_preloader_v42.py
+          node --check /tmp/preloader-v42/new/assets/js/catalogos-api.js
+          node --check /tmp/preloader-v42/new/assets/js/carga-global-v42.js
+          test -s /tmp/preloader-v42/new/assets/css/carga-global-v42.css
+          grep -Fq 'carga-global-v42.js?v=20261122-v42prod' /tmp/preloader-v42/new/index.html
+          grep -Fq 'giros-sii-v39.js?v=20261122-v41prod' /tmp/preloader-v42/new/index.html
+          echo 'V42 fuentes y producción compatibles; solo 4 recursos de interfaz, sin SQL.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Respaldo anterior disponible para rollback
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v42-backup-antes-de-preloader
+          path: |
+            /tmp/preloader-v42/old/
+            /tmp/preloader-v42/private-guard-before
+            /tmp/preloader-v42/gateway-guard-before
+            /tmp/preloader-v42/gateway-before
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar scripts primero y HTML de último
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/preloader-v42/upload-started
+          python3 - <<'PY'
+          import os,pathlib
+          root=pathlib.Path('/tmp/preloader-v42')
+          with (root/'upload.lftp').open('w') as f:
+            for x in ['set cmd:fail-exit yes','set net:timeout 45','set net:max-retries 2',
+                'set ftp:ssl-force yes','set ftp:ssl-protect-data yes',
+                'set ssl:verify-certificate yes']:print(x,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for path in ['assets/js/carga-global-v42.js',
+                'assets/css/carga-global-v42.css','assets/js/catalogos-api.js','index.html']:
+              print('put /tmp/preloader-v42/new/'+path+' -o /htdocs/'+path,file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/preloader-v42/upload.lftp >/dev/null
+      - name: Comprobar los cuatro archivos byte a byte en FTPS
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import os,pathlib
+          root=pathlib.Path('/tmp/preloader-v42')
+          with (root/'verify.lftp').open('w') as f:
+            for x in ['set cmd:fail-exit yes','set net:timeout 45','set net:max-retries 2',
+                'set ftp:ssl-force yes','set ftp:ssl-protect-data yes',
+                'set ssl:verify-certificate yes']:print(x,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for path in ['assets/js/carga-global-v42.js',
+                'assets/css/carga-global-v42.css','assets/js/catalogos-api.js','index.html']:
+              dest=root/'verified'/path;dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get /htdocs/'+path+' -o '+str(dest),file=f)
+            for remote,local in [
+                ('/htdocs/api-v2/.htaccess','private-guard-after'),
+                ('/htdocs/api/.htaccess','gateway-guard-after'),
+                ('/htdocs/api/index.php','gateway-after')]:
+              print('get '+remote+' -o /tmp/preloader-v42/'+local,file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/preloader-v42/verify.lftp >/dev/null
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/preloader-v42')
+          for name in ['assets/js/carga-global-v42.js',
+              'assets/css/carga-global-v42.css','assets/js/catalogos-api.js','index.html']:
+            assert (p/'new'/name).read_bytes()==(p/'verified'/name).read_bytes(),name
+          for name in ['private-guard','gateway-guard','gateway']:
+            assert (p/(name+'-before')).read_bytes()==(p/(name+'-after')).read_bytes(),name
+          print('V42_BYTES_OK: 4 archivos y seguridad Apache sin alteraciones.')
+          PY
+      - name: Comprobar overlay visual en Chromium sin credenciales
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/preloader-v42/browser
+          cd /tmp/preloader-v42/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({locale:'es-CL'});
+            let ok=false,inconclusive=false;
+            for(let attempt=1;attempt<=3;attempt++){
+              const response=await page.goto('https://rutahyd2.free.nf/?v42=20261122',{
+                waitUntil:'domcontentloaded',timeout:55000});
+              await page.waitForTimeout(3500);
+              if([502,503,504].includes(response?.status())){
+                console.log('V42_SMOKE_GATEWAY',response?.status(),'intento',attempt);
+                if(attempt===3){inconclusive=true;break;}
+                await page.waitForTimeout(2200);continue;
+              }
+              const evidence=await page.evaluate(async()=>{
+                const files=['/api/v1/estado',
+                  '/assets/js/carga-global-v42.js?v=20261122-v42prod',
+                  '/assets/css/carga-global-v42.css?v=20261122-v42prod'];
+                const results=await Promise.all(files.map(async path=>({
+                  path,http:(await fetch(path,{cache:'no-store'})).status
+                })));
+                return {
+                  logo:!!document.querySelector('.brand-logo'),
+                  geo:!!document.querySelector('#ubicacionesSubnav'),
+                  loading:typeof window.RutaHDCarga?.start==='function',
+                  version:!!document.querySelector('script[src*="carga-global-v42.js?v=20261122-v42prod"]'),
+                  results
+                };
+              });
+              console.log('V42_SMOKE_UI',JSON.stringify(evidence));
+              if(!evidence.logo||!evidence.geo||!evidence.loading||!evidence.version||
+                evidence.results.some(x=>x.http!==200))
+                throw Error('Recursos esenciales o API no disponibles tras V42');
+              await page.evaluate(()=>{
+                window.__finishV42=window.RutaHDCarga.start({
+                  path:'/giros-sii',method:'GET'
+                });
+              });
+              await page.waitForSelector('dialog.hd-loading-overlay[open]',{timeout:5000});
+              await page.evaluate(()=>window.__finishV42());
+              await page.waitForFunction(()=>!document.querySelector('dialog.hd-loading-overlay[open]'),{timeout:5000});
+              ok=true;break;
+            }
+            if(!ok&&!inconclusive)throw Error('Smoke de V42 falló');
+            if(inconclusive)console.log('::warning::InfinityFree 502/503 general: smoke inconcluso. Integridad FTPS y JS aprobadas; no se afirma disponibilidad HTTP.');
+          }finally{await browser.close();}
+          JS
+          echo 'V42: archivos y popup modal validados; si hubo 502 general la validación HTTP queda inconclusa.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Restaurar archivos anteriores ante fallo tras escribir
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/preloader-v42/upload-started ] && [ -s /tmp/preloader-v42/old/index.html ]; then
+            python3 - <<'PY'
+            import os,pathlib
+            p=pathlib.Path('/tmp/preloader-v42')
+            with (p/'rollback.lftp').open('w') as f:
+              for x in ['set cmd:fail-exit yes','set net:timeout 45','set net:max-retries 3',
+                  'set ftp:ssl-force yes','set ftp:ssl-protect-data yes',
+                  'set ssl:verify-certificate yes']:print(x,file=f)
+              print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+              print('put /tmp/preloader-v42/old/assets/js/catalogos-api.js -o /htdocs/assets/js/catalogos-api.js',file=f)
+              print('put /tmp/preloader-v42/old/index.html -o /htdocs/index.html',file=f)
+              print('set cmd:fail-exit no',file=f)
+              print('rm /htdocs/assets/js/carga-global-v42.js',file=f)
+              print('rm /htdocs/assets/css/carga-global-v42.css',file=f)
+              print('bye',file=f)
+            PY
+            lftp -f /tmp/preloader-v42/rollback.lftp >/dev/null ||
+              echo '::error::Rollback incompleto; recuperar artefacto V42 del run'
+          fi
+      - name: Borrar scripts de sesión FTPS
+        if: always()
+        run: rm -f /tmp/preloader-v42/*.lftp

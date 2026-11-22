@@ -30,6 +30,14 @@ jobs:
           grep -Fq 'supplier-products-module' /tmp/front/assets/js/proveedores-productos.js
           test -f /tmp/front/assets/css/crud-v18.css
           grep -Fq 'crud-v18.css?v=20261122-fix19' /tmp/front/index.html
+          grep -Fq 'listados-tema-v20.css?v=20261122-ui20' /tmp/front/index.html
+          grep -Fq 'menu-usuario.js?v=20261122-ui20' /tmp/front/index.html
+          grep -Fq 'listados-ui.js?v=20261122-ui20' /tmp/front/index.html
+          test -s /tmp/front/assets/js/menu-usuario.js
+          test -s /tmp/front/assets/js/listados-ui.js
+          test -s /tmp/front/assets/css/listados-tema-v20.css
+          ! grep -Fq 'id="apiStatus"' /tmp/front/index.html
+          ! grep -Fq 'id="heroLogin"' /tmp/front/index.html
           ! grep -Fq 'Cerrar sesión remota' /tmp/front/assets/js/admin-remoto.js
           grep -Fq 'const key=selected;' /tmp/front/assets/js/admin-remoto.js
           grep -Fq 'No hay registros guardados' /tmp/front/assets/js/admin-remoto.js
@@ -47,7 +55,7 @@ jobs:
           assert s.count('id="loginDemo"')==0
           assert 'Explorar interfaz de demostración' not in s
           assert 'src="assets/js/app-produccion.js' in s
-          assert 'src="assets/js/login-produccion.js"' in s
+          assert 'src="assets/js/login-produccion.js' in s
           assert 'assets/css/produccion.css' in s
           assert '<meta name="referrer" content="no-referrer">' in s
           assert 'src="assets/js/recuperacion.js"' in s
@@ -66,8 +74,8 @@ jobs:
           s=s.replace('menu-oficial.css?v=20261121-2','menu-oficial.css?v=20261122-prod17')
           s=s.replace('produccion.css?v=20261121-1','produccion.css?v=20261122-prod17')
           s=re.sub(r'src="assets/js/([a-z-]+)\.js"',r'src="assets/js/\1.js?v=20261122-prod17"',s)
-          assert s.count('src="assets/js/login-produccion.js?v=20261122-prod17"')==1
-          assert s.count('src="assets/js/app-produccion.js?v=20261122-fix19"')==1
+          assert s.count('src="assets/js/login-produccion.js?v=20261122-ui20"')==1
+          assert s.count('src="assets/js/app-produccion.js?v=20261122-ui20"')==1
           Path('/tmp/release_index.html').write_text(s,'utf-8')
           Path('/tmp/redirect_violeta.html').write_text(
             '<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Ruta H&D2 · Producción</title>'
@@ -160,6 +168,9 @@ jobs:
           get /htdocs/assets/js/accesos.js -o /tmp/accesos_after.js
           get /htdocs/assets/css/produccion.css -o /tmp/css_after.css
           get /htdocs/assets/css/crud-v18.css -o /tmp/crud_after.css
+          get /htdocs/assets/css/listados-tema-v20.css -o /tmp/listados_css_after.css
+          get /htdocs/assets/js/listados-ui.js -o /tmp/listados_js_after.js
+          get /htdocs/assets/js/menu-usuario.js -o /tmp/menu_usuario_after.js
           get /htdocs/api-v2/.htaccess -o /tmp/guard_after
           bye
           EOF
@@ -177,9 +188,12 @@ jobs:
           cmp -s /tmp/front/assets/js/accesos.js /tmp/accesos_after.js
           cmp -s /tmp/front/assets/css/produccion.css /tmp/css_after.css
           cmp -s /tmp/front/assets/css/crud-v18.css /tmp/crud_after.css
+          cmp -s /tmp/front/assets/css/listados-tema-v20.css /tmp/listados_css_after.css
+          cmp -s /tmp/front/assets/js/listados-ui.js /tmp/listados_js_after.js
+          cmp -s /tmp/front/assets/js/menu-usuario.js /tmp/menu_usuario_after.js
           cmp -s /tmp/guard_before /tmp/guard_after
           echo "Frontend productivo SHA: $FRONTEND_SHA" >> "$GITHUB_STEP_SUMMARY"
-          echo 'Frontend v18: CRUD estilizados, dialogs responsivos, acciones al extremo derecho y salida única junto al usuario. JWT y MariaDB intactos.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Frontend v20: listados uniformes, busqueda avanzada, iconos accesibles, menu de perfil y modo oscuro local por cuenta. JWT y MariaDB intactos. Submodulos nuevos requieren DDL23 para permisos independientes.' >> "$GITHUB_STEP_SUMMARY"
       - name: Restaurar archivos originales ante cualquier fallo
         if: failure()
         run: |

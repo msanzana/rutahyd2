@@ -28,6 +28,9 @@ jobs:
           grep -Fq 'product-editor-dialog' /tmp/front/assets/css/produccion.css
           grep -Fq 'productSuppliers' /tmp/front/assets/js/catalogos-api.js
           grep -Fq 'supplier-products-module' /tmp/front/assets/js/proveedores-productos.js
+          test -f /tmp/front/assets/css/crud-v18.css
+          grep -Fq 'crud-v18.css?v=20261122-crud18' /tmp/front/index.html
+          ! grep -Fq 'Cerrar sesión remota' /tmp/front/assets/js/admin-remoto.js
           python3 - <<'PY'
           from pathlib import Path
           import re
@@ -154,6 +157,7 @@ jobs:
           get /htdocs/assets/js/recuperacion.js -o /tmp/recuperacion_after.js
           get /htdocs/assets/js/accesos.js -o /tmp/accesos_after.js
           get /htdocs/assets/css/produccion.css -o /tmp/css_after.css
+          get /htdocs/assets/css/crud-v18.css -o /tmp/crud_after.css
           get /htdocs/api-v2/.htaccess -o /tmp/guard_after
           bye
           EOF
@@ -170,9 +174,10 @@ jobs:
           cmp -s /tmp/front/assets/js/recuperacion.js /tmp/recuperacion_after.js
           cmp -s /tmp/front/assets/js/accesos.js /tmp/accesos_after.js
           cmp -s /tmp/front/assets/css/produccion.css /tmp/css_after.css
+          cmp -s /tmp/front/assets/css/crud-v18.css /tmp/crud_after.css
           cmp -s /tmp/guard_before /tmp/guard_after
           echo "Frontend productivo SHA: $FRONTEND_SHA" >> "$GITHUB_STEP_SUMMARY"
-          echo 'Frontend v17 con Proveedores productos, catálogo EAN/DUN/Code y formulario ancho desplegado. JWT y MariaDB intactos.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Frontend v18: CRUD estilizados, dialogs responsivos, acciones al extremo derecho y salida única junto al usuario. JWT y MariaDB intactos.' >> "$GITHUB_STEP_SUMMARY"
       - name: Restaurar archivos originales ante cualquier fallo
         if: failure()
         run: |

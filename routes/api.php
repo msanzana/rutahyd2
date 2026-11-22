@@ -11,6 +11,7 @@ use App\Http\Controllers\InventarioControlador;
 use App\Http\Controllers\CatalogoComercialControlador;
 use App\Http\Controllers\ClasificacionProductoControlador;
 use App\Http\Controllers\ProductoComercialControlador;
+use App\Http\Controllers\FotosProductoControlador;
 use App\Http\Controllers\ListasPreciosControlador;
 use App\Http\Controllers\ListasPreciosClientesControlador;
 use App\Http\Controllers\ProductosProveedoresControlador;
@@ -40,6 +41,18 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::delete('/productos/{id}',[ProductoComercialControlador::class,'desactivar'])->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos_listado,gestionar')->whereNumber('id');
     Route::get('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'ver'])->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos_listado,ver')->whereNumber('id');
     Route::patch('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'guardar'])->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos_listado,gestionar')->whereNumber('id');
+
+    // Fotos de productos - solo JWT con permiso de Productos, sin enlaces públicos.
+    Route::get('/productos/{productoId}/fotos',[FotosProductoControlador::class,'listar'])
+        ->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos_listado,ver')->whereNumber('productoId');
+    Route::get('/productos/{productoId}/fotos/{fotoId}',[FotosProductoControlador::class,'imagen'])
+        ->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos_listado,ver')->whereNumber('productoId')->whereNumber('fotoId');
+    Route::post('/productos/{productoId}/fotos',[FotosProductoControlador::class,'subir'])
+        ->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos_listado,gestionar')
+        ->middleware('throttle:12,1')->whereNumber('productoId');
+    Route::delete('/productos/{productoId}/fotos/{fotoId}',[FotosProductoControlador::class,'eliminar'])
+        ->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos_listado,gestionar')
+        ->whereNumber('productoId')->whereNumber('fotoId');
 
     // Listas de precios: precio base y listas especiales. JWT + autorización backend.
     Route::get('/listas-precios',[ListasPreciosControlador::class,'listar']);

@@ -1,0 +1,138 @@
+name: Publicar diálogo de estado Ruta H&D V36
+on:
+  push:
+    branches: [main]
+    paths:
+      - deployment/solicitudes/publicar-dialogo-estados-v36.txt
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-frontend-deploy
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FRONT_SHA: a4fb0e391c46cde507337a531a9926d6640214a3
+      FRONT_BEFORE_SHA: 84f211f82f3f9dac1d00545649e10d0c9f590cbc
+    steps:
+      - name: Leer código aprobado sin credenciales publicadas
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          git clone -q --depth 1 --branch main https://github.com/msanzana/rutahyd2front.git /tmp/rutahdfront
+          test "$(git -C /tmp/rutahdfront rev-parse HEAD)" = "$FRONT_SHA"
+          git -C /tmp/rutahdfront fetch -q --depth 1 origin "$FRONT_BEFORE_SHA"
+          git -C /tmp/rutahdfront show "$FRONT_BEFORE_SHA:assets/js/listados-ui.js" > /tmp/listados-antes.js
+          node --check /tmp/rutahdfront/assets/js/listados-ui.js
+          test -s /tmp/rutahdfront/assets/css/dialogo-estados-v36.css
+          grep -Fq 'hd-status-confirm' /tmp/rutahdfront/assets/js/listados-ui.js
+          ! grep -Fq 'window.confirm(' /tmp/rutahdfront/assets/js/listados-ui.js
+          grep -Fq 'dialogo-estados-v36.css?v=20261122-modal36' /tmp/rutahdfront/index.html
+          grep -Fq 'listados-ui.js?v=20261122-modal36' /tmp/rutahdfront/index.html
+      - name: Instalar FTPS
+        run: sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Respaldo y preflight de archivos existentes
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          mkdir -p /tmp/v36
+          cat >/tmp/v36/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 40
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/v36/index-before.html
+          get /htdocs/assets/js/listados-ui.js -o /tmp/v36/listados-before.js
+          get /htdocs/api-v2/.htaccess -o /tmp/v36/guard-before
+          bye
+          EOF
+          lftp -f /tmp/v36/read.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/v36/guard-before
+          cmp -s /tmp/listados-antes.js /tmp/v36/listados-before.js || {
+            echo "::error::JS productivo no coincide con V35; no publicar"; exit 1;
+          }
+          python3 - <<'PY'
+          from pathlib import Path
+          html=Path('/tmp/v36/index-before.html').read_text('utf-8')
+          old='<link rel="stylesheet" href="assets/css/navegacion-v35.css?v=20261122-nav35">'
+          oldjs='assets/js/listados-ui.js?v=20261122-nav35'
+          assert html.count(old)==1, 'CSS V35 inesperado: no desplegar'
+          assert html.count(oldjs)==1, 'JS V35 inesperado: no desplegar'
+          assert 'dialogo-estados-v36' not in html, 'V36 posiblemente ya publicada'
+          html=html.replace(old,old+'\n  <link rel="stylesheet" href="assets/css/dialogo-estados-v36.css?v=20261122-modal36">')
+          html=html.replace(oldjs,'assets/js/listados-ui.js?v=20261122-modal36')
+          Path('/tmp/v36/index-after.html').write_text(html,'utf-8')
+          PY
+      - name: Publicar dos recursos y HTML al final
+        run: |
+          set -euo pipefail
+          set +x
+          touch /tmp/v36/upload-started
+          cat >/tmp/v36/write.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 40
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/rutahdfront/assets/js/listados-ui.js -o /htdocs/assets/js/listados-ui.js
+          put /tmp/rutahdfront/assets/css/dialogo-estados-v36.css -o /htdocs/assets/css/dialogo-estados-v36.css
+          put /tmp/v36/index-after.html -o /htdocs/index.html
+          bye
+          EOF
+          lftp -f /tmp/v36/write.lftp >/dev/null
+      - name: Comprobar bytes e integridad de backend
+        run: |
+          set -euo pipefail
+          set +x
+          cat >/tmp/v36/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 40
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/v36/index-check.html
+          get /htdocs/assets/js/listados-ui.js -o /tmp/v36/listados-check.js
+          get /htdocs/assets/css/dialogo-estados-v36.css -o /tmp/v36/estados-check.css
+          get /htdocs/api-v2/.htaccess -o /tmp/v36/guard-after
+          bye
+          EOF
+          lftp -f /tmp/v36/verify.lftp >/dev/null
+          cmp -s /tmp/v36/index-after.html /tmp/v36/index-check.html
+          cmp -s /tmp/rutahdfront/assets/js/listados-ui.js /tmp/v36/listados-check.js
+          cmp -s /tmp/rutahdfront/assets/css/dialogo-estados-v36.css /tmp/v36/estados-check.css
+          cmp -s /tmp/v36/guard-before /tmp/v36/guard-after
+          node --check /tmp/v36/listados-check.js
+          echo 'V36 publicada en portada, 3 archivos cotejados, backend y BBDD intactos.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Restaurar HTML y JS si falla
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/v36/upload-started ] && [ -s /tmp/v36/index-before.html ]; then
+            cat >/tmp/v36/rollback.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/v36/listados-before.js -o /htdocs/assets/js/listados-ui.js
+          put /tmp/v36/index-before.html -o /htdocs/index.html
+          bye
+          EOF
+            lftp -f /tmp/v36/rollback.lftp >/dev/null || echo "::error::Revisar restauración FTPS"
+          fi
+      - name: Limpiar archivos privados locales
+        if: always()
+        run: rm -rf /tmp/rutahdfront /tmp/v36 /tmp/listados-antes.js

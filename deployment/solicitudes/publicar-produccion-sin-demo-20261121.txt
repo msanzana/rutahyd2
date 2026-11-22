@@ -138,3 +138,15 @@ mariadb=no-modificar
 ddl26=manual-phpmyadmin-pending
 firecrawl=prohibido
 rollback=habilitado
+
+release=20261122-productos-margen-sin-costo-v30
+frontend_sha=a8bdcaf01915b3a4d717a45d4608f6b9745c97b3
+frontend_ci=https://github.com/msanzana/rutahyd2front/actions/runs/44994695938-success-63
+scope=frontend-js-css-html-only
+fix=precio_no_se_borra_si_costo_0,margen_indefinido,editor_compacto
+preserve=galeria_v28,encabezados_ordenables,precios_por_lista,JWT
+database=DDL25_y_DDL26_declarados_ejecutados_por_titular
+sql=NO_EJECUTAR
+backend=NO_MODIFICAR
+firecrawl=PROHIBIDO
+rollback=habilitado

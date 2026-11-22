@@ -1,0 +1,13 @@
+Ruta H&D V2 | Complemento de catálogos seguros de venta | 2026-11-22
+backend_fuente=282a558fbc2f4a44521018c18106286676e24afe
+backend_ci=44987656432-success
+base_ya_publicada=44987328292-success
+propósito=cliente_y_producto_con_tarifa_especial_seleccionables_por_ventas
+modificar_solo=rutas_y_ListasPreciosClientesControlador
+preflight=comparacion_exacta_y_backup
+api_nueva=ventas/clientes-disponibles,ventas/productos-disponibles
+datos_reales=no_modificar
+ddl=no_ejecutar
+triggers=no
+jwt=obligatorio
+rollback=habilitado

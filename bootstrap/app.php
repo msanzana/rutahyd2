@@ -5,6 +5,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use App\Http\Middleware\AutenticarToken;
 use App\Http\Middleware\AutorizarPermiso;
+use App\Http\Middleware\AutorizarSubmodulo;
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
@@ -17,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'token.rutahd'=>AutenticarToken::class,
             'permiso.rutahd'=>AutorizarPermiso::class,
+            'submodulo.rutahd'=>AutorizarSubmodulo::class,
         ]);
     })
     ->withExceptions(function(Exceptions $exceptions): void {})

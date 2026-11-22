@@ -95,6 +95,7 @@ final class ProductoComercialControlador extends Controller
             'nombre'=>['sometimes','nullable','string','max:190'],
             'descripcion'=>['sometimes','nullable','string','max:200'],
             'codigo_barras'=>['sometimes','nullable','string','max:100'],
+            'tipo_codigo_barra_id'=>['sometimes','nullable','integer','min:1'],
             'activo'=>['sometimes','nullable','boolean'],
             'precio_min'=>['sometimes','nullable','numeric','min:0','max:99999999999'],
             'precio_max'=>['sometimes','nullable','numeric','min:0','max:99999999999'],
@@ -135,18 +136,23 @@ final class ProductoComercialControlador extends Controller
             }
         }
         if(isset($datos['proveedor_id']))$q->where('proveedor_id',(int)$datos['proveedor_id']);
-        if(isset($datos['codigo_barras'])&&trim((string)$datos['codigo_barras'])!==''){
-            $busqueda=trim((string)$datos['codigo_barras']);
-            $q->where(function($sub)use($busqueda){
-                $sub->whereExists(function($codes)use($busqueda){
+        $codigo=trim((string)($datos['codigo_barras']??''));
+        $tipo=$datos['tipo_codigo_barra_id']??null;
+        if($codigo!==''||$tipo!==null){
+            $q->where(function($sub)use($codigo,$tipo){
+                $sub->whereExists(function($codes)use($codigo,$tipo){
                     $codes->selectRaw('1')->from('productos_codigos_barra_venta as cb')
-                        ->whereColumn('cb.producto_id','productos.id')
-                        ->where('cb.codigo_barras','like','%'.$busqueda.'%');
-                })->orWhereExists(function($legacy)use($busqueda){
-                    $legacy->selectRaw('1')->from('presentaciones_productos as ppb')
-                        ->whereColumn('ppb.producto_id','productos.id')
-                        ->where('ppb.codigo_barras','like','%'.$busqueda.'%');
+                        ->whereColumn('cb.producto_id','productos.id');
+                    if($codigo!=='')$codes->where('cb.codigo_barras','like','%'.$codigo.'%');
+                    if($tipo!==null)$codes->where('cb.tipo_codigo_barra_id',(int)$tipo);
                 });
+                if($tipo===null&&$codigo!==''){
+                    $sub->orWhereExists(function($legacy)use($codigo){
+                        $legacy->selectRaw('1')->from('presentaciones_productos as ppb')
+                            ->whereColumn('ppb.producto_id','productos.id')
+                            ->where('ppb.codigo_barras','like','%'.$codigo.'%');
+                    });
+                }
             });
         }
         $presentacionFiltros=['presentacion','precio_min','precio_max','iva','unidades_min','unidades_max'];

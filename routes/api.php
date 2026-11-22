@@ -3,6 +3,7 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\SesionControlador;
 use App\Http\Controllers\RecursoControlador;
+use App\Http\Controllers\EntidadesComercialesControlador;
 use App\Http\Controllers\VentaControlador;
 use App\Http\Controllers\NotaVentaControlador;
 use App\Http\Controllers\InventarioControlador;
@@ -47,6 +48,14 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     // Consultas paginadas solo de recursos admitidos y con permiso por rol.
     Route::get('/recursos/{recurso}',[RecursoControlador::class,'listar']);
     Route::get('/recursos/{recurso}/{id}',[RecursoControlador::class,'ver'])->whereNumber('id');
+    // Escrituras permitidas solo para clientes, proveedores y bodegas.
+    // Nunca crear/eliminar productos, inventario, ventas u órdenes mediante una ruta genérica.
+    Route::post('/recursos/{recurso}',[EntidadesComercialesControlador::class,'crear'])
+        ->where('recurso','clientes|proveedores|bodegas');
+    Route::put('/recursos/{recurso}/{id}',[EntidadesComercialesControlador::class,'actualizar'])
+        ->where('recurso','clientes|proveedores|bodegas')->whereNumber('id');
+    Route::delete('/recursos/{recurso}/{id}',[EntidadesComercialesControlador::class,'desactivar'])
+        ->where('recurso','clientes|proveedores|bodegas')->whereNumber('id');
 
     Route::get('/ventas/{id}/detalles',[VentaControlador::class,'detalles'])->middleware('permiso.rutahd:ventas.ver')->whereNumber('id');
     Route::post('/ventas',[VentaControlador::class,'guardar'])->middleware('permiso.rutahd:ventas.gestionar');

@@ -1,0 +1,69 @@
+name: Verificar popup producto en InfinityFree sin login real
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/probar-popup-producto-real-20261122.txt]
+permissions:
+  contents: read
+jobs:
+  verificar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar Chromium de Playwright
+        run: |
+          mkdir -p /tmp/hd-popup && cd /tmp/hd-popup
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Probar visual en producción con API simulada y JWT ficticio
+        working-directory: /tmp/hd-popup
+        run: |
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          const host='https://rutahyd2.free.nf/';
+          try{
+            for(const width of [1440,572,390]){
+              const page=await browser.newPage({viewport:{width,height:840},locale:'es-CL'});
+              const fake=(route,data,status=200)=>route.fulfill({
+                status,contentType:'application/json',body:JSON.stringify(data)});
+              await page.goto(host,{waitUntil:'domcontentloaded',timeout:45000});
+              await page.waitForTimeout(9000);
+              await page.route('**/api/v1/**',route=>{
+                const req=route.request(),path=new URL(req.url()).pathname;
+                if(path==='/api/v1/estado')return fake(route,{servicio:'Ruta H&D2 API',estado:'disponible'});
+                if(path==='/api/v1/sesion')return fake(route,{token:'aaa.bbb.ccc',token_type:'Bearer',
+                  usuario:{nombre:'QA Sin Credenciales',rol:'administrador',permisos:['productos.gestionar']}});
+                if(path.startsWith('/api/v1/catalogos/'))return fake(route,{
+                  items:[{id:1,nombre:'Catalogo QA',activo:true,parentId:null}]});
+                if(path==='/api/v1/productos')return fake(route,{data:[],total:0,last_page:1});
+                return fake(route,{},404);
+              });
+              await page.goto(host+'#inicio',{waitUntil:'domcontentloaded',timeout:45000});
+              await page.waitForSelector('#loginSubmit:not([disabled])',{timeout:10000});
+              await page.locator('#loginEmail').fill('qa@example.invalid');
+              await page.locator('#loginPassword').fill('NO-ES-CONTRASENA-REAL');
+              await page.locator('#loginSubmit').click();
+              await page.waitForFunction(()=>document.querySelector('#loginDialog')?.open===false);
+              if(width<1000)await page.locator('#menuToggle').click();
+              await page.locator('.nav-link[data-nav="productos"]').click();
+              await page.getByRole('button',{name:'Nuevo producto real'}).click();
+              const r=await page.locator('dialog.product-legacy-editor-dialog[open]').evaluate(d=>{
+                const rect=d.getBoundingClientRect();
+                return {width:rect.width,left:rect.left,right:rect.right,
+                  overflow:d.scrollWidth>d.clientWidth+1,
+                  supplier:d.textContent.includes('ID de proveedor'),
+                  sections:d.textContent.includes('Presentación, precio e IVA')};
+              });
+              console.log('PRODUCT_EDITOR_PRODUCTION',JSON.stringify({viewport:width,...r}));
+              if(r.left<0||r.right>width+1||r.overflow||r.supplier||!r.sections||
+                  (width>1200&&r.width<800))process.exitCode=1;
+              await page.close();
+            }
+          }finally{await browser.close();}
+          JS
+          echo 'Formulario Producto probado contra recursos públicos reales con sesión API simulada. No se realizaron escrituras.' >> "$GITHUB_STEP_SUMMARY"

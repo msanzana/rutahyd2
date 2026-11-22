@@ -101,3 +101,15 @@ ddl=no
 triggers=no
 jwt_preserve=true
 rollback=yes
+
+release=20261122-login-photo-v26
+goal=integrate_realistic_delivery_photograph_on_official_login
+frontend_sha=a08a6e4a0fa0d3f269184600177638c885b7b511
+frontend_ci=44989018097-success-56
+photo=WebP_original_280x373_embedded_in_login-foto-v26.css
+responsive_breakpoints=1440,820,390
+security=preserve_JWT_no_demo
+scope=frontend_only
+database=no_changes
+backup=required
+rollback=enabled

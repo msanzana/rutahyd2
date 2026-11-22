@@ -1,0 +1,96 @@
+name: V38 - comprobar integración 3 vías sin publicar
+on:
+  push:
+    branches: [feature/proveedores-ubicaciones-sii-v38]
+    paths: [.github/workflows/preflight-merge-v38.yml]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  probar-merge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACK_BASE: 83296bb5acfe6c69309ec308c8da0c3df6a3c764
+      FRONT_BASE: 089699db01a9f725d324ee62fba04d38eec479af
+    steps:
+      - name: Preparar versiones y herramienta FTPS
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          git clone -q --depth 1 --branch feature/proveedores-ubicaciones-sii-v38 https://github.com/msanzana/rutahyd2.git /tmp/b
+          git clone -q --depth 1 --branch feature/proveedores-ubicaciones-sii-v38 https://github.com/msanzana/rutahyd2front.git /tmp/f
+          git -C /tmp/b fetch -q --depth 1 origin "$BACK_BASE"
+          git -C /tmp/f fetch -q --depth 1 origin "$FRONT_BASE"
+          mkdir -p /tmp/v38merge
+      - name: Obtener versiones publicadas de cuatro archivos divergentes (SOLO GET)
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/v38merge/ftp.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/routes/api.php -o /tmp/v38merge/routes-live.php
+          get /htdocs/api-v2/app/Http/Controllers/EntidadesComercialesControlador.php -o /tmp/v38merge/entities-live.php
+          get /htdocs/api-v2/app/Http/Controllers/RecursoControlador.php -o /tmp/v38merge/resource-live.php
+          get /htdocs/index.html -o /tmp/v38merge/index-live.html
+          bye
+          EOF
+          lftp -f /tmp/v38merge/ftp.lftp >/dev/null
+      - name: Reunir cambios y verificar que el merge no pierde otros parches
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,subprocess,difflib
+          root=pathlib.Path('/tmp/v38merge')
+          files=[
+            ('back','routes/api.php','routes-live.php','routes-merged.php'),
+            ('back','app/Http/Controllers/EntidadesComercialesControlador.php',
+              'entities-live.php','entities-merged.php'),
+            ('back','app/Http/Controllers/RecursoControlador.php',
+              'resource-live.php','resource-merged.php'),
+            ('front','index.html','index-live.html','index-merged.html')
+          ]
+          for kind,path,live,out in files:
+            directory='/tmp/b' if kind=='back' else '/tmp/f'
+            base_sha='83296bb5acfe6c69309ec308c8da0c3df6a3c764' if kind=='back' else '089699db01a9f725d324ee62fba04d38eec479af'
+            base=subprocess.check_output(['git','-C',directory,'show',base_sha+':'+path])
+            ours=(pathlib.Path(directory)/path).read_bytes()
+            (root/(out+'.base')).write_bytes(base)
+            (root/(out+'.ours')).write_bytes(ours)
+            result=subprocess.run(['git','merge-file','-p',
+              str(root/live),str(root/(out+'.base')),str(root/(out+'.ours'))],
+              capture_output=True)
+            (root/out).write_bytes(result.stdout)
+            if result.returncode:
+              print('CONFLICTO_REAL',path,'estado',result.returncode)
+              raise SystemExit('Detener V38: merge conflictivo, sin modificación productiva')
+            merged=result.stdout.decode('utf-8')
+            assert '<<<<<<< ' not in merged and '>>>>>>> ' not in merged
+            old=(root/live).read_text('utf-8')
+            adds=sum(l.startswith('+') and not l.startswith('+++') for l in
+              difflib.unified_diff(old.splitlines(),merged.splitlines()))
+            removes=sum(l.startswith('-') and not l.startswith('---') for l in
+              difflib.unified_diff(old.splitlines(),merged.splitlines()))
+            print('MERGE_LIMPIO',path,'lineas_añadidas',adds,'lineas_eliminadas',removes)
+          PY
+          php -l /tmp/v38merge/routes-merged.php
+          php -l /tmp/v38merge/entities-merged.php
+          php -l /tmp/v38merge/resource-merged.php
+          grep -Fq 'hd-branding/logo-hd-site.png' /tmp/v38merge/index-merged.html
+          grep -Fq 'productos-costo-promedio-v37.css' /tmp/v38merge/index-merged.html
+          grep -Fq 'ubicaciones.js?v=20261122-geo38' /tmp/v38merge/index-merged.html
+          grep -Fq 'ubicacionesSubnav' /tmp/v38merge/index-merged.html
+          echo 'Merge limpio y sintaxis correcta, SIN publicar.' >> "$GITHUB_STEP_SUMMARY"

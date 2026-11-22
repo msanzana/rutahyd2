@@ -1,0 +1,6 @@
+objetivo=preservar_cabecera_Authorization_con_regla_estandar_Apache
+prueba_previa=44968071425
+sin_sql=SI
+sin_credenciales=SI
+sin_firecrawl=SI
+rollback=SI

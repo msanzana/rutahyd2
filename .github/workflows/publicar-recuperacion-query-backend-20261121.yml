@@ -58,7 +58,7 @@ jobs:
           grep -Fq '/#recuperar?token=' /tmp/recovery_old.php
           test -s /tmp/recovery_marker
           php -l /tmp/recovery_old.php
-      - name: Reemplazar exclusivamente el controlador de recuperacion
+      - name: Publicar controlador usando PUT directo compatible con FTPS InfinityFree
         run: |
           set -euo pipefail
           set +x
@@ -71,8 +71,7 @@ jobs:
           set ftp:ssl-protect-data yes
           set ssl:verify-certificate yes
           open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
-          put /tmp/recovery_controller.php -o /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php.new
-          mv -f /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php.new /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php
+          put /tmp/recovery_controller.php -o /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php
           bye
           EOF
           lftp -f /tmp/recovery-write.lftp >/dev/null

@@ -18,7 +18,7 @@ final class Cliente extends Model
         'correo_electronico',
         'telefono',
         'direccion',
-        'comuna',
+        'ciudad_id',
         'sector',
         'observaciones',
         'activo',

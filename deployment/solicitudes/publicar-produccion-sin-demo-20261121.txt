@@ -113,3 +113,16 @@ scope=frontend_only
 database=no_changes
 backup=required
 rollback=enabled
+
+release=20261122-products-photo-gallery-v28
+frontend_commit=9218610915be616d4a3a66b975652a95ca698cbe
+frontend_ci=https://github.com/msanzana/rutahyd2front/actions/runs/44992820046
+frontend_tests=61_passed
+backend_deploy=https://github.com/msanzana/rutahyd2/actions/runs/44992534805
+scope=frontend_files_js_css_html
+features=gallery_multiple_blob_photos,sortable_compact_products,price_and_barcode_pills,product_save_fix
+new_resources=galeria-productos.js,productos-densidad-v28.css
+database_ddl25=not_applied
+triggers=none
+backend=unchanged
+rollback=required

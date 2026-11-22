@@ -2,7 +2,7 @@ name: V40 - preflight mix multiple FTPS sin publicar
 on:
   push:
     branches: [feature/v40-mix-proveedor-seleccion-multiple-20261122]
-    paths: [.github/workflows/v40-preflight.yml]
+    paths: [.github/workflows/v40-preflight.yml, scripts/ensamblar_mix_v40.py]
 permissions:
   contents: read
 concurrency:

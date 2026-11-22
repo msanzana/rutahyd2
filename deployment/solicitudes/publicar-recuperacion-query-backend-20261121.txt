@@ -1,0 +1,6 @@
+solicitud=20261122-generar-enlaces-recuperacion-query
+requiere_frontend=20261121-prod14
+mysql=sin_modificaciones
+smtp=mantener_actual
+jwt=conservar_activo
+firecrawl=no

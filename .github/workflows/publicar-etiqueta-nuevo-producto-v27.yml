@@ -1,0 +1,141 @@
+name: Publicar etiqueta Nuevo Producto v27 sin cambiar backend
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/publicar-etiqueta-nuevo-producto-v27.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FRONT_SHA: fad40b1de92aff13421fea9238b05b40a56f6b74
+      LIVE_PREVIOUS_SHA: a08a6e4a0fa0d3f269184600177638c885b7b511
+    steps:
+      - name: Obtener única fuente frontend aprobada
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          git clone --quiet --depth 1 --branch main https://github.com/msanzana/rutahyd2front.git /tmp/frontlabel
+          test "$(git -C /tmp/frontlabel rev-parse HEAD)" = "$FRONT_SHA"
+          git -C /tmp/frontlabel fetch --quiet --depth 1 origin "$LIVE_PREVIOUS_SHA"
+          mkdir -p /tmp/labelproduct
+          cp /tmp/frontlabel/assets/js/productos-remotos.js /tmp/labelproduct/new.js
+          git -C /tmp/frontlabel show "$LIVE_PREVIOUS_SHA:assets/js/productos-remotos.js" > /tmp/labelproduct/previous.js
+          node --check /tmp/labelproduct/new.js
+          python3 - <<'PY'
+          from pathlib import Path
+          before=Path('/tmp/labelproduct/previous.js').read_text()
+          after=Path('/tmp/labelproduct/new.js').read_text()
+          original="button('Nuevo producto real',()=>guarded(()=>editProduct(null)),'button primary')"
+          updated="button('Nuevo Producto',()=>guarded(()=>editProduct(null)),'button primary')"
+          assert before.count(original)==1
+          assert after==before.replace(original,updated), 'El JS presenta cambios no autorizados'
+          print('Cambio único verificado: Nuevo producto real -> Nuevo Producto')
+          PY
+      - name: Instalar FTPS
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lftp
+      - name: Respaldar los dos archivos y verificar estado previo
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/labelproduct/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 40
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/assets/js/productos-remotos.js -o /tmp/labelproduct/remote_before.js
+          get /htdocs/index.html -o /tmp/labelproduct/index_before.html
+          get /htdocs/api-v2/.htaccess -o /tmp/labelproduct/guard_before
+          bye
+          EOF
+          lftp -f /tmp/labelproduct/read.lftp >/dev/null
+          cmp -s /tmp/labelproduct/remote_before.js /tmp/labelproduct/previous.js || {
+            echo "::error::JS remoto divergente; no se modifica nada"
+            exit 1
+          }
+          grep -Fq 'Require all denied' /tmp/labelproduct/guard_before
+          python3 - <<'PY'
+          from pathlib import Path
+          old=Path('/tmp/labelproduct/index_before.html').read_text('utf-8')
+          src='productos-remotos.js?v=20261122-prices25'
+          assert old.count(src)==1,'Versión de script remoto distinta; cancelar despliegue'
+          newer=old.replace(src,'productos-remotos.js?v=20261122-product-button27')
+          assert newer.count('productos-remotos.js?v=20261122-product-button27')==1
+          Path('/tmp/labelproduct/index_after.html').write_text(newer,'utf-8')
+          PY
+      - name: Subir solo productos-remotos.js y HTML con caché actualizada
+        run: |
+          set -euo pipefail
+          set +x
+          touch /tmp/labelproduct/upload_started
+          cat >/tmp/labelproduct/write.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 40
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/labelproduct/new.js -o /htdocs/assets/js/productos-remotos.js
+          put /tmp/labelproduct/index_after.html -o /htdocs/index.html
+          bye
+          EOF
+          lftp -f /tmp/labelproduct/write.lftp >/dev/null
+      - name: Comparar archivos publicados y comprobar seguridad intacta
+        run: |
+          set -euo pipefail
+          set +x
+          cat >/tmp/labelproduct/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 40
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/assets/js/productos-remotos.js -o /tmp/labelproduct/remote_after.js
+          get /htdocs/index.html -o /tmp/labelproduct/index_remote_after.html
+          get /htdocs/api-v2/.htaccess -o /tmp/labelproduct/guard_after
+          bye
+          EOF
+          lftp -f /tmp/labelproduct/verify.lftp >/dev/null
+          cmp -s /tmp/labelproduct/new.js /tmp/labelproduct/remote_after.js
+          cmp -s /tmp/labelproduct/index_after.html /tmp/labelproduct/index_remote_after.html
+          cmp -s /tmp/labelproduct/guard_before /tmp/labelproduct/guard_after
+          node --check /tmp/labelproduct/remote_after.js
+          echo "Publicado: botón Nuevo Producto; JS e index HTML cotejados byte a byte. Sin cambios de API/BDD." >> "$GITHUB_STEP_SUMMARY"
+      - name: Restaurar JS y HTML si falla la publicación
+        if: failure()
+        run: |
+          set +x
+          if [ -e /tmp/labelproduct/upload_started ] && [ -s /tmp/labelproduct/index_before.html ]; then
+            cat >/tmp/labelproduct/rollback.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/labelproduct/remote_before.js -o /htdocs/assets/js/productos-remotos.js
+          put /tmp/labelproduct/index_before.html -o /htdocs/index.html
+          bye
+          EOF
+            lftp -f /tmp/labelproduct/rollback.lftp >/dev/null || echo "::error::Revisar restauración FTPS"
+          fi
+      - name: Limpiar copias locales
+        if: always()
+        run: |
+          rm -rf /tmp/frontlabel /tmp/labelproduct

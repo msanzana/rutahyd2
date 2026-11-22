@@ -187,3 +187,14 @@ backend=NO-MODIFICAR
 mariadb=NO-EJECUTAR-SQL
 firecrawl=PROHIBIDO
 rollback=habilitado
+
+release=20261122-v34-switch-activo-seguro-productos-pills-tooltips
+frontend_sha=d774e6989273ace2db661482a30e6314eb2d2aa8
+frontend_ci=https://github.com/msanzana/rutahyd2front/actions/runs/45000669351-passed-78
+scope=frontend-html-js-css-only
+fix=precio_sin_neto,guardar_sin_mysql,lista_precios_switch_compacto,precios_y_barras_verticales,tooltip_portal_debajo
+security=estados_switch_reversibles,no_borrar_en_listados,administrador_protegido,lista_base_protegida
+datos=NO_MODIFICAR_BBDD
+backend=NO_MODIFICAR
+firecrawl=PROHIBIDO
+rollback=habilitado

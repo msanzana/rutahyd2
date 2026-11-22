@@ -638,3 +638,10 @@ El titular pidió reemplazar los triggers propuestos por **funciones de backend 
 - Frontend V32 `assets/css/switches-v32.css` aplica interruptores compactos violetas a checks visibles de módulos, respetando teclado, estados y tema. CRUD listas conserva el formulario ante 500 y muestra causa segura. Ficha Producto resuelve nombres con catálogos como fallback cuando recibe solo IDs desde versiones anteriores del backend.
 - CI frontend https://github.com/msanzana/rutahyd2front/actions/runs/44997738267 **71 pruebas Playwright aprobadas**. Despliegue FTPS frontend https://github.com/msanzana/rutahyd2/actions/runs/44997895358: **ÉXITO**; respaldo, transferencia de CSS/JS con HTML último, comparación exacta de archivos (incluida switches-v32.css) y backend intacto. No contiene SQL ni migraciones.
 - Regla de switches añadida al archivo `docs/REGLAS_OPERATIVAS_RUTA_HD_V2.md`. Firecrawl permanece prohibido, las modificaciones de estructura son DDLs manuales exclusivamente en phpMyAdmin.
+
+
+### Confirmación de ejecución DDL27 por el titular — 2026-11-22
+- Titular confirmó DDL27 ejecutado **en phpMyAdmin** sobre su base de datos; no se realizó modificación SQL desde asistentes, CI/CD ni conectores. DDL27 vigente usa exclusivamente SELECT directos a `listas_precios` y no consulta `information_schema`.
+- La confirmación del titular acredita la ejecución declarada, no prueba por sí misma que `POST /api/v1/listas-precios` se haya guardado correctamente en la base productiva.
+- Relectura posterior únicamente de logs Laravel por FTPS en https://github.com/msanzana/rutahyd2/actions/runs/44998454734; esta auditoría no crea listas ni altera datos. Errores históricos anteriores al DDL27 no cuentan como fallo nuevo; es necesaria una operación real autorizada para certificar el alta completa.
+- Frontend v32 (switches, errores legibles) y backend de clasificación ya fueron publicados con verificaciones; no repetir sus 71 pruebas en esta confirmación.

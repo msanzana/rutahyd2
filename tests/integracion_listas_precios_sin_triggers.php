@@ -124,13 +124,13 @@ try {
         ]]
     ];
     try{
-        $app->make(\\App\\Services\\ServicioVenta::class)->crear($saleData,(int)$sellerId);
+        $app->make(\App\Services\ServicioVenta::class)->crear($saleData,(int)$sellerId);
         throw new RuntimeException('Venta no debe aceptar tarifa base para cliente especial');
-    }catch(\\Illuminate\\Validation\\ValidationException $e){
+    }catch(\Illuminate\Validation\ValidationException $e){
         verificarLista(true,'Precio diferente del asignado rechazado');
     }
     $saleData['detalles'][0]['precio_unitario']=1500;
-    $venta=$app->make(\\App\\Services\\ServicioVenta::class)->crear($saleData,(int)$sellerId);
+    $venta=$app->make(\App\Services\ServicioVenta::class)->crear($saleData,(int)$sellerId);
     verificarLista((float)DB::table('detalles_ventas')
         ->where('venta_id',$venta->id)->value('precio_unitario')===1500.0,
         'Venta persiste el precio de la lista especial de este cliente');

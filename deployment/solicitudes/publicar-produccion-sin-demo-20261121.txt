@@ -126,3 +126,15 @@ database_ddl25=not_applied
 triggers=none
 backend=unchanged
 rollback=required
+
+release=20261122-productos-guardar-frontend-v29
+frontend_sha=48dd81c505d7677dd56b9aa962f68b865cfd61dd
+frontend_ci=https://github.com/msanzana/rutahyd2front/actions/runs/44993758179-success
+scope=frontend-js-css-html-only
+fix=ean13-length-client-validation,http500-user-feedback,compact-product-editor-and-margin
+preserve=price-lists,photo-gallery,sortable-headers,jwt,official-menu
+backend=no-modificar
+mariadb=no-modificar
+ddl26=manual-phpmyadmin-pending
+firecrawl=prohibido
+rollback=habilitado

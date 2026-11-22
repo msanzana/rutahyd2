@@ -94,7 +94,7 @@ final class ProductoComercialControlador extends Controller
         $datos=$request->validate([
             'page'=>['sometimes','integer','min:1','max:10000'],
             'por_pagina'=>['sometimes','integer','min:1','max:100'],
-            'orden'=>['sometimes','string','in:sku,nombre,rubro,departamento,familia,linea,marca,modelo,activo'],
+            'orden'=>['sometimes','string','in:sku,nombre,rubro,departamento,familia,linea,marca,modelo,activo,precios,codigos'],
             'direccion'=>['sometimes','string','in:asc,desc'],
             'buscar'=>['sometimes','nullable','string','max:120'],
             'incluye_inactivos'=>['sometimes','boolean'],
@@ -195,6 +195,17 @@ final class ProductoComercialControlador extends Controller
             [$catalog,$col]=$sortCatalogs[$orden];
             $sub=DB::table($catalog)->select('nombre')
                 ->whereColumn($catalog.'.id','productos.'.$col)->limit(1);
+            $q->orderBy($sub,$direccion);
+        }elseif($orden==='precios'){
+            $sub=DB::table('listas_precios_detalle as d')
+                ->join('listas_precios as l','l.id','=','d.lista_precio_id')
+                ->select('d.precio_venta')->whereColumn('d.producto_id','productos.id')
+                ->where('l.es_base',1)->limit(1);
+            $q->orderBy($sub,$direccion);
+        }elseif($orden==='codigos'){
+            $sub=DB::table('productos_codigos_barra_venta as b')
+                ->select('b.codigo_barras')->whereColumn('b.producto_id','productos.id')
+                ->where('b.activo',1)->orderBy('b.id')->limit(1);
             $q->orderBy($sub,$direccion);
         }elseif(isset($orderColumns[$orden])){
             $q->orderBy('productos.'.$orderColumns[$orden],$direccion);

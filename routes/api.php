@@ -101,6 +101,10 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
         ->middleware('permiso.rutahd:compras.gestionar')->middleware('submodulo.rutahd:proveedores_productos,ver');
     Route::post('/proveedores-productos',[ProductosProveedoresControlador::class,'crear'])
         ->middleware('permiso.rutahd:compras.gestionar')->middleware('submodulo.rutahd:proveedores_productos,gestionar');
+    Route::post('/proveedores-productos/lote',[ProductosProveedoresControlador::class,'crearLote'])
+        ->middleware('permiso.rutahd:compras.gestionar')
+        ->middleware('submodulo.rutahd:proveedores_productos,gestionar')
+        ->middleware('throttle:20,1');
     Route::get('/proveedores-productos/{id}',[ProductosProveedoresControlador::class,'ver'])
         ->middleware('permiso.rutahd:compras.gestionar')->middleware('submodulo.rutahd:proveedores_productos,ver')->whereNumber('id');
     Route::put('/proveedores-productos/{id}',[ProductosProveedoresControlador::class,'actualizar'])

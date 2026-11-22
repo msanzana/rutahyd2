@@ -155,6 +155,79 @@ final class ProductosProveedoresControlador extends Controller
         return response()->json($this->save($request,null),201)
             ->header('Cache-Control','no-store');
     }
+    /**
+     * Guarda una selección múltiple del buscador en una sola transacción:
+     * o se crean TODOS los vínculos o no se modifica ninguno.
+     * No crea recepciones, códigos de barras ni movimientos de stock.
+     */
+    public function crearLote(Request $request)
+    {
+        $data=Validator::make($request->all(),[
+            'proveedor_id'=>['required','integer','min:1'],
+            'productos'=>['required','array','min:1','max:50'],
+            'productos.*'=>['required','array'],
+            'productos.*.producto_id'=>['required','integer','min:1','distinct'],
+            'productos.*.codigo_proveedor_producto'=>['sometimes','nullable','string','max:80'],
+            'productos.*.costo_proveedor'=>['sometimes','nullable','numeric','min:0','max:99999999999'],
+        ])->validate();
+        abort_if(array_diff(array_keys($request->all()),['proveedor_id','productos'])!==[],
+            422,'Hay campos no permitidos en la selección');
+        $allowed=['producto_id','codigo_proveedor_producto','costo_proveedor'];
+        $ids=[];$codes=[];
+        foreach($data['productos'] as &$item){
+            abort_if(array_diff(array_keys($item),$allowed)!==[],
+                422,'Hay campos no permitidos en un producto');
+            $id=(int)$item['producto_id'];
+            abort_if(in_array($id,$ids,true),422,'No se puede repetir el mismo producto');
+            $ids[]=$id;
+            $code=trim((string)($item['codigo_proveedor_producto']??''));
+            $item['codigo_proveedor_producto']=$code!==''?$code:null;
+            if($code!==''){
+                $comparison=mb_strtolower($code,'UTF-8');
+                abort_if(in_array($comparison,$codes,true),422,
+                    'El código del proveedor debe ser distinto para cada producto');
+                $codes[]=$comparison;
+            }
+        }
+        unset($item);
+        try{
+            $result=DB::transaction(function()use($data,$ids){
+                $supplier=DB::table('proveedores')
+                    ->where('id',$data['proveedor_id'])->lockForUpdate()->first();
+                abort_unless($supplier && (bool)$supplier->activo,422,
+                    'El proveedor no está disponible');
+                $valid=DB::table('productos')->whereIn('id',$ids)
+                    ->where('activo',1)->count();
+                abort_unless($valid===count($ids),422,
+                    'Uno o más productos no están disponibles');
+                $already=DB::table('productos_proveedores')
+                    ->where('proveedor_id',$data['proveedor_id'])
+                    ->whereIn('producto_id',$ids)->pluck('producto_id')->all();
+                abort_if(!empty($already),409,
+                    'Uno o más productos ya pertenecen al mix del proveedor. Actualiza la lista y revisa los repetidos');
+                $created=[];
+                foreach($data['productos'] as $item){
+                    $relation=[
+                        'proveedor_id'=>(int)$data['proveedor_id'],
+                        'producto_id'=>(int)$item['producto_id'],
+                        'codigo_proveedor_producto'=>$item['codigo_proveedor_producto'],
+                        'costo_proveedor'=>$item['costo_proveedor']??null,
+                        'activo'=>1,
+                    ];
+                    $created[]=(int)DB::table('productos_proveedores')->insertGetId($relation);
+                }
+                return $created;
+            },3);
+            return response()->json(['cantidad'=>count($result),'ids'=>$result,
+                'mensaje'=>'Productos asociados correctamente al proveedor'],201)
+                ->header('Cache-Control','no-store');
+        }catch(QueryException $e){
+            if((string)$e->getCode()==='23000')
+                abort(409,'La selección contiene un producto o código ya asociado al proveedor');
+            throw $e;
+        }
+    }
+
     public function actualizar(Request $request,int $id)
     {
         return response()->json($this->save($request,$id))

@@ -38,7 +38,7 @@ final class EntidadesComercialesControlador extends Controller
         abort_unless(isset(self::PERMISOS[$recurso]), 404, 'Entidad no administrable');
         $usuario = $request->user();
         abort_unless($usuario && $usuario->activo, 401);
-        if($recurso==='proveedores') PermisosSubmodulos::exigir($usuario,'proveedores.listado','gestionar');
+        if($recurso==='proveedores') PermisosSubmodulos::exigir($usuario,'proveedores_listado','gestionar');
         if ($usuario->rol?->codigo === 'administrador') return;
         $puede = DB::table('roles_permisos')
             ->join('permisos', 'permisos.id', '=', 'roles_permisos.permiso_id')

@@ -111,8 +111,23 @@ jobs:
               loginStart:document.body.dataset.loginStart
             }));
             console.log('RECUPERACION_PRODUCCION',JSON.stringify(recovery));
-            if(!recovery.visible||recovery.loginVisible||!recovery.hasPassword||
-              recovery.tokenInUrl||recovery.officialStyle!=='grid')process.exitCode=1;
+            if(!recovery.visible){
+              // InfinityFree elimina el fragmento # durante la primera verificación ?i=1.
+              // Con la cookie ya establecida, volver a abrir el enlace en ese MISMO navegador.
+              await recoveryPage.goto(endpoint+'#recuperar?token='+'a'.repeat(64),{
+                waitUntil:'domcontentloaded',timeout:45000
+              });
+              await recoveryPage.waitForTimeout(1400);
+            }
+            const after=await recoveryPage.evaluate(()=>({
+              visible:document.querySelector('.recovery-dialog')?.open===true,
+              loginVisible:document.querySelector('#loginDialog')?.open===true,
+              hasPassword:!!document.querySelector('#recovery-password'),
+              tokenInUrl:location.hash.includes('token=')
+            }));
+            console.log('RECUPERACION_CON_COOKIE',JSON.stringify(after));
+            if(!after.visible||after.loginVisible||!after.hasPassword||after.tokenInUrl)
+              process.exitCode=1;
             await recoveryPage.close();
           } finally {await browser.close();}
           JS

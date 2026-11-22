@@ -1,0 +1,110 @@
+name: Verificar v17 Proveedores productos y códigos en sitio real
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/verificar-abastecimiento-v17-publico-20261122.txt]
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar Chromium
+        run: |
+          mkdir -p /tmp/rutahd-v17 && cd /tmp/rutahd-v17
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Validar recursos públicos y navegación sin credenciales reales
+        working-directory: /tmp/rutahd-v17
+        run: |
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try {
+            const page=await browser.newPage({locale:'es-CL',viewport:{width:1440,height:900}});
+            await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:45000});
+            await page.waitForTimeout(9500);
+            const reality=await page.evaluate(async()=>{
+              const sources=await Promise.all([
+                '/assets/js/productos-remotos.js','/assets/js/proveedores-productos.js',
+                '/assets/js/catalogos-api.js','/assets/css/produccion.css'
+              ].map(async path=>{
+                const response=await fetch(path,{cache:'no-store'});
+                return {path,http:response.status,source:response.status===200?await response.text():''};
+              }));
+              const status=await fetch('/api/v1/estado',{headers:{Accept:'application/json'},cache:'no-store'});
+              const denied=await fetch('/api/v1/proveedores-productos',{headers:{Accept:'application/json'},cache:'no-store'});
+              const nav=document.querySelector('nav.nav');
+              return {
+                api:status.status,denied:denied.status,
+                eightParents:nav?.querySelectorAll('.nav-link').length,
+                providerSubitems:[...document.querySelectorAll('#providerSubnav .nav-sublink')].map(x=>x.textContent.trim()),
+                adminSubitems:[...document.querySelectorAll('#adminSubnav .nav-sublink')].map(x=>x.textContent.trim()),
+                productCatalogs:document.querySelectorAll('[data-catalog-key]').length,
+                prod17:document.documentElement.outerHTML.includes('20261122-prod17'),
+                scriptsOk:sources.every(x=>x.http===200),
+                productEditor:sources[0].source.includes('product-editor-dialog'),
+                supplierModule:sources[1].source.includes('supplier-products-module'),
+                supplierApi:sources[2].source.includes('productSuppliers:'),
+                style:sources[3].source.includes('.product-barcode-row')
+              };
+            });
+            console.log('ABASTECIMIENTO_V17_PUBLICO',JSON.stringify(reality));
+            if(reality.api!==200||reality.denied!==401||reality.eightParents!==8||
+              reality.adminSubitems.length!==6||reality.providerSubitems.length!==2||
+              reality.productCatalogs!==6||!reality.prod17||!reality.scriptsOk||
+              !reality.productEditor||!reality.supplierModule||!reality.supplierApi||!reality.style)
+              throw Error('HTML/JS/CSS v17 o JWT publico no coincide');
+            const respond=(route,obj,status=200)=>route.fulfill({
+              status,contentType:'application/json',body:JSON.stringify(obj)});
+            const catNames=new Set(['rubros','departamentos','familias','lineas','marcas',
+              'modelos','tipos_unidad','tipos_envasado','condiciones_tributarias','tipos_codigos_barras']);
+            await page.route('**/api/v1/**',route=>{
+              const req=route.request(),path=new URL(req.url()).pathname;
+              if(path==='/api/v1/estado')return respond(route,{servicio:'Ruta H&D2 API',estado:'disponible'});
+              if(path==='/api/v1/sesion')return respond(route,{token:'aaa.bbb.ccc',token_type:'Bearer',
+                usuario:{id:1,nombre:'Admin QA sin cuenta',rol:'administrador',permisos:[]}});
+              if(req.headers().authorization!=='Bearer aaa.bbb.ccc')return respond(route,{},401);
+              if(path.startsWith('/api/v1/catalogos/')){
+                const name=path.split('/').at(-1);
+                return respond(route,{items:catNames.has(name)?[
+                  {id:1,nombre:'Catálogo de prueba',codigo:name==='tipos_codigos_barras'?'EAN13':null,
+                    activo:true,parentId:null}]:[]});
+              }
+              if(path==='/api/v1/productos')return respond(route,{data:[],total:0,last_page:1});
+              if(path==='/api/v1/proveedores-productos')return respond(route,{data:[],total:0,last_page:1});
+              if(path.startsWith('/api/v1/recursos/'))return respond(route,{data:[],total:0,last_page:1});
+              return respond(route,{},404);
+            });
+            await page.reload({waitUntil:'domcontentloaded',timeout:45000});
+            await page.waitForSelector('#loginSubmit:not([disabled])',{timeout:15000});
+            await page.locator('#loginEmail').fill('qa@example.invalid');
+            await page.locator('#loginPassword').fill('CLAVE-SINTETICA-NO-REAL');
+            await page.locator('#loginSubmit').click();
+            await page.waitForFunction(()=>document.querySelector('#loginDialog')?.open===false,{timeout:15000});
+            await page.locator('#toggleProviderSubnav').click();
+            await page.locator('#providerSubnav [data-nav="proveedores_productos"]').click();
+            await page.locator('.supplier-products-module').waitFor({state:'visible'});
+            await page.getByRole('button',{name:'Asociar producto a proveedor'}).click();
+            await page.locator('dialog.supplier-product-dialog[open]').waitFor({state:'visible'});
+            await page.locator('dialog.supplier-product-dialog[open]').evaluate(el=>el.close());
+            await page.locator('.nav-link[data-nav="productos"]').click();
+            await page.getByRole('button',{name:'Nuevo producto real'}).click();
+            const dims=await page.locator('dialog.product-editor-dialog[open]').evaluate(d=>{
+              const r=d.getBoundingClientRect();
+              return {width:r.width,overflow:d.scrollWidth>d.clientWidth+1,
+                hasSupplier:d.textContent.includes('ID de proveedor'),
+                hasBarcodes:d.textContent.includes('Códigos de barras de venta'),
+                hasGrams:d.textContent.includes('Gramajes')};
+            });
+            console.log('ABASTECIMIENTO_V17_UI',JSON.stringify(dims));
+            if(dims.width<850||dims.overflow||dims.hasSupplier||dims.hasGrams||!dims.hasBarcodes)
+              throw Error('Popup de producto real no cumple la nueva interfaz');
+          }finally{await browser.close();}
+          JS
+          echo 'Frontend v17 comprobado en InfinityFree; JWT real no utilizado; ninguna escritura en MariaDB.' >> "$GITHUB_STEP_SUMMARY"

@@ -14,15 +14,8 @@ final class Proveedor extends Model
     protected $fillable = [
         'nombre','razon_social','nombre_fantasia',
         'rut','giro','actividad_economica_codigo','tipo_contribuyente',
-        'inicio_actividades','situacion_tributaria','correo_dte',
-        'telefono_secundario','sitio_web','representante_legal','representante_rut',
-        'contacto_nombre','contacto_cargo','contacto_telefono','contacto_correo',
-        'direccion_numero','direccion_detalle','codigo_postal',
-        'ciudad_id','observaciones','moneda_preferida','plazo_pago_dias',
-        'correo_electronico',
-        'telefono',
-        'direccion',
-        'activo',
+        'direccion','direccion_numero','ciudad_id',
+        'correo_electronico','telefono','plazo_pago_dias','activo',
     ];
 
     protected function casts(): array

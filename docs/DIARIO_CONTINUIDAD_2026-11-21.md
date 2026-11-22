@@ -591,3 +591,12 @@ El titular pidió reemplazar los triggers propuestos por **funciones de backend 
 **Seguridad y estado:** No se crearon ni cargaron fotos reales en producción; únicamente pruebas ficticias y MySQL temporal. Para activar galería real es imprescindible importar DDL25 en phpMyAdmin. Los endpoints reales exigen JWT; sin DDL25 muestran 503 explicativo.
 
 - Smoke de UI publicada `https://github.com/msanzana/rutahyd2/actions/runs/44993193520` **aprobado** en 1440 y 390 px. Verificó presencia de JS/CSS v28, glóbulos de precios/códigos, acceso al icono Fotos y galería responsiva sin overflow, sin credenciales ni escrituras reales. Capturas en artifact `capturas-productos-galeria-v28`.
+
+
+## Diagnóstico verificable POST /api/v1/productos HTTP 500 — 22-11-2026
+- En producción el usuario aportó captura de formulario Nuevo Producto mostrando POST /api/v1/productos HTTP 500. La selección de EAN-13 contenía un código de 12 dígitos; dicho error de formato debería recibir 422, pero el error SQL ocurre antes de su validación en el backend.
+- El workflow de SOLO LECTURA https://github.com/msanzana/rutahyd2/actions/runs/44993445627 recuperó el registro Laravel por FTPS sin subir ni divulgar SQL, SKU, peticiones, hashes, contraseñas o contenido del log. Se clasificaron 7 eventos de Producto; los de 03:19:35 y 03:19:53 hora de Chile reportaron SQLSTATE 42S22, MySQL 1054, columna desconocida `costo_neto`, en ProductoComercialControlador.php. Ésta es la causa comprobada del HTTP 500.
+- El DDL25 `productos_fotos` fue declarado ejecutado por el titular; no se comprobó independientemente su estructura. DDL25 no crea `productos.costo_neto`.
+- DDL26 manual correctivo en `database/espanol/26_reparar_guardado_productos_costo_margen_ddl.sql`: agrega condicionalmente costo_neto a productos y minimo_margen_precio_venta a lineas, seguido de SELECT sobre INFORMATION_SCHEMA. Solo el titular puede ejecutarlo en phpMyAdmin. NO ejecutado aquí.
+- Desarrollo frontend posterior: validación preventiva de longitud EAN/UPC/DUN antes de POST, feedback específico para HTTP 500, formulario compactado legible (incluida tabla de margen), cache-busting de recursos. CI/release deben registrarse tras concluir; no afirmar publicación antes.
+- **Restricción permanente:** Firecrawl desinstalado y prohibido; cambios de BBDD solo mediante DDL ejecutado manualmente en phpMyAdmin. No repetir pruebas ya documentadas ni efectuar escrituras productivas de prueba.

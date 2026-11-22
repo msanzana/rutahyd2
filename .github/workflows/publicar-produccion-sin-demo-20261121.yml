@@ -31,6 +31,9 @@ jobs:
           test -f /tmp/front/assets/css/crud-v18.css
           grep -Fq 'crud-v18.css?v=20261122-crud18' /tmp/front/index.html
           ! grep -Fq 'Cerrar sesión remota' /tmp/front/assets/js/admin-remoto.js
+          grep -Fq 'const key=selected;' /tmp/front/assets/js/admin-remoto.js
+          grep -Fq 'No hay registros guardados' /tmp/front/assets/js/admin-remoto.js
+          grep -Fq 'crud-v18.css?v=20261122-fix19' /tmp/front/index.html
           python3 - <<'PY'
           from pathlib import Path
           import re
@@ -44,7 +47,7 @@ jobs:
           assert positions==sorted(positions) and nav.count('class="nav-link"')==8
           assert s.count('id="loginDemo"')==0
           assert 'Explorar interfaz de demostración' not in s
-          assert 'src="assets/js/app-produccion.js"' in s
+          assert 'src="assets/js/app-produccion.js' in s
           assert 'src="assets/js/login-produccion.js"' in s
           assert 'assets/css/produccion.css' in s
           assert '<meta name="referrer" content="no-referrer">' in s
@@ -65,7 +68,7 @@ jobs:
           s=s.replace('produccion.css?v=20261121-1','produccion.css?v=20261122-prod17')
           s=re.sub(r'src="assets/js/([a-z-]+)\.js"',r'src="assets/js/\1.js?v=20261122-prod17"',s)
           assert s.count('src="assets/js/login-produccion.js?v=20261122-prod17"')==1
-          assert s.count('src="assets/js/app-produccion.js?v=20261122-prod17"')==1
+          assert s.count('src="assets/js/app-produccion.js?v=20261122-fix19"')==1
           Path('/tmp/release_index.html').write_text(s,'utf-8')
           Path('/tmp/redirect_violeta.html').write_text(
             '<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Ruta H&D2 · Producción</title>'

@@ -5,3 +5,4 @@ jwt=preservar
 mysql=sin_escrituras
 rollback=habilitado
 firecrawl=no
+reintento=corregir_nombre_ruta_proveedor_productos_20261122

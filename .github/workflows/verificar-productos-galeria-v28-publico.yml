@@ -1,0 +1,121 @@
+name: Comprobar galería y listado de Productos v28 en sitio real
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/verificar-productos-galeria-v28-publico.txt]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar Chromium
+        run: |
+          mkdir -p /tmp/hdproductos28 && cd /tmp/hdproductos28
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Comprobar frontend productivo con API simulada, sin escrituras reales
+        working-directory: /tmp/hdproductos28
+        run: |
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          const send=(route,body,status=200)=>route.fulfill({
+            status,contentType:'application/json',body:JSON.stringify(body)
+          });
+          const cats={
+            rubros:[{id:1,nombre:'Alimentos',activo:true}],
+            departamentos:[{id:2,nombre:'Abarrotes',parentId:1,activo:true}],
+            familias:[{id:3,nombre:'Conservas',parentId:2,activo:true}],
+            lineas:[{id:4,nombre:'Lácteos',parentId:3,activo:true,minimoMargenPrecioVenta:'15.0000'}],
+            marcas:[{id:5,nombre:'H&D',activo:true}],
+            modelos:[{id:6,nombre:'Tradicional',parentId:5,activo:true}],
+            tipos_unidad:[{id:7,nombre:'Unidad',activo:true}],
+            tipos_envasado:[{id:8,nombre:'Caja',activo:true}],
+            condiciones_tributarias:[{id:9,nombre:'Exento',activo:true}],
+            tipos_codigos_barras:[{id:10,nombre:'EAN-13',codigo:'EAN13',activo:true}]
+          };
+          const product={id:9,sku:'SKU-HD28',nombre:'Producto H&D',
+            activo:true,costoNeto:'100',
+            clasificacion:{rubroId:1,departamentoId:2,familiaId:3,lineaId:4,
+              marcaId:5,modeloId:6,tipoUnidadId:7,tipoEnvasadoId:8,condicionTributariaId:9},
+            clasificacionNombres:{rubroId:'Alimentos',departamentoId:'Abarrotes',
+              familiaId:'Conservas',lineaId:'Lácteos',marcaId:'H&D',modeloId:'Tradicional'},
+            presentacion:{id:11,nombre:'Unidad',unidadesPorEnvase:1,precioNeto:125,tasaIva:0},
+            precios:[{listaPrecioId:1,listaNombre:'LISTA BASE',precioVenta:125,
+              margenPorcentaje:25,activo:true}],
+            codigosVenta:[{id:3,tipoCodigoBarraId:10,tipoNombre:'EAN-13',
+              codigoBarras:'7801234567890',unidadesPorCodigo:1,activo:true}],
+            minimoMargenPrecioVenta:15,stock:0,galeriaDisponible:true,cantidadFotos:0};
+          try{
+            for(const width of [1440,390]){
+              const page=await browser.newPage({viewport:{width,height:870},locale:'es-CL'});
+              let writes=0;
+              await page.route('**/api/v1/**',route=>{
+                const req=route.request(),url=new URL(req.url()),p=url.pathname;
+                if(p==='/api/v1/estado')return send(route,{servicio:'Ruta H&D2 API',estado:'disponible'});
+                if(p==='/api/v1/sesion'&&req.method()==='POST')return send(route,{
+                  token:'fake.jwt.signature',token_type:'Bearer',
+                  usuario:{id:1,nombre:'QA de productos',rol:'administrador',permisos:['productos.gestionar']}
+                });
+                if(req.method()!=='GET'){writes++;return send(route,{},403);}
+                if(p.startsWith('/api/v1/catalogos/'))return send(route,{items:cats[p.split('/').at(-1)]||[]});
+                if(p==='/api/v1/listas-precios')return send(route,{data:[
+                  {id:1,codigo:'BASE',nombre:'LISTA BASE',es_base:true,activo:true}]});
+                if(p==='/api/v1/productos')return send(route,{
+                  data:[product],last_page:1,total:1,filtros_aplicados:true});
+                if(p==='/api/v1/productos/9')return send(route,product);
+                if(p==='/api/v1/productos/9/fotos')return send(route,{
+                  producto_id:9,sku:'SKU-HD28',items:[],total:0});
+                return send(route,{},404);
+              });
+              await page.goto('https://rutahyd2.free.nf/?qa=galeria28',
+                {waitUntil:'domcontentloaded',timeout:55000});
+              await page.waitForTimeout(7000);
+              for(const asset of [
+                'script[src*="galeria-productos.js?v=20261122-photos28"]',
+                'script[src*="productos-remotos.js?v=20261122-photos28"]',
+                'link[href*="productos-densidad-v28.css?v=20261122-photos28"]'
+              ])if(await page.locator(asset).count()!==1)
+                throw Error('Falta recurso de producción '+asset);
+              await page.locator('#loginSubmit:not([disabled])').waitFor({timeout:25000});
+              await page.locator('#loginEmail').fill('qa@example.invalid');
+              await page.locator('#loginPassword').fill('FICTICIA-NO-REAL');
+              await page.locator('#loginSubmit').click();
+              await page.locator('#loginDialog[open]').waitFor({state:'hidden'});
+              if(width<900)await page.locator('#menuToggle').click();
+              await page.locator('.nav-link[data-nav="productos"]').click();
+              await page.locator('#productosRealesListado').getByText('SKU-HD28').waitFor();
+              const tr=page.locator('.product-index-table tbody tr');
+              if(!(await tr.textContent()).includes('LISTA BASE')||
+                 !(await tr.textContent()).includes('EAN-13'))
+                 throw Error('Faltan precios o código de barras');
+              await page.locator('[data-photo-action="9"]').click();
+              const dialog=page.locator('dialog.product-gallery-dialog[open]');
+              await dialog.waitFor();
+              await page.screenshot({path:'/tmp/hdproductos28/galeria-'+width+'.png'});
+              const geom=await dialog.evaluate(node=>{
+                const r=node.getBoundingClientRect();
+                return {left:r.left,right:r.right,overflow:node.scrollWidth>node.clientWidth+3};
+              });
+              if(geom.left<0||geom.right>width+1||geom.overflow)
+                throw Error('Galería se sale de la pantalla: '+JSON.stringify(geom));
+              if(writes)throw Error('Hubo intentos de escritura');
+              console.log('PRODUCTS_GALLERY_V28_PUBLIC',JSON.stringify({width,geom}));
+              await page.close();
+            }
+          }finally{await browser.close();}
+          JS
+      - name: Guardar capturas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capturas-productos-galeria-v28
+          path: /tmp/hdproductos28/galeria-*.png
+          retention-days: 7
+          if-no-files-found: ignore

@@ -24,13 +24,15 @@ jobs:
           test -n "$(git -C /tmp/front rev-parse HEAD)"
           echo "FRONTEND_SHA=$(git -C /tmp/front rev-parse HEAD)" >> "$GITHUB_ENV"
           for f in /tmp/front/assets/js/*.js; do node --check "$f"; done
-          grep -Fq 'product-legacy-editor-dialog' /tmp/front/assets/js/productos-remotos.js
-          grep -Fq 'product-legacy-editor-dialog' /tmp/front/assets/css/produccion.css
+          grep -Fq 'product-editor-dialog' /tmp/front/assets/js/productos-remotos.js
+          grep -Fq 'product-editor-dialog' /tmp/front/assets/css/produccion.css
+          grep -Fq 'productSuppliers' /tmp/front/assets/js/catalogos-api.js
+          grep -Fq 'supplier-products-module' /tmp/front/assets/js/proveedores-productos.js
           python3 - <<'PY'
           from pathlib import Path
           import re
           s=Path('/tmp/front/index.html').read_text('utf-8')
-          assert s.count('data-catalog-key=')==10 and s.count('data-admin-catalog=')==10
+          assert s.count('data-catalog-key=')==6 and s.count('data-admin-catalog=')==4
           assert 'subnav-heading' not in s and 'nav-depth-' not in s
           assert s.count('id="loginDialog"')==1
           nav=s.split('<nav class="nav"',1)[1].split('</nav>',1)[0]
@@ -47,18 +49,20 @@ jobs:
           assert 'src="assets/js/catalogos.js"' not in s
           assert 'src="assets/js/app.js"' not in s
           assert 'assets/js/modulos-oficiales.js' in s
+          assert 'assets/js/proveedores-productos.js' in s
+          assert 'id="providerSubnav"' in s
           assert 'assets/css/menu-oficial.css' in s
           assert s.count('assets/img/prueba-rutahd2.webp')==3
           # El servidor publica el PNG oficial desde /hd-branding. No reponer WebP ausente.
-          s=s.replace('assets/img/prueba-rutahd2.webp','hd-branding/logo-hd-site.png?v=20261122-prod16')
-          assert s.count('hd-branding/logo-hd-site.png?v=20261122-prod16')==3
-          s=s.replace('href="assets/css/app.css"','href="assets/css/app.css?v=20261122-prod16"')
-          s=s.replace('correcciones-ui.css?v=20261121-1','correcciones-ui.css?v=20261122-prod16')
-          s=s.replace('menu-oficial.css?v=20261121-2','menu-oficial.css?v=20261122-prod16')
-          s=s.replace('produccion.css?v=20261121-1','produccion.css?v=20261122-prod16')
-          s=re.sub(r'src="assets/js/([a-z-]+)\.js"',r'src="assets/js/\1.js?v=20261122-prod16"',s)
-          assert s.count('src="assets/js/login-produccion.js?v=20261122-prod16"')==1
-          assert s.count('src="assets/js/app-produccion.js?v=20261122-prod16"')==1
+          s=s.replace('assets/img/prueba-rutahd2.webp','hd-branding/logo-hd-site.png?v=20261122-prod17')
+          assert s.count('hd-branding/logo-hd-site.png?v=20261122-prod17')==3
+          s=s.replace('href="assets/css/app.css"','href="assets/css/app.css?v=20261122-prod17"')
+          s=s.replace('correcciones-ui.css?v=20261121-1','correcciones-ui.css?v=20261122-prod17')
+          s=s.replace('menu-oficial.css?v=20261121-2','menu-oficial.css?v=20261122-prod17')
+          s=s.replace('produccion.css?v=20261121-1','produccion.css?v=20261122-prod17')
+          s=re.sub(r'src="assets/js/([a-z-]+)\.js"',r'src="assets/js/\1.js?v=20261122-prod17"',s)
+          assert s.count('src="assets/js/login-produccion.js?v=20261122-prod17"')==1
+          assert s.count('src="assets/js/app-produccion.js?v=20261122-prod17"')==1
           Path('/tmp/release_index.html').write_text(s,'utf-8')
           Path('/tmp/redirect_violeta.html').write_text(
             '<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Ruta H&D2 · Producción</title>'
@@ -102,7 +106,8 @@ jobs:
           names=['administracion','compras','ventas','proveedores','clientes','productos','bodega','cuentas_corrientes']
           s=Path('/tmp/root_before.html').read_text('utf-8')
           nav=s.split('<nav class="nav"',1)[1].split('</nav>',1)[0]
-          assert s.count('data-catalog-key=')==10 and s.count('data-admin-catalog=')==10
+          assert s.count('data-catalog-key=') in (6,10)
+          assert s.count('data-admin-catalog=') in (4,10)
           x=[nav.index('data-nav="'+n+'" class="nav-link') for n in names]
           assert x==sorted(x)
           PY
@@ -142,6 +147,10 @@ jobs:
           get /htdocs/assets/js/login-produccion.js -o /tmp/login_after.js
           get /htdocs/assets/js/app-produccion.js -o /tmp/app_after.js
           get /htdocs/assets/js/catalogos-api.js -o /tmp/api_after.js
+          get /htdocs/assets/js/productos-remotos.js -o /tmp/product_after.js
+          get /htdocs/assets/js/modulos-oficiales.js -o /tmp/official_after.js
+          get /htdocs/assets/js/proveedores-productos.js -o /tmp/suppliers_products_after.js
+          get /htdocs/assets/js/admin-remoto.js -o /tmp/admin_after.js
           get /htdocs/assets/js/recuperacion.js -o /tmp/recuperacion_after.js
           get /htdocs/assets/js/accesos.js -o /tmp/accesos_after.js
           get /htdocs/assets/css/produccion.css -o /tmp/css_after.css
@@ -154,12 +163,16 @@ jobs:
           cmp -s /tmp/front/assets/js/login-produccion.js /tmp/login_after.js
           cmp -s /tmp/front/assets/js/app-produccion.js /tmp/app_after.js
           cmp -s /tmp/front/assets/js/catalogos-api.js /tmp/api_after.js
+          cmp -s /tmp/front/assets/js/productos-remotos.js /tmp/product_after.js
+          cmp -s /tmp/front/assets/js/modulos-oficiales.js /tmp/official_after.js
+          cmp -s /tmp/front/assets/js/proveedores-productos.js /tmp/suppliers_products_after.js
+          cmp -s /tmp/front/assets/js/admin-remoto.js /tmp/admin_after.js
           cmp -s /tmp/front/assets/js/recuperacion.js /tmp/recuperacion_after.js
           cmp -s /tmp/front/assets/js/accesos.js /tmp/accesos_after.js
           cmp -s /tmp/front/assets/css/produccion.css /tmp/css_after.css
           cmp -s /tmp/guard_before /tmp/guard_after
           echo "Frontend productivo SHA: $FRONTEND_SHA" >> "$GITHUB_STEP_SUMMARY"
-          echo 'Sesiones productivas más estables: sondeos HTTP no fuerzan logout, JWT vigentes preservados; backend y MariaDB intactos.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Frontend v17 con Proveedores productos, catálogo EAN/DUN/Code y formulario ancho desplegado. JWT y MariaDB intactos.' >> "$GITHUB_STEP_SUMMARY"
       - name: Restaurar archivos originales ante cualquier fallo
         if: failure()
         run: |

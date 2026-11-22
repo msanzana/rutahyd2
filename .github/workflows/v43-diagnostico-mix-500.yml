@@ -1,0 +1,82 @@
+name: V43 - diagnosticar HTTP 500 directorio de mix (solo lectura)
+on:
+  push:
+    branches: [diagnostico/v43-mix-500-20261122]
+    paths: [.github/workflows/v43-diagnostico-mix-500.yml]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  leer-registros:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Preparar lectura FTPS privada
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+      - name: Descargar únicamente logs al runner temporal
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          mkdir -p /tmp/rutahd-v43-read
+          cat >/tmp/rutahd-v43-read/read.lftp <<EOF
+          set cmd:fail-exit no
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/storage/logs/laravel.log -o /tmp/rutahd-v43-read/laravel.log
+          get /htdocs/api-v2/storage/logs/laravel-2026-11-22.log -o /tmp/rutahd-v43-read/daily.log
+          get /htdocs/api-v2/error_log -o /tmp/rutahd-v43-read/php-error.log
+          bye
+          EOF
+          lftp -f /tmp/rutahd-v43-read/read.lftp >/dev/null 2>&1 || true
+      - name: Mostrar solo clasificación de fallas, sin trazas ni datos privados
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          paths=[p for p in Path('/tmp/rutahd-v43-read').glob('*.log') if p.stat().st_size>0]
+          print('V43_LOGS_DISPONIBLES',len(paths))
+          for path in paths:
+              rows=path.read_text(errors='replace').splitlines()
+              headers=[i for i,s in enumerate(rows) if re.search(r'(?i)(production|local)\.ERROR:',s)]
+              print('ARCHIVO',path.name,'EVENTOS',len(headers))
+              for n,i in enumerate(headers[-60:]):
+                  end=next((x for x in headers if x>i),len(rows))
+                  chunk='\n'.join(rows[i:min(i+120,end)])
+                  headline=rows[i]
+                  hit=bool(re.search(r'ProductosProveedoresControlador|productos_proveedores|cantidad_productos_mix|/proveedores-productos/mix',chunk,re.I))
+                  if not hit:continue
+                  date=re.search(r'\[(\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d)',headline)
+                  sqlstate=re.search(r'SQLSTATE\[([A-Z0-9]+)\]',headline)
+                  vendor=re.search(r'SQLSTATE\[[A-Z0-9]+\]:[^:]*:\s*(\d{3,5})',headline)
+                  missing=re.search(r"Unknown column '([a-zA-Z_][a-zA-Z0-9_.]{0,95})'",headline,re.I)
+                  table=re.search(r"Table '[^']*\.([a-zA-Z_][a-zA-Z0-9_]{0,95})' doesn't exist",headline,re.I)
+                  coll=re.search(r'Illegal mix of collations',headline,re.I)
+                  klass=re.search(r'(QueryException|PDOException|TypeError|RuntimeException|ErrorException|ParseError)',chunk)
+                  print('V43_MIX_ERROR',
+                    'fecha='+(date.group(1) if date else 'sin_fecha'),
+                    'sqlstate='+(sqlstate.group(1) if sqlstate else 'ninguno'),
+                    'codigo='+(vendor.group(1) if vendor else 'ninguno'),
+                    'clase='+(klass.group(1) if klass else 'otra'),
+                    'columna='+(missing.group(1) if missing else 'ninguna'),
+                    'tabla='+(table.group(1) if table else 'ninguna'),
+                    'collation='+str(bool(coll)))
+          PY
+          echo 'Diagnóstico V43 exclusivamente FTPS GET; no SQL, POST productivos ni cambios en el hosting.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Eliminar logs y contraseña temporal en todos los casos
+        if: always()
+        run: rm -rf /tmp/rutahd-v43-read

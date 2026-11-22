@@ -1,0 +1,11 @@
+Ruta H&D V2 | QA sitio público de Productos v28 | 2026-11-22
+frontend_deploy=44992955237-success
+frontend_ci=44992820046-success-61
+backend_deploy=44992534805-success
+endpoints=fotos_jwt,productos_orden_server
+screens=1440,390
+api_reals_writes=no
+jwt_real=no
+objetivos=galeria_responsive,etiquetas_precios_codigos,acciones
+ddl25_en_produccion=no_confirmado
+capturas=si

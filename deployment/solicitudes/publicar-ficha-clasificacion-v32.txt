@@ -1,0 +1,1 @@
+Publicar solo la ampliación de GET /productos/{id} con nombres de clasificación, fuente 9b17bb1b55245170e4947ef55dea4774a8c6eb5c, sin SQL ni migraciones. Verificar bytes y rollback.

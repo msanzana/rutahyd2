@@ -45,7 +45,7 @@ jobs:
             git -C /tmp/backend show "$BASE_SHA:$f" > "/tmp/backup/$f"
           done </tmp/changed-files
           while IFS= read -r f; do php -l "/tmp/backend/$f"; done </tmp/new-files
-          grep -Fq 'productos_proveedores' /tmp/backend/routes/api.php
+          grep -Fq '/proveedores-productos' /tmp/backend/routes/api.php
           grep -Fq 'tipos_codigos_barras' /tmp/backend/app/Http/Controllers/CatalogoComercialControlador.php
           ! grep -Eq 'DROP TABLE|TRUNCATE' /tmp/backend/app/Http/Controllers/ProductosProveedoresControlador.php
       - name: Instalar FTPS y Chromium

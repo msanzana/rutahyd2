@@ -1,0 +1,12 @@
+RUTAHD2_DESPLIEGUE_DIALOGO_ESTADOS_V36
+fecha=2026-11-22
+frontend_repositorio=msanzana/rutahyd2front
+frontend_sha=09bc1936d307b5881ef6fce9dc791c2bcf1e0b1a
+ci_frontend_exitoso=45003168967
+sitio=https://rutahyd2.free.nf/
+archivos=index.html;assets/js/listados-ui.js;assets/css/dialogo-estados-v36.css
+preflight=validar_version_v35_productiva
+rollback=restaurar_html_y_js_si_falla
+api_laravel=no_modificar
+mysql_mariadb=no_modificar
+firecrawl=prohibido

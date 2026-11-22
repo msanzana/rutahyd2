@@ -1,0 +1,92 @@
+name: Verificar CRUD corporativo v18 en pagina productiva
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/verificar-crud-v18-publico.txt]
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar navegador sin credenciales
+        run: |
+          mkdir -p /tmp/hd-crud-qa && cd /tmp/hd-crud-qa
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Verificar sitio v18, modales y tablas con JWT de prueba interceptado
+        working-directory: /tmp/hd-crud-qa
+        run: |
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          const host='https://rutahyd2.free.nf/';
+          const reply=(route,data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
+          try{
+            for(const width of [1440,820,390]){
+              const page=await browser.newPage({viewport:{width,height:880},locale:'es-CL'});
+              await page.route('**/api/v1/**',route=>{
+                const path=new URL(route.request().url()).pathname;
+                if(path==='/api/v1/estado')return reply(route,{servicio:'Ruta H&D2 API',estado:'disponible'});
+                if(path==='/api/v1/sesion')return reply(route,{token:'header.fake.signature',token_type:'Bearer',
+                  usuario:{id:1,nombre:'Verificador UI',rol:'administrador',permisos:['clientes.gestionar','productos.gestionar','compras.gestionar']}});
+                if(path==='/api/v1/recursos/clientes')return reply(route,{data:[{
+                  id:17,nombre:'Cliente visual de prueba',codigo:'CLI-17',activo:true,rut:'11111111-1'
+                }],last_page:1,total:1});
+                if(path.startsWith('/api/v1/catalogos/'))return reply(route,{items:[{id:1,nombre:'Catalogo QA',activo:true,parentId:null}]});
+                if(path==='/api/v1/productos')return reply(route,{data:[],last_page:1,total:0});
+                return reply(route,{},404);
+              });
+              await page.goto(host+'?qa=crud18',{waitUntil:'domcontentloaded',timeout:55000});
+              await page.waitForTimeout(9000);
+              if(!(await page.locator('#loginSubmit').count())){
+                throw Error('No se cargó login productivo '+width+' '+page.url());
+              }
+              const cssLink=await page.locator('link[href*="crud-v18.css"]').count();
+              if(cssLink!==1)throw Error('CSS corporativo v18 no enlazado');
+              await page.locator('#loginSubmit:not([disabled])').waitFor({timeout:20000});
+              await page.locator('#loginEmail').fill('qa@example.invalid');
+              await page.locator('#loginPassword').fill('FICTICIA-SIN-USO');
+              await page.locator('#loginSubmit').click();
+              await page.waitForFunction(()=>document.querySelector('#loginDialog')?.open===false);
+              const onlyOne=await page.getByRole('button',{name:'Cerrar sesión',exact:true}).count();
+              if(onlyOne!==1)throw Error('Cierre de sesión duplicado');
+              if(width<1000)await page.locator('#menuToggle').click();
+              await page.locator('.nav-link[data-nav="clientes"]').click();
+              await page.locator('.official-table tbody tr').first().waitFor();
+              const rowActions=await page.locator('.official-table tbody tr td').last().evaluate(el=>({
+                tag:el.tagName,display:getComputedStyle(el).display,align:getComputedStyle(el).textAlign
+              }));
+              if(rowActions.tag!=='TD'||rowActions.display!=='table-cell'||rowActions.align!=='right')throw Error('Columna de acciones desalineada '+JSON.stringify(rowActions));
+              await page.getByRole('button',{name:'Nuevo registro'}).click();
+              const dialog=page.locator('dialog.official-editor[open]');
+              await dialog.waitFor();
+              const result=await dialog.evaluate(el=>{
+                const rect=el.getBoundingClientRect();
+                const header=el.querySelector('.official-editor-heading');
+                return {left:rect.left,right:rect.right,width:rect.width,
+                  overflow:el.scrollWidth>el.clientWidth+2,
+                  gradient:getComputedStyle(header).backgroundImage.includes('gradient'),
+                  close:!!header.querySelector('.crud-close')
+                };
+              });
+              await page.screenshot({path:'/tmp/hd-crud-qa/clientes-'+width+'.png'});
+              if(result.left<0||result.right>width+1||result.overflow||!result.gradient||!result.close)throw Error('Modal invalido '+width+' '+JSON.stringify(result));
+              console.log('CRUD_V18_PRODUCTIVO',JSON.stringify({width,cssLink,rowActions,...result}));
+              await page.close();
+            }
+          }finally{await browser.close();}
+          JS
+      - name: Capturas de verificación visual
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crud-v18-capturas
+          path: /tmp/hd-crud-qa/clientes-*.png
+          if-no-files-found: ignore
+          retention-days: 7

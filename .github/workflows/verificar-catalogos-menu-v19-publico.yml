@@ -1,0 +1,83 @@
+name: Verificar catalogos y menus v19 en sitio oficial sin datos reales
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/verificar-catalogos-menu-v19.txt]
+permissions:
+  contents: read
+jobs:
+  qa:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preparar Chromium
+        run: |
+          mkdir -p /tmp/rutahd-v19 && cd /tmp/rutahd-v19
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Comprobar menus planos y botones Nuevo contra HTML publicado
+        working-directory: /tmp/rutahd-v19
+        run: |
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          const reply=(route,body,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
+          const data={rubros:[{id:1,nombre:'Rubro QA',activo:true,parentId:null}],
+            departamentos:[],familias:[],lineas:[],marcas:[{id:2,nombre:'Marca QA',activo:true,parentId:null}],
+            modelos:[],tipos_unidad:[],tipos_envasado:[],condiciones_tributarias:[],tipos_codigos_barras:[]};
+          try{
+            for(const width of [1440,390]){
+              const page=await browser.newPage({viewport:{width,height:860},locale:'es-CL'});
+              let gotUnexpectedWrite=false;
+              await page.route('**/api/v1/**',route=>{
+                const req=route.request(),p=new URL(req.url()).pathname;
+                if(p==='/api/v1/estado')return reply(route,{servicio:'Ruta H&D2 API',estado:'disponible'});
+                if(p==='/api/v1/sesion'&&req.method()==='POST')return reply(route,{token:'qa.header.signature',token_type:'Bearer',
+                  usuario:{id:1,nombre:'QA visual',rol:'administrador',permisos:['productos.gestionar']}});
+                if(req.method()!=='GET'){gotUnexpectedWrite=true;return reply(route,{},403);}
+                if(p.startsWith('/api/v1/catalogos/'))return reply(route,{items:data[p.split('/').at(-1)]||[]});
+                if(p==='/api/v1/productos')return reply(route,{data:[{
+                  id:1,sku:'SKU-CI',nombre:'Producto QA',activo:true,presentacion:{precioNeto:2000,tasaIva:19}
+                }],last_page:1,total:1});
+                return reply(route,{},404);
+              });
+              await page.goto('https://rutahyd2.free.nf/?ci=v19',{waitUntil:'domcontentloaded',timeout:55000});
+              await page.waitForTimeout(9000);
+              if(await page.locator('link[href*="crud-v18.css?v=20261122-fix19"]').count()!==1)
+                throw Error('El servidor no entregó estilos v19');
+              if(await page.locator('script[src*="admin-remoto.js?v=20261122-fix19"]').count()!==1)
+                throw Error('El servidor no entregó JavaScript CRUD v19');
+              await page.locator('#loginSubmit:not([disabled])').waitFor({timeout:25000});
+              await page.locator('#loginEmail').fill('qa@example.invalid');
+              await page.locator('#loginPassword').fill('CLAVE-FICTICIA');
+              await page.locator('#loginSubmit').click();
+              await page.waitForFunction(()=>document.querySelector('#loginDialog')?.open===false);
+              if(width<900)await page.locator('#menuToggle').click();
+              await page.locator('#toggleProductSubnav').click();
+              await page.locator('#productSubnav [data-nav="catalogos.rubros"]').click();
+              await page.locator('#adminRemoto').getByText('Rubro QA').waitFor({timeout:20000});
+              await page.getByRole('button',{name:'Nuevo registro de Rubros'}).click();
+              await page.locator('dialog.remote-catalog-dialog[open]').waitFor();
+              await page.screenshot({path:'/tmp/rutahd-v19/nuevo-rubro-'+width+'.png'});
+              if(gotUnexpectedWrite)throw Error('Solicitud no GET no permitida en prueba visual');
+              const d=await page.locator('dialog.remote-catalog-dialog[open]').evaluate(el=>{
+                const r=el.getBoundingClientRect();return {left:r.left,right:r.right,overflow:el.scrollWidth>el.clientWidth+2};
+              });
+              if(d.left<0||d.right>width+1||d.overflow)throw Error('Dialogo fuera de pantalla '+JSON.stringify(d));
+              console.log('V19_PRODUCCION',JSON.stringify({width,dialog:d,header:'Nuevo Rubro abierto',server:'publicado'}));
+              await page.close();
+            }
+          }finally{await browser.close();}
+          JS
+      - name: Guardar evidencia de ventanas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruta-v19-menus-crud
+          path: /tmp/rutahd-v19/nuevo-rubro-*.png
+          if-no-files-found: ignore
+          retention-days: 7

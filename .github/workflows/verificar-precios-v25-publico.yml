@@ -103,7 +103,9 @@ jobs:
                 return {left:box.left,right:box.right,overflow:el.scrollWidth>el.clientWidth+2};
               });
               if(position.left<0||position.right>width+1||position.overflow)throw Error('Popup fuera de pantalla '+JSON.stringify(position));
-              await dlg.getByRole('button',{name:'Cerrar ventana'}).click();
+              await page.keyboard.press('Escape');
+              await dlg.waitFor({state:'hidden'});
+              if(width<900)await page.locator('#menuToggle').click();
               await page.locator('.nav-link[data-nav="ventas"]').click();
               const sale=page.locator('#salePriceModule');
               await sale.waitFor();

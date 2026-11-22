@@ -1,0 +1,126 @@
+name: Comprobar filtros de Productos y mensajes de formulario V22 en sitio real
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/verificar-filtros-productos-v22.txt]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar navegador aislado
+        run: |
+          mkdir -p /tmp/hd-filtros22 && cd /tmp/hd-filtros22
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Verificar popup avanzado, cascadas y avisos sin acceder a MariaDB
+        working-directory: /tmp/hd-filtros22
+        run: |
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          const wrap=(route,data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
+          const names={
+            rubros:[{id:1,nombre:'Alimentos',activo:true}],
+            departamentos:[{id:11,nombre:'Abarrotes',parentId:1,activo:true}],
+            familias:[{id:21,nombre:'Conservas',parentId:11,activo:true}],
+            lineas:[{id:31,nombre:'Vegetales',parentId:21,activo:true}],
+            marcas:[{id:41,nombre:'Marca Norte',activo:true}],
+            modelos:[{id:51,nombre:'Tradicional',parentId:41,activo:true}],
+            tipos_unidad:[{id:61,nombre:'Unidad',activo:true}],
+            tipos_envasado:[{id:71,nombre:'Lata',activo:true}],
+            condiciones_tributarias:[{id:81,nombre:'Exento',activo:true}],
+            tipos_codigos_barras:[{id:91,nombre:'EAN-13',activo:true}],
+          };
+          try{
+            for(const width of [1440,390]){
+              const page=await browser.newPage({viewport:{width,height:850},locale:'es-CL'});
+              let remoteWrite=false,filters={};
+              await page.route('**/api/v1/**',route=>{
+                const req=route.request(),url=new URL(req.url()),path=url.pathname;
+                if(path==='/api/v1/estado')return wrap(route,{estado:'disponible',servicio:'Ruta H&D2 API'});
+                if(path==='/api/v1/sesion'&&req.method()==='POST')return wrap(route,{
+                  token:'fake.header.signature',token_type:'Bearer',
+                  usuario:{id:1,nombre:'Verificador Visual',rol:'administrador',
+                    permisos:['productos.gestionar','compras.gestionar']}
+                });
+                if(req.method()!=='GET'){remoteWrite=true;return wrap(route,{},403);}
+                if(path.startsWith('/api/v1/catalogos/'))return wrap(route,{items:names[path.split('/').at(-1)]||[]});
+                if(path==='/api/v1/productos'){
+                  filters=Object.fromEntries(url.searchParams);
+                  return wrap(route,{data:[{
+                    id:3,sku:'QA-1',nombre:'Producto QA',activo:true,clasificacion:{
+                      rubroId:1,departamentoId:11,familiaId:21,lineaId:31,marcaId:41,modeloId:51,
+                      tipoUnidadId:61,tipoEnvasadoId:71,condicionTributariaId:81},
+                    presentacion:{nombre:'Unidad',precioNeto:1500,tasaIva:0,unidadesPorEnvase:1}
+                  }],total:1,last_page:1,filtros_aplicados:true});
+                }
+                return wrap(route,{},404);
+              });
+              await page.goto('https://rutahyd2.free.nf/?qa=filtros22',{waitUntil:'domcontentloaded',timeout:55000});
+              await page.waitForTimeout(9000);
+              for(const attr of [
+                'script[src*="validacion-ui.js?v=20261122-filters22"]',
+                'script[src*="productos-remotos.js?v=20261122-filters22"]',
+                'link[href*="listados-tema-v20.css?v=20261122-filters22"]'
+              ]){
+                if(await page.locator(attr).count()!==1)throw Error('Recurso nuevo no publicado: '+attr);
+              }
+              await page.locator('#loginSubmit:not([disabled])').waitFor({timeout:25000});
+              await page.locator('#loginEmail').fill('qa@example.invalid');
+              await page.locator('#loginPassword').fill('CONTRASENA_FICTICIA');
+              await page.locator('#loginSubmit').click();
+              await page.waitForFunction(()=>document.querySelector('#loginDialog')?.open===false);
+              if(width<900)await page.locator('#menuToggle').click();
+              await page.locator('.nav-link[data-nav="productos"]').click();
+              await page.locator('#productosRealesListado').getByText('Producto QA').waitFor({timeout:20000});
+              const button=page.locator('#productosReales .advanced-filter-trigger');
+              if(await button.count()!==1)throw Error('Búsqueda avanzada duplicada');
+              await button.click();
+              const dlg=page.locator('dialog.product-advanced-dialog[open]');
+              await dlg.waitFor();
+              await dlg.locator('[name="rubro_id"]').selectOption('1');
+              await dlg.locator('[name="departamento_id"]').selectOption('11');
+              await dlg.locator('[name="familia_id"]').selectOption('21');
+              await dlg.locator('[name="marca_id"]').selectOption('41');
+              await dlg.locator('[name="modelo_id"]').selectOption('51');
+              await dlg.locator('[name="activo"]').selectOption('1');
+              await dlg.locator('[name="precio_min"]').fill('1800');
+              await dlg.locator('[name="precio_max"]').fill('1200');
+              await dlg.getByRole('button',{name:'Aplicar filtros'}).click();
+              await dlg.locator('.hd-validation-summary:not([hidden])').waitFor();
+              if(!(await dlg.locator('.hd-validation-summary').textContent()).includes('máximo'))
+                throw Error('Aviso de rango no explicativo');
+              await dlg.locator('[name="precio_max"]').fill('2200');
+              await dlg.locator('.hd-validation-summary').waitFor({state:'hidden'});
+              await page.screenshot({path:'/tmp/hd-filtros22/filtros-'+width+'.png'});
+              const rect=await dlg.evaluate(el=>{
+                const r=el.getBoundingClientRect();
+                return {left:r.left,right:r.right,overflow:el.scrollWidth>el.clientWidth+2};
+              });
+              if(rect.left<0||rect.right>width+1||rect.overflow)throw Error('Popup desbordado '+JSON.stringify(rect));
+              await dlg.getByRole('button',{name:'Aplicar filtros'}).click();
+              await page.locator('#productosReales .hd-filter-active').waitFor();
+              if(filters.familia_id!=='21'||filters.modelo_id!=='51'||filters.activo!=='1'||
+                filters.precio_min!=='1800'||filters.precio_max!=='2200')
+                throw Error('Filtros de jerarquía y precios no enviados a Laravel: '+JSON.stringify(filters));
+              if(remoteWrite)throw Error('Se intentó escribir en API productiva');
+              console.log('FILTROS_V22_PUBLICO',JSON.stringify({width,rect,filters,errors:true}));
+              await page.close();
+            }
+          }finally{await browser.close();}
+          JS
+      - name: Capturas de popup de Producto
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: popup-productos-v22
+          path: /tmp/hd-filtros22/filtros-*.png
+          if-no-files-found: ignore
+          retention-days: 7

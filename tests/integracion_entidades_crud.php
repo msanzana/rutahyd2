@@ -54,7 +54,7 @@ try {
             'nombre'=>'No autorizado','codigo'=>'INTRUSO'
         ],$reader),'No permitir escritura '.$resource);
     }
-    entityExpect(404,entityRequest('POST','/api/v1/recursos/ventas',[
+    entityExpect(405,entityRequest('POST','/api/v1/recursos/ventas',[
         'nombre'=>'No autorizado'
     ],$admin),'No permitir ventas por CRUD generico');
     entityExpect(422,entityRequest('POST','/api/v1/recursos/clientes',[

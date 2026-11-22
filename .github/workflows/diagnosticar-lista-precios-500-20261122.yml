@@ -1,0 +1,80 @@
+name: Diagnosticar listas de precios HTTP 500 (FTPS lectura segura)
+on:
+  push:
+    branches: [main]
+    paths:
+      - deployment/solicitudes/diagnosticar-lista-precios-500-20261122.txt
+permissions:
+  contents: read
+jobs:
+  leer-log-privado:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Instalar lector FTPS
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+      - name: Clasificar errores sin divulgar datos ni escribir en hosting
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          mkdir -p /tmp/rutahd-price500
+          cat >/tmp/rutahd-price500/read.lftp <<EOF
+          set cmd:fail-exit no
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/storage/logs/laravel.log -o /tmp/rutahd-price500/laravel.log
+          get /htdocs/api-v2/storage/logs/laravel-2026-11-22.log -o /tmp/rutahd-price500/daily.log
+          get /htdocs/api-v2/error_log -o /tmp/rutahd-price500/error.log
+          bye
+          EOF
+          lftp -f /tmp/rutahd-price500/read.lftp >/dev/null 2>&1 || true
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          files=[p for p in Path('/tmp/rutahd-price500').glob('*.log') if p.stat().st_size>0]
+          print('LOGS_ACCESIBLES',len(files))
+          for path in files:
+              raw=path.read_text(errors='replace').splitlines()
+              errors=[i for i,l in enumerate(raw) if re.search(r'(?i)(?:production|local)\.ERROR:',l)]
+              print('ARCHIVO',path.name,'EVENTOS',len(errors))
+              matching=0
+              for pos in errors[-80:]:
+                  header=raw[pos]
+                  body='\n'.join(raw[pos:min(len(raw),pos+115)])
+                  if not re.search(r'(ListasPreciosControlador|GestionListasPrecios|listas_precios)',body,re.I):
+                      continue
+                  matching+=1
+                  dt=re.search(r'\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})',header)
+                  sql=re.search(r'SQLSTATE\[([A-Z0-9]+)\]',header)
+                  code=re.search(r'\((\d{3,5})\)',header)
+                  missingcol=re.search(r"Unknown column '([A-Za-z_][\w.]{0,80})'",header,re.I)
+                  missingtable=re.search(r"Table '[^']*\.([A-Za-z_][\w]{0,80})' doesn't exist",header,re.I)
+                  nodflt=re.search(r"(?:Field|Column) '([A-Za-z_][\w]{0,80})' (?:doesn't have a default value|cannot be null)",header,re.I)
+                  cls=re.search(r'(?:Illuminate\\Database\\QueryException|PDOException|TypeError|ErrorException|RuntimeException|ParseError)',body)
+                  component='GestionListasPrecios' if 'GestionListasPrecios' in body else 'ListasPreciosControlador' if 'ListasPreciosControlador' in body else 'listas_precios'
+                  print('PRICE_ERROR',
+                        'fecha='+ (dt.group(1) if dt else 'no-especificada'),
+                        'sqlstate='+ (sql.group(1) if sql else 'ninguno'),
+                        'mysql_code='+ (code.group(1) if code else 'ninguno'),
+                        'exception='+ (cls.group(0).split(chr(92))[-1] if cls else 'otro'),
+                        'columna_ausente='+ (missingcol.group(1) if missingcol else 'ninguna'),
+                        'tabla_ausente='+ (missingtable.group(1) if missingtable else 'ninguna'),
+                        'obligatorio='+ (nodflt.group(1) if nodflt else 'ninguno'),
+                        'componente='+component)
+              print('ERRORES_LISTAS_RECIENTES',matching)
+          PY
+      - name: Eliminar copias temporales
+        if: always()
+        run: rm -rf /tmp/rutahd-price500

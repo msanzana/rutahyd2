@@ -89,9 +89,16 @@ jobs:
                     if re.search(pattern,headline,re.I):
                       category=key;break
                   origin='desconocido'
+                  salida_iniciada='desconocido'
                   if recent:
-                    m=re.search(r'/(app/(?:Http|Services|Models|Support)/[A-Za-z0-9_/.:-]{1,120}\\.php|routes/api\\.php|vendor/laravel/framework/src/[A-Za-z0-9_/.:-]{1,120}\\.php)',chunk,re.I)
-                    if m: origin=m.group(1)
+                    m=re.search(r'/(app/[A-Za-z0-9_./-]+[.]php|routes/[A-Za-z0-9_./-]+[.]php|bootstrap/[A-Za-z0-9_./-]+[.]php|vendor/laravel/[A-Za-z0-9_./-]+[.]php)',chunk,re.I)
+                    if m: origin=m.group(1)[:120]
+                    emitted=re.search(r'output started at\\s+([^\\s):]+[.]php):(\\d+)',chunk,re.I)
+                    if emitted:
+                      p=emitted.group(1).replace(chr(92),'/')
+                      scoped=p.split('/api-v2/')[-1] if '/api-v2/' in p else p.rsplit('/',1)[-1]
+                      if re.fullmatch(r'[a-zA-Z0-9_./-]{1,120}',scoped):
+                        salida_iniciada=scoped+':'+emitted.group(2)
                   print('V43_EVENTO',
                     'fecha='+(date.group(1) if date else 'sin_fecha'),
                     'sqlstate='+(sqlstate.group(1) if sqlstate else 'ninguno'),
@@ -101,7 +108,7 @@ jobs:
                     'tabla='+(table.group(1) if table else 'ninguna'),
                     'collation='+str(bool(coll)),
                     'relacionado_mix='+str(hit),
-                    'categoria='+category,'origen='+origin)
+                    'categoria='+category,'origen='+origin,'salida_iniciada='+salida_iniciada)
           PY
           echo 'Diagnóstico V43 exclusivamente FTPS GET; no SQL, POST productivos ni cambios en el hosting.' >> "$GITHUB_STEP_SUMMARY"
       - name: Eliminar logs y contraseña temporal en todos los casos

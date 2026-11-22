@@ -1,0 +1,7 @@
+smoke=publicacion_v17
+frontend_deploy=44975636120-success
+backend_deploy=44975302543-success
+db_audit=44974987537-success
+sin_credenciales=true
+sin_escrituras=true
+sin_firecrawl=true

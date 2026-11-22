@@ -1,0 +1,238 @@
+name: V45 - publicar UX de mix, selector y validaciones (respaldo y rollback)
+on:
+  push:
+    branches: [deploy/v45-ui-mix-checkbox-validacion-20261122]
+    paths: [deployment/solicitudes/publicar-ui-v45.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicacion:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FRONT_BASE: cb0c42ba8a3b51de0fa66943f8620fe4f58c2a64
+      FRONT_PIN: 3803b8946d7e809aaceba63f21e74edbec507d19
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar fuente V45 fijada y FTPS seguro
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          git clone -q --depth 1 --branch feature/v45-mix-checkbox-validacion-20261122 https://github.com/msanzana/rutahyd2front.git /tmp/v45-source
+          git -C /tmp/v45-source fetch -q --depth 1 origin "$FRONT_BASE" "$FRONT_PIN"
+          git -C /tmp/v45-source checkout -q --detach "$FRONT_PIN"
+          test "$(git -C /tmp/v45-source rev-parse HEAD)" = "$FRONT_PIN"
+          mkdir -p /tmp/v45/{before,after,verify}
+      - name: Descargar únicamente frontend vigente y protección del backend
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import os,pathlib
+          p=pathlib.Path('/tmp/v45')
+          files=[
+            'assets/js/proveedores-productos.js',
+            'assets/js/buscador-productos-v39.js',
+            'assets/js/validacion-ui.js','index.html']
+          (p/'files.txt').write_text('\n'.join(files)+'\n')
+          with (p/'read.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 2']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              dest=p/'before'/name;dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get /htdocs/'+name+' -o '+str(dest),file=f)
+            for remote,local in [
+              ('/htdocs/api-v2/.htaccess','guard-private'),
+              ('/htdocs/api/.htaccess','guard-api'),
+              ('/htdocs/api/index.php','gateway')]:
+              print('get '+remote+' -o '+str(p/'before'/local),file=f)
+            print('cls -1 /htdocs/assets/css > /tmp/v45/css-list',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v45/read.lftp >/dev/null
+          ! grep -Fxq 'interfaz-mix-validacion-v45.css' /tmp/v45/css-list
+          grep -Fq 'Require all denied' /tmp/v45/before/guard-private
+          grep -Fq 'HTTP_AUTHORIZATION' /tmp/v45/before/guard-api
+          grep -Fq 'rutahd2_api_ready' /tmp/v45/before/gateway
+      - name: Parchear diferencias V42-v45 sobre archivos reales de producción
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,subprocess,re,shutil
+          base=pathlib.Path('/tmp/v45')
+          files=(base/'files.txt').read_text().splitlines()
+          scripts=[x for x in files if x.endswith('.js')]
+          for name in files:
+            out=base/'after'/name;out.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copy2(base/'before'/name,out)
+          patch=subprocess.run([
+            'git','-C','/tmp/v45-source','diff',
+            '--no-ext-diff','--binary',
+            'cb0c42ba8a3b51de0fa66943f8620fe4f58c2a64',
+            '3803b8946d7e809aaceba63f21e74edbec507d19',
+            '--',*scripts],capture_output=True,check=True).stdout
+          assert patch and b'validacion-ui.js' in patch
+          result=subprocess.run(['patch','--batch','--fuzz=0','-p1','-d',str(base/'after')],
+            input=patch,capture_output=True)
+          if result.returncode:
+            print(result.stdout.decode(errors='replace')[:1800])
+            raise RuntimeError('El archivo remoto difiere del contexto del parche: NO PUBLICAR')
+          name='index.html'
+          text=(base/'before'/name).read_text()
+          assert '<img' in text and 'ubicacionesSubnav' in text and 'giros-sii-v39.js' in text
+          for js in scripts:
+            script=js.rsplit('/',1)[-1]
+            pattern=r'(<script\\s+src="assets/js/'+re.escape(script)+r'\\?v=)[^"]+(")'
+            text,count=re.subn(pattern,r'\\g<1>20261122-v45prod\\2',text)
+            assert count==1,script+' en index productivo no reconocido'
+          marker=r'(<link rel="stylesheet" href="assets/css/carga-global-v42[.]css\\?v=[^"]+">)'
+          extra='\n  <link rel="stylesheet" href="assets/css/interfaz-mix-validacion-v45.css?v=20261122-v45prod">'
+          text,count=re.subn(marker,lambda m:m.group(1)+extra,text)
+          assert count==1,'No se identificó CSS de preloader V42'
+          (base/'after/index.html').write_text(text)
+          target=base/'after/assets/css/interfaz-mix-validacion-v45.css'
+          target.parent.mkdir(parents=True,exist_ok=True)
+          shutil.copyfile('/tmp/v45-source/assets/css/interfaz-mix-validacion-v45.css',target)
+          for js in scripts:
+            source=(pathlib.Path('/tmp/v45-source')/js).read_text()
+            target=(base/'after'/js).read_text()
+            for needle in [
+               ('supplier-mix-metrics' if js.endswith('proveedores-productos.js') else
+                'hd-lookup-check' if js.endswith('buscador-productos-v39.js') else
+                'hd-validation-bubble')]:
+              assert needle in target,js+' perdió cambio'
+          print('V45_PREFLIGHT: parche exacto sobre frontend productivo; HTML conserva V41/V42.')
+          PY
+          for f in assets/js/proveedores-productos.js assets/js/buscador-productos-v39.js assets/js/validacion-ui.js; do
+            node --check "/tmp/v45/after/$f"
+          done
+          grep -Fq 'giros-sii-v39.js' /tmp/v45/after/index.html
+          grep -Fq 'carga-global-v42.js' /tmp/v45/after/index.html
+          grep -Fq 'interfaz-mix-validacion-v45.css?v=20261122-v45prod' /tmp/v45/after/index.html
+      - name: Respaldo FTPS previo para restauración
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v45-backup-antes-ux
+          path: /tmp/v45/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Subir CSS, scripts y HTML de último
+        run: |
+          set -euo pipefail
+          set +x
+          touch /tmp/v45/upload-started
+          python3 - <<'PY'
+          import os,pathlib
+          p=pathlib.Path('/tmp/v45')
+          files=[
+            'assets/css/interfaz-mix-validacion-v45.css',
+            'assets/js/proveedores-productos.js',
+            'assets/js/buscador-productos-v39.js',
+            'assets/js/validacion-ui.js',
+            'index.html']
+          (p/'uploaded.txt').write_text('\n'.join(files)+'\n')
+          with (p/'upload.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:print('put '+str(p/'after'/name)+' -o /htdocs/'+name,file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v45/upload.lftp >/dev/null
+      - name: Descargar de nuevo y comparar cinco archivos más protecciones
+        run: |
+          set -euo pipefail
+          set +x
+          python3 - <<'PY'
+          import os,pathlib
+          p=pathlib.Path('/tmp/v45')
+          with (p/'verify.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in (p/'uploaded.txt').read_text().splitlines():
+              dest=p/'verify'/name;dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get /htdocs/'+name+' -o '+str(dest),file=f)
+            for remote,name in [
+              ('/htdocs/api-v2/.htaccess','guard-private'),
+              ('/htdocs/api/.htaccess','guard-api'),
+              ('/htdocs/api/index.php','gateway')]:
+              print('get '+remote+' -o '+str(p/'verify'/name),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v45/verify.lftp >/dev/null
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/v45')
+          for name in (p/'uploaded.txt').read_text().splitlines():
+            assert (p/'after'/name).read_bytes()==(p/'verify'/name).read_bytes(),name
+          for name in ['guard-private','guard-api','gateway']:
+            assert (p/'before'/name).read_bytes()==(p/'verify'/name).read_bytes(),name
+          print('V45_BYTES_OK: cinco recursos y seguridad sin modificaciones.')
+          PY
+      - name: Comprobar referencias del frontend público sin sesión
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v45/browser
+          cd /tmp/v45/browser
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund -q playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/?v45=20261122',{waitUntil:'domcontentloaded',timeout:55000});
+            await page.waitForTimeout(3500);
+            const ui=await page.evaluate(()=>({
+              app:!!document.querySelector('#ubicacionesSubnav'),
+              logo:!!document.querySelector('.brand-logo'),
+              css:!!document.querySelector('link[href*="interfaz-mix-validacion-v45.css?v=20261122-v45prod"]'),
+              scripts:['proveedores-productos.js','buscador-productos-v39.js','validacion-ui.js']
+                .every(f=>!!document.querySelector('script[src*="'+f+'?v=20261122-v45prod"]')),
+              finder:typeof window.RutaHDBuscadorProductos?.openMultiple==='function'
+            }));
+            console.log('V45_SMOKE_PUBLICO',JSON.stringify(ui));
+            if(!ui.app||!ui.logo||!ui.css||!ui.scripts||!ui.finder){
+              console.log('::warning::La puerta de enlace no permitió verificar UI desde navegador anónimo. Bytes FTPS sí comprobados.');
+            }
+          }finally{await browser.close();}
+          JS
+          echo 'V45: frontend publicado por FTPS con respaldo y verificación exacta; sin SQL.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Restaurar automáticamente archivos anteriores ante fallo
+        if: failure()
+        run: |
+          set +x
+          if [[ -f /tmp/v45/upload-started && -s /tmp/v45/before/index.html ]];then
+            python3 - <<'PY'
+            import os,pathlib
+            p=pathlib.Path('/tmp/v45')
+            with (p/'rollback.lftp').open('w') as f:
+              for cmd in ['set cmd:fail-exit no','set ftp:ssl-force yes',
+                'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+                'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+              print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+              for name in (p/'files.txt').read_text().splitlines():
+                print('put '+str(p/'before'/name)+' -o /htdocs/'+name,file=f)
+              print('rm /htdocs/assets/css/interfaz-mix-validacion-v45.css',file=f)
+              print('bye',file=f)
+            PY
+            lftp -f /tmp/v45/rollback.lftp >/dev/null ||
+              echo '::error::Rollback incompleto: restaurar desde rutahd-v45-backup-antes-ux'
+          fi
+      - name: Limpiar scripts FTPS
+        if: always()
+        run: rm -f /tmp/v45/*.lftp

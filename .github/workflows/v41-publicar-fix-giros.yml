@@ -1,0 +1,156 @@
+name: V41 - publicar corrección giros SII con respaldo y rollback
+on:
+  push:
+    branches: [hotfix/v41-giros-sii-busqueda-20261122]
+    paths: [deployment/solicitudes/publicar-v41-giros.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  corregir:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 23
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BEFORE: d8e116bc3b897336331cb6361f466a2c3182fc82
+      AFTER: ec826f1ae0cc3093040b69233e9963a80a064af7
+      TARGET: app/Http/Controllers/GirosSiiControlador.php
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar FTP seguro y fuente PHP inmóvil
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          git fetch --quiet --depth 1 origin "$BEFORE" "$AFTER"
+          mkdir -p /tmp/giros-v41
+          git show "$BEFORE:$TARGET" > /tmp/giros-v41/before-source.php
+          git show "$AFTER:$TARGET" > /tmp/giros-v41/fixed-source.php
+          php -l /tmp/giros-v41/fixed-source.php
+      - name: Obtener el archivo que está publicado y protecciones originales
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat > /tmp/giros-v41/get.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "/htdocs/api-v2/$TARGET" -o /tmp/giros-v41/original.php
+          get /htdocs/api-v2/.htaccess -o /tmp/giros-v41/private-before
+          get /htdocs/api/.htaccess -o /tmp/giros-v41/gateway-before
+          get /htdocs/api/index.php -o /tmp/giros-v41/index-before
+          bye
+          EOF
+          lftp -f /tmp/giros-v41/get.lftp >/dev/null
+          cmp /tmp/giros-v41/before-source.php /tmp/giros-v41/original.php
+          grep -Fq 'Require all denied' /tmp/giros-v41/private-before
+          grep -Fq 'HTTP_AUTHORIZATION' /tmp/giros-v41/gateway-before
+          grep -Fq 'rutahd2_api_ready' /tmp/giros-v41/index-before
+      - name: Resguardar controlador original para restauración
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v41-respaldo-giro-original
+          path: |
+            /tmp/giros-v41/original.php
+            /tmp/giros-v41/private-before
+            /tmp/giros-v41/gateway-before
+            /tmp/giros-v41/index-before
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar UN archivo Laravel sin tocar base de datos
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/giros-v41/write-started
+          cat > /tmp/giros-v41/put.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/giros-v41/fixed-source.php -o "/htdocs/api-v2/$TARGET"
+          bye
+          EOF
+          lftp -f /tmp/giros-v41/put.lftp >/dev/null
+      - name: Descargar y comparar bytes, asegurar protecciones Apache intactas
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat > /tmp/giros-v41/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "/htdocs/api-v2/$TARGET" -o /tmp/giros-v41/live-fixed.php
+          get /htdocs/api-v2/.htaccess -o /tmp/giros-v41/private-after
+          get /htdocs/api/.htaccess -o /tmp/giros-v41/gateway-after
+          get /htdocs/api/index.php -o /tmp/giros-v41/index-after
+          bye
+          EOF
+          lftp -f /tmp/giros-v41/verify.lftp >/dev/null
+          cmp /tmp/giros-v41/fixed-source.php /tmp/giros-v41/live-fixed.php
+          cmp /tmp/giros-v41/private-before /tmp/giros-v41/private-after
+          cmp /tmp/giros-v41/gateway-before /tmp/giros-v41/gateway-after
+          cmp /tmp/giros-v41/index-before /tmp/giros-v41/index-after
+          echo 'V41 archivo PHP corregido coincide por bytes, seguridad Apache intacta.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Smoke del sitio y acceso JWT, sin escribir datos
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import urllib.request,urllib.error
+          base='https://rutahyd2.free.nf'
+          # El dominio público puede tener un challenge anti-bot en CI;
+          # verificaciones autoritativas son los bytes FTPS confirmados.
+          for path in ['/api/v1/estado','/api/v1/giros-sii?buscar=Fabricaci%C3%B3n']:
+              req=urllib.request.Request(base+path,headers={
+                  'Accept':'application/json','User-Agent':'Mozilla/5.0'})
+              try:
+                  with urllib.request.urlopen(req,timeout=22) as response:
+                      status=response.status
+              except urllib.error.HTTPError as err:
+                  status=err.code
+              print('HTTP_PROTEGIDO',path.split('?')[0],status)
+              if path.startswith('/api/v1/estado') and status!=200:raise SystemExit('Estado API indisponible')
+              if path.startswith('/api/v1/giros-sii') and status!=401:raise SystemExit('JWT de giros no protegida')
+          PY
+          echo 'Giros protegidos con JWT 401 sin sesión, API estado 200.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Revertir controlador original si falla la publicación
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/giros-v41/write-started ] && [ -s /tmp/giros-v41/original.php ]; then
+            cat > /tmp/giros-v41/rollback.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 3
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/giros-v41/original.php -o "/htdocs/api-v2/$TARGET"
+          bye
+          EOF
+            lftp -f /tmp/giros-v41/rollback.lftp >/dev/null ||
+              echo '::error::Restauración incompleta: usar el respaldo de este run'
+          else
+            echo 'No se había iniciado ninguna escritura.'
+          fi
+      - name: Borrar comandos que contenían secretos
+        if: always()
+        run: rm -f /tmp/giros-v41/*.lftp

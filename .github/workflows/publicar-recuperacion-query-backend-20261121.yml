@@ -1,0 +1,128 @@
+name: Publicar nuevo enlace Laravel de recuperacion InfinityFree
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/publicar-recuperacion-query-backend-20261121.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      SOURCE_SHA: 71038de2408fed743c26649d5dbcc3f4f00ce06c
+    steps:
+      - name: Obtener fuente y verificar PHP
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          git clone -q --depth 1 --branch feature/recuperacion-query-link-20261121 https://github.com/msanzana/rutahyd2.git /tmp/recovery_source
+          test "$(git -C /tmp/recovery_source rev-parse HEAD)" = "$SOURCE_SHA"
+          cp /tmp/recovery_source/app/Http/Controllers/RecuperacionContrasenaControlador.php /tmp/recovery_controller.php
+          php -l /tmp/recovery_controller.php
+          grep -Fq "/?recuperar=" /tmp/recovery_controller.php
+      - name: Instalar FTPS
+        run: sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Verificar frontend primero y respaldar controlador
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/recovery-read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/index.html -o /tmp/recovery_front.html
+          get /htdocs/assets/js/recuperacion.js -o /tmp/recovery_front_js
+          get /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php -o /tmp/recovery_old.php
+          get /htdocs/api-v2/.htaccess -o /tmp/recovery_guard_before
+          get /htdocs/api/index.php -o /tmp/recovery_gateway_before
+          get /htdocs/api-v2/storage/app/private/rutahd2_api_ready -o /tmp/recovery_marker
+          bye
+          EOF
+          lftp -f /tmp/recovery-read.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/recovery_guard_before
+          grep -Fq 'recuperacion.js?v=20261121-prod14' /tmp/recovery_front.html
+          grep -Fq '<meta name="referrer" content="no-referrer">' /tmp/recovery_front.html
+          grep -Fq "get('recuperar')" /tmp/recovery_front_js
+          grep -Fq '/#recuperar?token=' /tmp/recovery_old.php
+          test -s /tmp/recovery_marker
+          php -l /tmp/recovery_old.php
+      - name: Reemplazar exclusivamente el controlador de recuperacion
+        run: |
+          set -euo pipefail
+          set +x
+          touch /tmp/recovery_upload_started
+          cat >/tmp/recovery-write.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/recovery_controller.php -o /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php.new
+          mv -f /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php.new /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php
+          bye
+          EOF
+          lftp -f /tmp/recovery-write.lftp >/dev/null
+      - name: Verificar por bytes y guardias JWT intactos
+        run: |
+          set -euo pipefail
+          set +x
+          cat >/tmp/recovery-verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php -o /tmp/recovery_after.php
+          get /htdocs/api-v2/.htaccess -o /tmp/recovery_guard_after
+          get /htdocs/api/index.php -o /tmp/recovery_gateway_after
+          get /htdocs/index.html -o /tmp/recovery_front_after
+          bye
+          EOF
+          lftp -f /tmp/recovery-verify.lftp >/dev/null
+          cmp -s /tmp/recovery_controller.php /tmp/recovery_after.php
+          cmp -s /tmp/recovery_guard_before /tmp/recovery_guard_after
+          cmp -s /tmp/recovery_gateway_before /tmp/recovery_gateway_after
+          cmp -s /tmp/recovery_front.html /tmp/recovery_front_after
+          php -l /tmp/recovery_after.php
+          echo 'Nuevo enlace por query instalado. Requiere solicitar un correo NUEVO.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Sin cambios en MariaDB, SMTP, .env o gateway JWT.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Revertir el controlador ante cualquier fallo
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/recovery_upload_started ] && [ -s /tmp/recovery_old.php ]; then
+            cat >/tmp/recovery-rollback.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/recovery_old.php -o /htdocs/api-v2/app/Http/Controllers/RecuperacionContrasenaControlador.php
+          bye
+          EOF
+            lftp -f /tmp/recovery-rollback.lftp >/dev/null || echo "::error::Reversion FTPS sin confirmar."
+          fi
+      - name: Limpiar archivos temporales
+        if: always()
+        run: |
+          set +x
+          rm -f /tmp/recovery-*.lftp /tmp/recovery_controller.php /tmp/recovery_old.php /tmp/recovery_after.php
+          rm -f /tmp/recovery_marker /tmp/recovery_front_js

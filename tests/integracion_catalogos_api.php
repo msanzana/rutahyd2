@@ -171,7 +171,7 @@ $linea = crear('lineas', 'Vegetales', $familia, $token);
 $marca = crear('marcas', 'H&D', null, $token);
 $modelo = crear('modelos', 'Tradicional', $marca, $token);
 $unidad = crear('tipos_unidad', 'Unidad', null, $token);
-$gramaje = crear('gramajes', '500', null, $token);
+$tipo = crear('tipos_codigos_barras', 'TIPO ESPECIAL CI', null, $token);
 $envasado = crear('tipos_envasado', 'Lata', null, $token);
 
 esperar(409, api('POST', '/api/v1/catalogos/rubros',
@@ -214,7 +214,7 @@ $datos = [
     'rubroId' => $rubro, 'departamentoId' => $depto,
     'familiaId' => $familia, 'lineaId' => $linea,
     'marcaId' => $marca, 'modeloId' => $modelo,
-    'tipoUnidadId' => $unidad, 'gramajeId' => $gramaje,
+    'tipoUnidadId' => $unidad,
     'tipoEnvasadoId' => $envasado, 'condicionTributariaId' => $exento
 ];
 $incorrectos = $datos;

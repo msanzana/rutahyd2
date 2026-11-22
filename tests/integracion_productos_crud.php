@@ -152,6 +152,7 @@ try {
     $attrs['condicionTributariaId']=$idDe('condiciones_tributarias','Afecto');
     $updated=$payload;
     $updated['nombre']='Producto actualizado CI';
+    $updated['sku']='SKU-CRUD-FULLSTACK-CI-V2';
     $updated['clasificacion']=$attrs;
     $updated['presentacion']['id']=$single['presentacion']['id'];
     $updated['presentacion']['precioNeto']='2399.9900';
@@ -159,6 +160,9 @@ try {
         'Actualizar producto');
     assertTrue($after['nombre']==='Producto actualizado CI' &&
         $after['presentacion']['tasaIva']==='19.00','IVA Afecto y nombre actualizados');
+    assertTrue(DB::table('listas_precios_detalle')
+        ->where('producto_id',$id)->where('sku','SKU-CRUD-FULLSTACK-CI-V2')
+        ->exists(),'Actualizar SKU desde el controlador sincroniza la lista base sin trigger');
     assertTrue((float)DB::table('presentaciones_productos')
         ->where('producto_id',$id)->value('precio_neto')===2399.99,'Precio persistido');
     assertTrue((int)DB::table('productos')->where('id',$id)->value('categoria_id')===0 ||

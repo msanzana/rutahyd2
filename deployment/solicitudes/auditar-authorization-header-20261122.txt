@@ -1,0 +1,1 @@
+audit=Authorization ficticio en InfinityFree, sin credenciales, sin SQL, sin Firecrawl

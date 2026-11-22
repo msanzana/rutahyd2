@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use App\Services\GestionListasPrecios;
 
 /**
  * CRUD productivo: producto + clasificación + presentación de venta.
@@ -15,6 +16,8 @@ use Illuminate\Support\Facades\Validator;
  */
 final class ProductoComercialControlador extends Controller
 {
+    public function __construct(private GestionListasPrecios $listasPrecios) {}
+
     private const CLASIFICACIONES = [
         'rubroId' => ['rubros','rubro_id'],
         'departamentoId' => ['departamentos','departamento_id','rubro_id','rubroId'],
@@ -364,6 +367,12 @@ final class ProductoComercialControlador extends Controller
             }
             if(array_key_exists('codigosVenta',$datos)){
                 $this->sincronizarCodigosVenta($id,$datos['codigosVenta']);
+            }
+            // Reemplazo de triggers de Producto: misma transacción del alta/edición.
+            if ($nuevo) {
+                $this->listasPrecios->asegurarPrecioBaseProducto($id);
+            } elseif (array_key_exists('sku', $cambios)) {
+                $this->listasPrecios->sincronizarSkuProducto($id, (string)$cambios['sku']);
             }
             $producto=DB::table('productos')->where('id',$id)->first();
             $principal=DB::table('presentaciones_productos')->where('producto_id',$id)->orderBy('id')->first();

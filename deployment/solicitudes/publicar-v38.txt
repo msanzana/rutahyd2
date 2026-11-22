@@ -1,0 +1,15 @@
+Ruta H&D V2 · Solicitud de despliegue V38 controlado
+Fecha: 2026-11-22
+Autorización operativa: el titular confirmó en conversación «ddl ejecutados».
+Auditoría SQL de SOLO LECTURA en base exacta if0_43460400_rutahyd2_es:
+https://github.com/msanzana/rutahyd2/actions/runs/45055234313
+Resultado: DDL29-32 OK; CL=1, 16 regiones, 56 provincias, 346 comunas, 347 localidades,
+columnas y FKs ciudad_id completas.
+Integración 3 vías de archivos publicados: 
+https://github.com/msanzana/rutahyd2/actions/runs/45055723204
+Resultado: merge PHP/HTML sin conflictos; conservar branding y V37.
+Backend pinned commit: cf61e34aa195cc41fab9513f1959dd7d51e3246c
+Frontend pinned commit: a36bc7b81d653061ed3b2646091d31a2d5c9fbbc
+Despliegue únicamente de archivos PHP/JS/CSS/HTML, no ejecuta SQL.
+Respaldar archivo previo, validar integridad FTPS, smoke HTTP sin JWT,
+rollback automático al error. No modificar .env ni gateway Apache.

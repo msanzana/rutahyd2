@@ -17,6 +17,7 @@ final class Usuario extends Authenticatable
         'nombre',
         'rut',
         'correo_electronico',
+        'ciudad_id',
         'hash_contrasena',
         'activo',
         'ultimo_acceso_en',

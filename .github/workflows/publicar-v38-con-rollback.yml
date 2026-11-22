@@ -1,0 +1,380 @@
+name: Publicar V38 proveedores y ubicaciones (DDL previamente auditados)
+on:
+  push:
+    branches: [feature/proveedores-ubicaciones-sii-v38]
+    paths: [deployment/solicitudes/publicar-v38.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 33
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACK_PIN: cf61e34aa195cc41fab9513f1959dd7d51e3246c
+      FRONT_PIN: a36bc7b81d653061ed3b2646091d31a2d5c9fbbc
+      BACK_BASE: 83296bb5acfe6c69309ec308c8da0c3df6a3c764
+      FRONT_BASE: 089699db01a9f725d324ee62fba04d38eec479af
+    steps:
+      - name: Clonar versiones exactas y verificar integridad y DDL confirmado
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          git clone -q --depth 1 --branch feature/proveedores-ubicaciones-sii-v38 https://github.com/msanzana/rutahyd2.git /tmp/v38back
+          git -C /tmp/v38back fetch -q --depth 1 origin "$BACK_PIN" "$BACK_BASE"
+          git -C /tmp/v38back checkout -q --detach "$BACK_PIN"
+          test "$(git -C /tmp/v38back rev-parse HEAD)" = "$BACK_PIN"
+          git clone -q --depth 1 --branch feature/proveedores-ubicaciones-sii-v38 https://github.com/msanzana/rutahyd2front.git /tmp/v38front
+          git -C /tmp/v38front fetch -q --depth 1 origin "$FRONT_PIN" "$FRONT_BASE"
+          git -C /tmp/v38front checkout -q --detach "$FRONT_PIN"
+          test "$(git -C /tmp/v38front rev-parse HEAD)" = "$FRONT_PIN"
+          grep -Fq 'Route::get' /tmp/v38back/routes/api.php
+          grep -Fq 'ubicaciones' /tmp/v38back/routes/api.php
+          grep -Fq 'ubicacionesSubnav' /tmp/v38front/index.html
+          test -s /tmp/v38front/assets/js/ubicaciones.js
+          test -s /tmp/v38front/assets/css/proveedores-ubicaciones-v38.css
+          # Auditoría SQL previa en base exacta (sin escritura): run 45055234313 éxito.
+          # Si se cambian DDL o destino de BD, se debe ejecutar nueva auditoría primero.
+          mkdir -p /tmp/v38/{back_before,back_after,front_before,front_after,verified_back,verified_front}
+          cat >/tmp/v38/back-existing.txt <<'EOF'
+          routes/api.php
+          app/Http/Controllers/EntidadesComercialesControlador.php
+          app/Http/Controllers/ProductosProveedoresControlador.php
+          app/Http/Controllers/RecursoControlador.php
+          app/Http/Controllers/UsuariosControlador.php
+          app/Models/Bodega.php
+          app/Models/Cliente.php
+          app/Models/Proveedor.php
+          app/Models/Usuario.php
+          EOF
+          cat >/tmp/v38/back-new.txt <<'EOF'
+          app/Http/Controllers/UbicacionesControlador.php
+          EOF
+          cat >/tmp/v38/front-existing.txt <<'EOF'
+          assets/js/app-produccion.js
+          assets/js/catalogos-api.js
+          assets/js/modulos-oficiales.js
+          assets/js/proveedores-productos.js
+          assets/js/usuarios.js
+          EOF
+          cat >/tmp/v38/front-new.txt <<'EOF'
+          assets/js/ubicaciones.js
+          assets/css/proveedores-ubicaciones-v38.css
+          EOF
+      - name: Preparar FTPS seguro y pruebas con navegador
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          mkdir -p /tmp/v38/browser
+          cd /tmp/v38/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Obtener y resguardar archivos productivos y protecciones (solo GET)
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          {
+            echo 'set cmd:fail-exit yes'
+            echo 'set net:timeout 45'
+            echo 'set net:max-retries 2'
+            echo 'set ftp:ssl-force yes'
+            echo 'set ftp:ssl-protect-data yes'
+            echo 'set ssl:verify-certificate yes'
+            printf 'open -u "%s","%s" ftp://%s\n' "$FTP_USER" "$FTP_PASSWORD" "$FTP_HOST"
+            while IFS= read -r f; do
+              mkdir -p "/tmp/v38/back_before/$(dirname "$f")"
+              printf 'get "/htdocs/api-v2/%s" -o "/tmp/v38/back_before/%s"\n' "$f" "$f"
+            done </tmp/v38/back-existing.txt
+            while IFS= read -r f; do
+              mkdir -p "/tmp/v38/front_before/$(dirname "$f")"
+              printf 'get "/htdocs/%s" -o "/tmp/v38/front_before/%s"\n' "$f" "$f"
+            done </tmp/v38/front-existing.txt
+            echo 'get /htdocs/index.html -o /tmp/v38/front_before/index.html'
+            echo 'get /htdocs/api-v2/.htaccess -o /tmp/v38/guard-private'
+            echo 'get /htdocs/api/.htaccess -o /tmp/v38/guard-gateway'
+            echo 'get /htdocs/api/index.php -o /tmp/v38/gateway-before'
+            echo 'cls -1 /htdocs/api-v2/app/Http/Controllers > /tmp/v38/back-controller-list'
+            echo 'cls -1 /htdocs/assets/js > /tmp/v38/front-js-list'
+            echo 'cls -1 /htdocs/assets/css > /tmp/v38/front-css-list'
+            echo 'bye'
+          } >/tmp/v38/get.lftp
+          lftp -f /tmp/v38/get.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/v38/guard-private
+          grep -Fq 'HTTP_AUTHORIZATION' /tmp/v38/guard-gateway
+          grep -Fq 'rutahd2_api_ready' /tmp/v38/gateway-before
+          ! grep -Fxq 'UbicacionesControlador.php' /tmp/v38/back-controller-list
+          ! grep -Fxq 'ubicaciones.js' /tmp/v38/front-js-list
+          ! grep -Fxq 'proveedores-ubicaciones-v38.css' /tmp/v38/front-css-list
+      - name: Construir tres fusiones PHP y parche HTML conservando V37 y branding
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, subprocess, shutil
+          root=pathlib.Path('/tmp/v38')
+          base_repo=pathlib.Path('/tmp/v38back')
+          target_repo=pathlib.Path('/tmp/v38front')
+          backbase='83296bb5acfe6c69309ec308c8da0c3df6a3c764'
+          frontbase='089699db01a9f725d324ee62fba04d38eec479af'
+          differs={
+            'routes/api.php',
+            'app/Http/Controllers/EntidadesComercialesControlador.php',
+            'app/Http/Controllers/RecursoControlador.php',
+          }
+          backfiles=(root/'back-existing.txt').read_text().splitlines()
+          frontfiles=(root/'front-existing.txt').read_text().splitlines()
+          for rel in backfiles:
+            old=root/'back_before'/rel
+            dest=root/'back_after'/rel
+            dest.parent.mkdir(parents=True,exist_ok=True)
+            base=subprocess.check_output(['git','-C',str(base_repo),'show',backbase+':'+rel])
+            new=(base_repo/rel).read_bytes()
+            if rel in differs:
+              basefile=root/'backend-base.tmp';ours=root/'backend-new.tmp'
+              basefile.write_bytes(base);ours.write_bytes(new)
+              response=subprocess.run(['git','merge-file','-p',str(old),str(basefile),str(ours)],
+                capture_output=True)
+              if response.returncode:
+                raise SystemExit('STOP: conflicto en '+rel+'; no publicar.')
+              dest.write_bytes(response.stdout)
+              print('INTEGRACION 3-WAY',rel,'sin conflictos')
+            else:
+              if old.read_bytes()!=base:
+                raise SystemExit('STOP: divergencia de base en '+rel+'; no publicar.')
+              dest.write_bytes(new)
+          for rel in (root/'back-new.txt').read_text().splitlines():
+            dest=root/'back_after'/rel
+            dest.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(base_repo/rel,dest)
+          for rel in frontfiles:
+            old=root/'front_before'/rel
+            baseline=subprocess.check_output(['git','-C',str(target_repo),'show',frontbase+':'+rel])
+            if old.read_bytes()!=baseline:
+              raise SystemExit('STOP: divergencia del frontend '+rel+'; no publicar.')
+            dest=root/'front_after'/rel
+            dest.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(target_repo/rel,dest)
+          for rel in (root/'front-new.txt').read_text().splitlines():
+            dest=root/'front_after'/rel
+            dest.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(target_repo/rel,dest)
+          # Parchar directamente el index existente. Conservar logo oficial,
+          # las correcciones previas y sus versiones. Nunca sobreescribir con demo.
+          live=(root/'front_before/index.html').read_text('utf-8')
+          target=(target_repo/'index.html').read_text('utf-8')
+          start='            <div class="hd-location-menu" id="ubicacionesMenu">'
+          end='            <button type="button" data-nav="usuarios"'
+          assert target.count(start)==1 and target.count(end)==1
+          block=target[target.index(start):target.index(end)]
+          def replace1(before,after):
+            global live
+            if live.count(before)!=1:
+              raise SystemExit('STOP: index.html remoto divergente en ancla V38; no publicar.')
+            live=live.replace(before,after)
+          css='  <link rel="stylesheet" href="assets/css/productos-costo-promedio-v37.css?v=20261122-cost37">'
+          replace1(css,css+chr(10)+
+            '  <link rel="stylesheet" href="assets/css/proveedores-ubicaciones-v38.css?v=20261122-geo38">')
+          replace1(end,block+end)
+          for name,old_version in [
+            ('catalogos-api.js','v31'),('usuarios.js','nav35'),
+            ('modulos-oficiales.js','nav35'),('proveedores-productos.js','nav35'),
+            ('app-produccion.js','nav35')]:
+            replace1('assets/js/'+name+'?v=20261122-'+old_version,
+              'assets/js/'+name+'?v=20261122-geo38')
+          mod='  <script src="assets/js/modulos-oficiales.js?v=20261122-geo38" defer></script>'
+          replace1(mod,
+            '  <script src="assets/js/ubicaciones.js?v=20261122-geo38" defer></script>'+
+            chr(10)+mod)
+          assert 'hd-branding/logo-hd-site.png' in live
+          assert 'productos-costo-promedio-v37.css' in live
+          assert 'id="ubicacionesSubnav"' in live
+          assert live.count('ubicaciones.js?v=20261122-geo38')==1
+          (root/'front_after/index.html').write_text(live,'utf-8')
+          print('INDEX_HTML_V38: cambios integrados, logo y V37 conservados')
+          PY
+          while IFS= read -r f; do php -l "/tmp/v38/back_after/$f"; done </tmp/v38/back-existing.txt
+          while IFS= read -r f; do php -l "/tmp/v38/back_after/$f"; done </tmp/v38/back-new.txt
+          while IFS= read -r f; do node --check "/tmp/v38/front_after/$f"; done </tmp/v38/front-existing.txt
+          node --check /tmp/v38/front_after/assets/js/ubicaciones.js
+          grep -Fq 'COUNT(DISTINCT producto_id)' /tmp/v38/back_after/app/Http/Controllers/ProductosProveedoresControlador.php
+          grep -Fq 'UbicacionesControlador' /tmp/v38/back_after/routes/api.php
+          grep -Fq 'ciudad_id' /tmp/v38/back_after/app/Http/Controllers/EntidadesComercialesControlador.php
+      - name: Mantener respaldo previo accesible para rollback
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v38-archivos-anteriores
+          path: |
+            /tmp/v38/back_before/
+            /tmp/v38/front_before/
+            /tmp/v38/guard-private
+            /tmp/v38/guard-gateway
+            /tmp/v38/gateway-before
+          retention-days: 30
+          if-no-files-found: error
+      - name: Desplegar backend compatible y después frontend, HTML último
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/v38/upload-started
+          {
+            echo 'set cmd:fail-exit yes'
+            echo 'set net:timeout 45'
+            echo 'set net:max-retries 2'
+            echo 'set ftp:ssl-force yes'
+            echo 'set ftp:ssl-protect-data yes'
+            echo 'set ssl:verify-certificate yes'
+            printf 'open -u "%s","%s" ftp://%s\n' "$FTP_USER" "$FTP_PASSWORD" "$FTP_HOST"
+            while IFS= read -r f; do
+              printf 'put "/tmp/v38/back_after/%s" -o "/htdocs/api-v2/%s"\n' "$f" "$f"
+            done </tmp/v38/back-existing.txt
+            while IFS= read -r f; do
+              printf 'put "/tmp/v38/back_after/%s" -o "/htdocs/api-v2/%s"\n' "$f" "$f"
+            done </tmp/v38/back-new.txt
+            while IFS= read -r f; do
+              printf 'put "/tmp/v38/front_after/%s" -o "/htdocs/%s"\n' "$f" "$f"
+            done </tmp/v38/front-existing.txt
+            while IFS= read -r f; do
+              printf 'put "/tmp/v38/front_after/%s" -o "/htdocs/%s"\n' "$f" "$f"
+            done </tmp/v38/front-new.txt
+            echo 'put /tmp/v38/front_after/index.html -o /htdocs/index.html'
+            echo 'bye'
+          } >/tmp/v38/upload.lftp
+          lftp -f /tmp/v38/upload.lftp >/dev/null
+      - name: Validar checksum de cada archivo y protección del servidor
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          {
+            echo 'set cmd:fail-exit yes'
+            echo 'set net:timeout 45'
+            echo 'set net:max-retries 2'
+            echo 'set ftp:ssl-force yes'
+            echo 'set ftp:ssl-protect-data yes'
+            echo 'set ssl:verify-certificate yes'
+            printf 'open -u "%s","%s" ftp://%s\n' "$FTP_USER" "$FTP_PASSWORD" "$FTP_HOST"
+            for list in back-existing back-new; do
+              while IFS= read -r f; do
+                mkdir -p "/tmp/v38/verified_back/$(dirname "$f")"
+                printf 'get "/htdocs/api-v2/%s" -o "/tmp/v38/verified_back/%s"\n' "$f" "$f"
+              done <"/tmp/v38/$list.txt"
+            done
+            for list in front-existing front-new; do
+              while IFS= read -r f; do
+                mkdir -p "/tmp/v38/verified_front/$(dirname "$f")"
+                printf 'get "/htdocs/%s" -o "/tmp/v38/verified_front/%s"\n' "$f" "$f"
+              done <"/tmp/v38/$list.txt"
+            done
+            echo 'get /htdocs/index.html -o /tmp/v38/verified_front/index.html'
+            echo 'get /htdocs/api-v2/.htaccess -o /tmp/v38/guard-private-after'
+            echo 'get /htdocs/api/.htaccess -o /tmp/v38/guard-gateway-after'
+            echo 'get /htdocs/api/index.php -o /tmp/v38/gateway-after'
+            echo 'bye'
+          } >/tmp/v38/check.lftp
+          lftp -f /tmp/v38/check.lftp >/dev/null
+          for list in back-existing back-new; do
+            while IFS= read -r f; do
+              cmp -s "/tmp/v38/back_after/$f" "/tmp/v38/verified_back/$f"
+            done <"/tmp/v38/$list.txt"
+          done
+          for list in front-existing front-new; do
+            while IFS= read -r f; do
+              cmp -s "/tmp/v38/front_after/$f" "/tmp/v38/verified_front/$f"
+            done <"/tmp/v38/$list.txt"
+          done
+          cmp -s /tmp/v38/front_after/index.html /tmp/v38/verified_front/index.html
+          cmp -s /tmp/v38/guard-private /tmp/v38/guard-private-after
+          cmp -s /tmp/v38/guard-gateway /tmp/v38/guard-gateway-after
+          cmp -s /tmp/v38/gateway-before /tmp/v38/gateway-after
+          echo '18 archivos de V38 verificados por integridad FTPS y protecciones inalteradas.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Prueba del sitio público, recursos y autenticación de rutas
+        working-directory: /tmp/v38/browser
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/?v38=20261122',{
+              waitUntil:'domcontentloaded',timeout:55000});
+            await page.waitForTimeout(9000);
+            const evidence=await page.evaluate(async()=>{
+              const index=[...document.querySelectorAll('script[src]')].map(x=>x.getAttribute('src'));
+              const styles=[...document.querySelectorAll('link[rel=stylesheet]')].map(x=>x.getAttribute('href'));
+              const paths=['/api/v1/estado','/api/v1/ubicaciones/paises',
+                '/api/v1/proveedores/mix',
+                '/assets/js/ubicaciones.js?v=20261122-geo38',
+                '/assets/css/proveedores-ubicaciones-v38.css?v=20261122-geo38'];
+              const requests=await Promise.all(paths.map(async path=>{
+                const r=await fetch(path,{headers:{Accept:'application/json'},cache:'no-store'});
+                return {path,status:r.status};
+              }));
+              return {menu:!!document.querySelector('#ubicacionesSubnav'),
+                label:document.title,logo:!!document.querySelector('.brand-logo'),
+                api:requests,scripts:index,styles};
+            });
+            const status=path=>evidence.api.find(x=>x.path.startsWith(path))?.status;
+            console.log('V38_SMOKE',{
+              menu:evidence.menu,logo:evidence.logo,
+              statuses:evidence.api,
+              geoScript:evidence.scripts.some(x=>x.includes('ubicaciones.js?v=20261122-geo38')),
+              geoCss:evidence.styles.some(x=>x.includes('proveedores-ubicaciones-v38.css?v=20261122-geo38'))
+            });
+            if(!evidence.menu||!evidence.logo||
+              !evidence.scripts.some(x=>x.includes('ubicaciones.js?v=20261122-geo38'))||
+              !evidence.styles.some(x=>x.includes('proveedores-ubicaciones-v38.css?v=20261122-geo38'))||
+              status('/api/v1/estado')!==200||
+              status('/api/v1/ubicaciones/paises')!==401||
+              status('/api/v1/proveedores/mix')!==401||
+              status('/assets/js/ubicaciones.js')!==200||
+              status('/assets/css/proveedores-ubicaciones-v38.css')!==200)
+                throw Error('V38 smoke falló; ejecutar rollback');
+          }finally{await browser.close();}
+          JS
+          echo 'V38 publicada: frontend nuevo, JSON API operativo y endpoints privados con JWT.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Rollback de todos los archivos previos si falla cualquier paso posterior al upload
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/v38/upload-started ] && [ -s /tmp/v38/front_before/index.html ]; then
+            {
+              echo 'set cmd:fail-exit yes'
+              echo 'set net:timeout 45'
+              echo 'set net:max-retries 3'
+              echo 'set ftp:ssl-force yes'
+              echo 'set ftp:ssl-protect-data yes'
+              echo 'set ssl:verify-certificate yes'
+              printf 'open -u "%s","%s" ftp://%s\n' "$FTP_USER" "$FTP_PASSWORD" "$FTP_HOST"
+              while IFS= read -r f; do
+                printf 'put "/tmp/v38/back_before/%s" -o "/htdocs/api-v2/%s"\n' "$f" "$f"
+              done </tmp/v38/back-existing.txt
+              while IFS= read -r f; do
+                printf 'put "/tmp/v38/front_before/%s" -o "/htdocs/%s"\n' "$f" "$f"
+              done </tmp/v38/front-existing.txt
+              echo 'put /tmp/v38/front_before/index.html -o /htdocs/index.html'
+              # La carga puede fallar antes de crear todos los archivos nuevos.
+              # No abortar por un "rm" de archivo inexistente durante el rollback.
+              echo 'set cmd:fail-exit no'
+              echo 'rm /htdocs/api-v2/app/Http/Controllers/UbicacionesControlador.php'
+              echo 'rm /htdocs/assets/js/ubicaciones.js'
+              echo 'rm /htdocs/assets/css/proveedores-ubicaciones-v38.css'
+              echo 'set cmd:fail-exit yes'
+              echo 'bye'
+            } >/tmp/v38/rollback.lftp
+            lftp -f /tmp/v38/rollback.lftp >/dev/null ||
+              echo '::error::ROLLBACK INCOMPLETO: usar artefacto de respaldo y verificar vía FTPS'
+          else
+            echo 'No hubo modificaciones productivas que requieran rollback.'
+          fi
+      - name: Borrar scripts temporales con credenciales de FTPS
+        if: always()
+        run: |
+          rm -f /tmp/v38/get.lftp /tmp/v38/upload.lftp /tmp/v38/check.lftp /tmp/v38/rollback.lftp

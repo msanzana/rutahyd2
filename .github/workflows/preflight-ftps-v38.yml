@@ -1,0 +1,112 @@
+name: V38 preflight FTPS solo lectura (sin publicar)
+on:
+  push:
+    branches: [feature/proveedores-ubicaciones-sii-v38]
+    paths:
+      - .github/workflows/preflight-ftps-v38.yml
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  comparar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACK_BASE: 83296bb5acfe6c69309ec308c8da0c3df6a3c764
+      FRONT_BASE: 089699db01a9f725d324ee62fba04d38eec479af
+    steps:
+      - name: Preparar FTPS y versiones de referencia
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lftp
+          git clone --quiet --depth 1 --branch feature/proveedores-ubicaciones-sii-v38 https://github.com/msanzana/rutahyd2.git /tmp/b
+          git clone --quiet --depth 1 --branch feature/proveedores-ubicaciones-sii-v38 https://github.com/msanzana/rutahyd2front.git /tmp/f
+          git -C /tmp/b fetch --quiet --depth 1 origin "$BACK_BASE"
+          git -C /tmp/f fetch --quiet --depth 1 origin "$FRONT_BASE"
+          mkdir -p /tmp/v38-preflight/back /tmp/v38-preflight/front
+          cat >/tmp/v38-preflight/backend.txt <<'EOF'
+          routes/api.php
+          app/Http/Controllers/EntidadesComercialesControlador.php
+          app/Http/Controllers/ProductosProveedoresControlador.php
+          app/Http/Controllers/RecursoControlador.php
+          app/Http/Controllers/UsuariosControlador.php
+          app/Models/Bodega.php
+          app/Models/Cliente.php
+          app/Models/Proveedor.php
+          app/Models/Usuario.php
+          EOF
+          cat >/tmp/v38-preflight/frontend.txt <<'EOF'
+          assets/js/app-produccion.js
+          assets/js/catalogos-api.js
+          assets/js/modulos-oficiales.js
+          assets/js/proveedores-productos.js
+          assets/js/usuarios.js
+          EOF
+      - name: Leer archivos remotos sin sobrescribir ni modificar la base
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          {
+            echo 'set cmd:fail-exit yes'
+            echo 'set net:timeout 45'
+            echo 'set net:max-retries 2'
+            echo 'set ftp:ssl-force yes'
+            echo 'set ftp:ssl-protect-data yes'
+            echo 'set ssl:verify-certificate yes'
+            printf 'open -u "%s","%s" ftp://%s\n' "$FTP_USER" "$FTP_PASSWORD" "$FTP_HOST"
+            while IFS= read -r path; do
+              mkdir -p "/tmp/v38-preflight/back/$(dirname "$path")"
+              printf 'get "/htdocs/api-v2/%s" -o "/tmp/v38-preflight/back/%s"\n' "$path" "$path"
+            done </tmp/v38-preflight/backend.txt
+            while IFS= read -r path; do
+              mkdir -p "/tmp/v38-preflight/front/$(dirname "$path")"
+              printf 'get "/htdocs/%s" -o "/tmp/v38-preflight/front/%s"\n' "$path" "$path"
+            done </tmp/v38-preflight/frontend.txt
+            echo 'get /htdocs/index.html -o /tmp/v38-preflight/front/index.html'
+            echo 'get /htdocs/api-v2/.htaccess -o /tmp/v38-preflight/private-guard'
+            echo 'get /htdocs/api/.htaccess -o /tmp/v38-preflight/gateway-guard'
+            echo 'get /htdocs/api/index.php -o /tmp/v38-preflight/gateway'
+            echo 'bye'
+          } >/tmp/v38-preflight/read.lftp
+          lftp -f /tmp/v38-preflight/read.lftp >/dev/null
+      - name: Comparar fuente base con archivos productivos (bloquear divergencias)
+        run: |
+          set -euo pipefail
+          failures=0
+          while IFS= read -r path; do
+            git -C /tmp/b show "$BACK_BASE:$path" > /tmp/v38-preflight/expected-before
+            if cmp -s /tmp/v38-preflight/expected-before "/tmp/v38-preflight/back/$path"; then
+              echo "COINCIDE BACK $path"
+            else
+              echo "::warning::DIVERGE BACK $path"
+              failures=$((failures+1))
+            fi
+          done </tmp/v38-preflight/backend.txt
+          while IFS= read -r path; do
+            git -C /tmp/f show "$FRONT_BASE:$path" > /tmp/v38-preflight/expected-before
+            if cmp -s /tmp/v38-preflight/expected-before "/tmp/v38-preflight/front/$path"; then
+              echo "COINCIDE FRONT $path"
+            else
+              echo "::warning::DIVERGE FRONT $path"
+              failures=$((failures+1))
+            fi
+          done </tmp/v38-preflight/frontend.txt
+          grep -Fq 'Require all denied' /tmp/v38-preflight/private-guard
+          grep -Fq 'HTTP_AUTHORIZATION' /tmp/v38-preflight/gateway-guard
+          grep -Fq 'rutahd2_api_ready' /tmp/v38-preflight/gateway
+          grep -Fq 'productos-costo-promedio-v37.css' /tmp/v38-preflight/front/index.html
+          grep -Fq 'hd-branding/logo-hd-site.png' /tmp/v38-preflight/front/index.html
+          echo "ARCHIVOS_DIVERGENTES=$failures"
+          echo "Archivos de producción leídos, sin cambios FTPS ni SQL." >> "$GITHUB_STEP_SUMMARY"
+          if [ "$failures" -ne 0 ]; then
+            echo "::error::No desplegar V38 automáticamente: hay archivos diferentes a la fuente base."
+            exit 1
+          fi

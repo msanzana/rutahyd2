@@ -13,6 +13,7 @@ final class Bodega extends Model
     protected $fillable = [
         'codigo',
         'nombre',
+        'ciudad_id',
         'tipo',
         'activo',
     ];

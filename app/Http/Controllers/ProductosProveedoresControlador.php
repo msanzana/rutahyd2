@@ -11,6 +11,45 @@ use Illuminate\Support\Facades\Validator;
 /** Contratos de abastecimiento por producto y proveedor; nunca altera inventario. */
 final class ProductosProveedoresControlador extends Controller
 {
+    /**
+     * Directorio de proveedores con cardinalidad real del mix (producto distinto),
+     * sin crear recepciones ni materializar contadores sujetos a desincronización.
+     */
+    public function mix(Request $request)
+    {
+        $input=$request->validate([
+            'page'=>['sometimes','integer','min:1','max:10000'],
+            'por_pagina'=>['sometimes','integer','min:1','max:25'],
+            'buscar'=>['sometimes','nullable','string','max:120'],
+        ]);
+        $counts=DB::table('productos_proveedores')
+            ->where('activo',1)
+            ->select('proveedor_id')
+            ->selectRaw('COUNT(DISTINCT producto_id) AS cantidad_productos_mix')
+            ->groupBy('proveedor_id');
+        $query=DB::table('proveedores as prov')
+            ->leftJoinSub($counts,'mix',fn($join)=>
+                $join->on('mix.proveedor_id','=','prov.id'))
+            ->leftJoin('ciudades as ci','ci.id','=','prov.ciudad_id')
+            ->leftJoin('comunas as co','co.id','=','ci.comuna_id')
+            ->leftJoin('provincias as pr','pr.id','=','co.provincia_id')
+            ->leftJoin('regiones as re','re.id','=','pr.region_id')
+            ->leftJoin('paises as pa','pa.id','=','re.pais_id')
+            ->select('prov.*','ci.nombre as ciudad','co.nombre as comuna_nombre',
+                'pr.nombre as provincia','re.nombre as region','pa.nombre as pais')
+            ->selectRaw('COALESCE(mix.cantidad_productos_mix,0) AS cantidad_productos_mix');
+        if(!empty($input['buscar'])){
+            $like='%'.trim($input['buscar']).'%';
+            $query->where(fn($q)=>$q->where('prov.nombre','like',$like)
+                ->orWhere('prov.razon_social','like',$like)
+                ->orWhere('prov.rut','like',$like)
+                ->orWhere('prov.correo_electronico','like',$like));
+        }
+        return response()->json($query->orderBy('prov.nombre')->orderBy('prov.id')
+            ->paginate((int)($input['por_pagina']??25)))
+            ->header('Cache-Control','no-store');
+    }
+
     private function base()
     {
         return DB::table('productos_proveedores as pp')

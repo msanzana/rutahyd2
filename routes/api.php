@@ -18,6 +18,7 @@ use App\Http\Controllers\ProductosProveedoresControlador;
 use App\Http\Controllers\CodigosBarrasProductoControlador;
 use App\Http\Controllers\PerfilesCatalogosControlador;
 use App\Http\Controllers\UsuariosControlador;
+use App\Http\Controllers\UbicacionesControlador;
 use App\Http\Controllers\RecuperacionContrasenaControlador;
 
 // El frontend pregunta /api/v1/estado; la ruta antigua /api/estado sigue disponible.
@@ -28,6 +29,22 @@ Route::post('/v1/recuperacion/solicitar',[RecuperacionContrasenaControlador::cla
 Route::post('/v1/recuperacion/restablecer',[RecuperacionContrasenaControlador::class,'restablecer'])->middleware('throttle:5,1');
 
 Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
+    // Geografía normalizada. Lecturas JWT para entidades comerciales;
+    // edición de países/regiones/provincias/comunas/ciudades: solo administrador.
+    Route::get('/ubicaciones/jerarquia/{ciudadId}',[UbicacionesControlador::class,'jerarquia'])
+        ->whereNumber('ciudadId');
+    Route::get('/ubicaciones/{tipo}',[UbicacionesControlador::class,'listar'])
+        ->where('tipo','paises|regiones|provincias|comunas|ciudades');
+    Route::post('/ubicaciones/{tipo}',[UbicacionesControlador::class,'crear'])
+        ->where('tipo','paises|regiones|provincias|comunas|ciudades');
+    Route::put('/ubicaciones/{tipo}/{id}',[UbicacionesControlador::class,'actualizar'])
+        ->where('tipo','paises|regiones|provincias|comunas|ciudades')->whereNumber('id');
+    Route::delete('/ubicaciones/{tipo}/{id}',[UbicacionesControlador::class,'desactivar'])
+        ->where('tipo','paises|regiones|provincias|comunas|ciudades')->whereNumber('id');
+    // Vista Mix de productos por proveedor: contar vínculos únicos desde SQL, sin recepciones.
+    Route::get('/proveedores/mix',[ProductosProveedoresControlador::class,'mix'])
+        ->middleware('permiso.rutahd:compras.gestionar')
+        ->middleware('submodulo.rutahd:proveedores_productos,ver');
     Route::get('/catalogos/{catalogo}',[CatalogoComercialControlador::class,'listar']);
     Route::post('/catalogos/{catalogo}',[CatalogoComercialControlador::class,'crear']);
     Route::put('/catalogos/{catalogo}/{id}',[CatalogoComercialControlador::class,'actualizar'])->whereNumber('id');

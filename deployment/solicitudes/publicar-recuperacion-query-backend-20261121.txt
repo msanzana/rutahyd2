@@ -4,3 +4,4 @@ mysql=sin_modificaciones
 smtp=mantener_actual
 jwt=conservar_activo
 firecrawl=no
+reintento_ftps_put_directo=20261122-001

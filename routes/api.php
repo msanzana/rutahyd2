@@ -55,6 +55,8 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
         ->whereNumber('clienteId');
     Route::put('/clientes/{clienteId}/lista-precio',[ListasPreciosClientesControlador::class,'asignar'])
         ->whereNumber('clienteId');
+    Route::get('/ventas/clientes-disponibles',[ListasPreciosClientesControlador::class,'clientesVenta']);
+    Route::get('/ventas/productos-disponibles',[ListasPreciosClientesControlador::class,'productosVenta']);
     Route::get('/ventas/precio-cliente',[ListasPreciosClientesControlador::class,'cotizar']);
 
     // Catálogo de productos de cada proveedor. No modifica inventario, costos históricos ni recepciones.

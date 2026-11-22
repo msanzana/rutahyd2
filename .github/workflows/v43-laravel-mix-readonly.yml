@@ -65,11 +65,11 @@ jobs:
               $json=json_decode((string)$response->getContent(),true,512,JSON_THROW_ON_ERROR);
               $aliases=$app->make('router')->getMiddleware();
               $out['alias_submodulo']=($aliases['submodulo.rutahd']??null)===
-                \\App\\Http\\Middleware\\AutorizarSubmodulo::class;
-              $out['clase_submodulo']=class_exists(\\App\\Http\\Middleware\\AutorizarSubmodulo::class);
-              $out['servicio_submodulo']=class_exists(\\App\\Services\\PermisosSubmodulos::class);
-              $out['ddl23_roles_submodulos']=\\Illuminate\\Support\\Facades\\DB::getSchemaBuilder()->hasTable('roles_submodulos');
-              $out['ddl23_preferencias']=\\Illuminate\\Support\\Facades\\DB::getSchemaBuilder()->hasTable('preferencias_usuarios');
+                \App\Http\Middleware\AutorizarSubmodulo::class;
+              $out['clase_submodulo']=class_exists(\App\Http\Middleware\AutorizarSubmodulo::class);
+              $out['servicio_submodulo']=class_exists(\App\Services\PermisosSubmodulos::class);
+              $out['ddl23_roles_submodulos']=\Illuminate\Support\Facades\DB::getSchemaBuilder()->hasTable('roles_submodulos');
+              $out['ddl23_preferencias']=\Illuminate\Support\Facades\DB::getSchemaBuilder()->hasTable('preferencias_usuarios');
               $out['ok']=$response->getStatusCode()===200 && isset($json['data']) 
                 && $out['alias_submodulo'] && $out['clase_submodulo'] && $out['servicio_submodulo'];
               $out['http']=$response->getStatusCode();
@@ -115,6 +115,7 @@ jobs:
           put /tmp/v43-laravel/probe.php -o /htdocs/$AUDIT_NAME
           bye
           EOF
+          touch /tmp/v43-laravel/upload-started
           lftp -f /tmp/v43-laravel/put.lftp >/dev/null
       - name: Ejecutar respuesta del controlador y publicar solamente resultados no sensibles
         working-directory: /tmp/v43-laravel/browser
@@ -148,7 +149,7 @@ jobs:
         if: always()
         run: |
           set +x
-          if [[ -n "$AUDIT_NAME" ]];then
+          if [[ -n "$AUDIT_NAME" && -f /tmp/v43-laravel/upload-started ]];then
             cat >/tmp/v43-laravel/delete.lftp <<EOF
           set cmd:fail-exit yes
           set ftp:ssl-force yes

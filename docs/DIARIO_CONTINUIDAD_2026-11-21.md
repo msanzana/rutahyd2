@@ -557,3 +557,10 @@ El titular pidió reemplazar los triggers propuestos por **funciones de backend 
 - Workflow FTPS de frontend `https://github.com/msanzana/rutahyd2/actions/runs/44988125009`: iniciado, estado por cerrar cuando termine la verificación.
 
 **Limitaciones honestas:** no se realizó una venta real de prueba en MariaDB productiva (no crear datos sin consentimiento); se usó MySQL temporal, sesión JWT ficticia y navegador con API interceptada. No se confirmó manualmente el esquema productivo mediante phpMyAdmin, solo la declaración de que el titular importó DDL. La ilustración realista de ventas en ruta para login se generó como recurso visual separado, aún no integrada como archivo publicado.
+
+
+### Cierre de publicación de precios v25 en InfinityFree — 22-11-2026
+- Frontend publicado con backup, HTML al final y comprobación de bytes: https://github.com/msanzana/rutahyd2/actions/runs/44988125009 **éxito**.
+- Navegador Chromium contra el sitio real en 1440 y 390 px: https://github.com/msanzana/rutahyd2/actions/runs/44988349225 **éxito**. Verifica sección Precios sin presentación antigua, costo editable, caja responsiva sin overflow, selector cliente/producto con tarifa Mayoristas y precio efectivo. Capturas artifact `capturas-precios-v25`.
+- Este smoke usa JWT ficticio e intercepta la API, no confirma datos privados de MariaDB real. Los endpoints auténticos de precios, clientes vendedores y productos vendedores se verificaron por 401 sin JWT. No se ejecutaron ventas de prueba ni nuevos SQL.
+- La fotografía realista para login fue generada como imagen independiente, pero **no se integró todavía en los archivos de frontend publicados**. No confundir imagen creada con pantalla actualizada.

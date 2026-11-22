@@ -29,3 +29,9 @@ Origen: instrucción expresa del titular del proyecto.
 - Todos los controles visibles de tipo activado/desactivado que antes utilizaban una casilla se presentan como **switches compactos violetas** en el frontend Ruta H&D V2, manteniendo legibilidad y adaptación móvil.
 - Mantener comportamiento nativo del control de formulario, estado checked, navegación por teclado, foco visible y tratamiento de disabled; no alterar semánticas de campos de selección múltiple donde implique romper permisos o relaciones.
 - Conservar el switch temático oscuro existente, sin duplicarlo.
+
+## Regla visual de paginación y checkboxes — 2026-11-22
+- Las páginas del sistema deben representarse con **números en círculos**; la página actual lleva el **violeta corporativo** como fondo y contraste legible, marcado con `aria-current=page`.
+- Mantener Anterior/Siguiente, puntos suspensivos para secuencias extensas y máximo 25 registros por página. La navegación remota siempre debe consultar el número de página real en Laravel, sin reutilizar filas de otra página.
+- Los checkboxes de selección múltiple (p. ej., permisos Ver/Gestionar) muestran esquinas suavemente **redondeadas**, marca de verificación legible, foco accesible y soporte de teclado. Los activadores binarios independientes mantienen sus switches corporativos.
+- Interfaces compactas y responsive, con contraste violeta y estados deshabilitado/foco perceptibles.

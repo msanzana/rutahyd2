@@ -41,3 +41,12 @@ Para cada producto, unificar unidades de todas las presentaciones:
 - Acordar qué costo neto prima (precio por contrato, orden de compra, factura), flete/descuentos y devoluciones: esta primera versión supone **costo neto unitario real confirmado de la recepción** y exige validación explícita.
 - Confirmar inventario inicial y `unidades_por_envase` de presentaciones históricas antes de costear Q0; no modificar retroactivamente presentaciones con stock.
 - Dejar para una etapa específica reversas, mermas, notas de crédito, costos por lotes y valorización histórica.
+
+
+## Avance implementado y comprobado — 2026-11-22
+
+- `database/espanol/36_recepciones_mercaderia_borrador_ddl.sql` quedó validado en MariaDB efímera 11.4, con dos importaciones de control, claves FK y columnas auditadas por `SHOW TABLES`, `SHOW COLUMNS` y `SHOW CREATE TABLE`. Run de CI: https://github.com/msanzana/rutahyd2/actions/runs/45075353946 . Se corrigió una restricción `CHECK` de MariaDB que refería a una columna FK; la consistencia del confirmador queda a cargo del backend transaccional.
+- `app/Services/CalculadoraCostoPromedioRecepcion.php`: motor independiente de cálculo de CPP que procesa una o varias líneas mediante `CAST(... AS DECIMAL)` de MariaDB y parámetros vinculados, sin usar float ni mutar datos. Bloquea stock anterior positivo sin valoración, cantidad no positiva, exceso de precisión y argumentos inválidos.
+- `tests/calculadora_cpp_v44.php`: cinco escenarios positivos y cinco rechazos, ejecutados contra MariaDB CI, completados con éxito https://github.com/msanzana/rutahyd2/actions/runs/45075548485 . **No hubo conexión a InfinityFree en esa CI.**
+- Próximo bloque NO IMPLEMENTADO: servicio de confirmación que escriba el movimiento y el saldo por bodega, vincule recepción con código de compra, actualice costo promedio y último recibo en transacción con idempotencia, permisos y rollback; frontend CRUD/popup correspondiente y pruebas completas.
+- **No ejecutar DDL36 en producción hasta que el backend y las pruebas end-to-end estén listos.** La regla excluye toda consulta a `information_schema`.

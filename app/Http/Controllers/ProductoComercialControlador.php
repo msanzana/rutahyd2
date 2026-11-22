@@ -23,7 +23,6 @@ final class ProductoComercialControlador extends Controller
         'marcaId' => ['marcas','marca_id'],
         'modeloId' => ['modelos','modelo_id','marca_id','marcaId'],
         'tipoUnidadId' => ['tipos_unidad','tipo_unidad_id'],
-        'gramajeId' => ['gramajes','gramaje_id'],
         'tipoEnvasadoId' => ['tipos_envasado','tipo_envasado_id'],
         'condicionTributariaId' => ['condiciones_tributarias','condicion_tributaria_id'],
     ];
@@ -134,7 +133,7 @@ final class ProductoComercialControlador extends Controller
             'descripcion'=>['sometimes','nullable','string','max:10000'],
             'activo'=>['sometimes','boolean'],
             'proveedorId'=>['sometimes','nullable','integer','min:1'],
-            'clasificacion'=>[$required,'array','size:10'],
+            'clasificacion'=>[$required,'array','size:9'],
             'presentacion'=>[$required,'array'],
             'presentacion.id'=>['sometimes','nullable','integer','min:1'],
             'presentacion.nombre'=>[$required,'string','min:1','max:150'],

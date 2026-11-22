@@ -18,19 +18,22 @@ final class ListasPreciosControlador extends Controller
 {
     public function __construct(private GestionListasPrecios $precios) {}
 
-    private function admin(Request $request): void
+    private function admin(Request $request,bool $write=true): void
     {
         $user=$request->user();
         abort_unless($user&&$user->activo,401);
         if($user->rol?->codigo==='administrador')return;
         abort_unless(DB::table('roles_permisos')->join('permisos','permisos.id','=','roles_permisos.permiso_id')
             ->where('roles_permisos.rol_id',$user->rol_id)
-            ->where('permisos.codigo','productos.gestionar')->exists(),403,
+            ->whereIn('permisos.codigo',$write
+                ? ['productos.gestionar']
+                : ['productos.gestionar','clientes.gestionar','ventas.ver','ventas.gestionar'])
+            ->exists(),403,
             'Tu perfil no puede mantener listas de precios');
     }
     public function listar(Request $request)
     {
-        $this->admin($request);
+        $this->admin($request,false);
         $data=$request->validate([
             'buscar'=>['sometimes','nullable','string','max:120'],
             'activo'=>['sometimes','boolean'],

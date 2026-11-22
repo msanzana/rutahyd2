@@ -1,0 +1,1 @@
+Ruta H&D V45: publicar únicamente mejoras de interfaz mix, checkbox de buscador y avisos de validación, después de CI frontend 45081149629 aprobada. Parchear los 3 JS contra contenido real en producción, añadir CSS y versionar HTML. Respaldar, cotejar bytes, rollback automático y no tocar backend ni BBDD. 2026-11-22.

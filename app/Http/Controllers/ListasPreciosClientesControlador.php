@@ -40,6 +40,61 @@ final class ListasPreciosClientesControlador extends Controller
         $this->precios->asignarListaCliente($clienteId,(int)$data['lista_precio_id']);
         return $this->listaCliente($request,$clienteId);
     }
+    /**
+     * Catálogos seguros para vendedores: sólo clientes activos y productos
+     * con un precio vigente en la lista EXCLUSIVA del cliente.
+     * No conceden acceso al mantenedor de Clientes o Productos.
+     */
+    public function clientesVenta(Request $request)
+    {
+        $this->permiso($request,'ventas.ver');
+        $data=$request->validate([
+            'buscar'=>['sometimes','nullable','string','max:120'],
+            'page'=>['sometimes','integer','min:1','max:10000']
+        ]);
+        $q=DB::table('clientes')->where('activo',1);
+        $buscar=trim((string)($data['buscar']??''));
+        if($buscar!=='')$q->where(function($query)use($buscar){
+            $query->where('nombre','like','%'.$buscar.'%')
+                ->orWhere('codigo','like','%'.$buscar.'%')
+                ->orWhere('rut','like','%'.$buscar.'%');
+        });
+        return response()->json($q->select('id','codigo','nombre','rut','direccion','activo')
+            ->orderBy('nombre')->paginate(100))->header('Cache-Control','no-store');
+    }
+
+    public function productosVenta(Request $request)
+    {
+        $this->permiso($request,'ventas.ver');
+        $data=$request->validate([
+            'cliente_id'=>['required','integer','min:1','exists:clientes,id'],
+            'buscar'=>['sometimes','nullable','string','max:120'],
+            'page'=>['sometimes','integer','min:1','max:10000']
+        ]);
+        $cliente=(int)$data['cliente_id'];
+        abort_unless(DB::table('clientes')->where('id',$cliente)->where('activo',1)->exists(),
+            422,'Cliente inactivo');
+        $q=DB::table('clientes_listas_precios as clp')
+            ->join('listas_precios as lp','lp.id','=','clp.lista_precio_id')
+            ->join('listas_precios_detalle as d','d.lista_precio_id','=','lp.id')
+            ->join('productos as p','p.id','=','d.producto_id')
+            ->where('clp.cliente_id',$cliente)
+            ->where('clp.activo',1)->where('lp.activo',1)
+            ->where('d.activo',1)->where('p.activo',1);
+        $buscar=trim((string)($data['buscar']??''));
+        if($buscar!=='')$q->where(function($sub)use($buscar){
+            $sub->where('p.nombre','like','%'.$buscar.'%')
+                ->orWhere('p.sku','like','%'.$buscar.'%');
+        });
+        $page=$q->orderBy('p.nombre')->select(
+            'p.id','p.sku','p.nombre','p.activo',
+            'lp.nombre as lista_precio_nombre',
+            DB::raw('(SELECT pp.tasa_iva FROM presentaciones_productos pp
+                WHERE pp.producto_id = p.id ORDER BY pp.id LIMIT 1) as tasa_iva')
+        )->paginate(100);
+        return response()->json($page)->header('Cache-Control','no-store');
+    }
+
     public function cotizar(Request $request)
     {
         $this->permiso($request,'ventas.ver');

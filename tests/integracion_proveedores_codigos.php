@@ -87,7 +87,7 @@ try{
         'unidades_por_codigo'=>1
     ],$admin),'EAN13 sólo 13 dígitos');
     $sales=abExpect(201,abRequest('POST','/api/v1/productos/'.$prodId.'/codigos-venta',[
-        'tipo_codigo_barra_id'=>$ean13,'codigo_barras'=>'7801234567890',
+        'tipo_codigo_barra_id'=>$ean13,'codigo_barras'=>'7809876543210',
         'unidades_por_codigo'=>1
     ],$admin),'Añadir código venta');
     checkAb((int)$sales['producto_id']===$prodId,'Código venta sin proveedor');

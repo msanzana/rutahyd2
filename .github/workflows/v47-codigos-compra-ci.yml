@@ -66,5 +66,6 @@ jobs:
         run: |
           set -euo pipefail
           composer install --no-interaction --prefer-dist --no-progress
+          php tests/integracion_catalogos_api.php
           php tests/integracion_proveedores_codigos.php
           echo 'V47: crear código compra (201), EAN inválido (422), toggle parcial (200), editar, duplicados (409) y permisos: solo MySQL CI.' >> "$GITHUB_STEP_SUMMARY"

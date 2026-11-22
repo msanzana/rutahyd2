@@ -341,3 +341,28 @@ Esta instrucción sustituye las recomendaciones anteriores del diario que priori
 - **Autorización realmente transportada a Laravel**: prueba con JWT totalmente ficticio produjo HTTP 401 distinto del 401 anónimo y el mensaje del servidor correspondió al validador JWT; indicador `TRANSPORTE_BEARER_LARAVEL` con `distinct_error_messages=true`, `fake_reaches_jwt=true`. Esta prueba evita usar contraseñas o tokens de usuarios.
 - El frontend ya no invalida una sesión al cambiar `rutahd:api-estado` a no disponible durante un sondeo; un 401 de una petición de sesión anterior tampoco elimina un JWT recién iniciado.
 - **Estado final**: cambios publicados y probados sintéticamente, sin DDL, DML, Firecrawl, SMTP o cambios a credenciales. La validación de persistencia con JWT auténtico del titular queda pendiente de su prueba de navegación; no declarar verificado un login real prolongado hasta su confirmación.
+
+## Confirmación del login estable y nueva etapa CRUD comercial — 22-11-2026
+
+**Confirmación directa del titular**: el cambio de contraseña, el ingreso JWT y la permanencia de sesión funcionan en el entorno productivo; puede navegar por Administración y Productos sin ser expulsado. El incidente de expulsión del 22-11 queda CERRADO por aceptación del titular.
+
+**Etapa CRUD completada en código y publicada**:
+- Se revisaron las tablas del esquema español `clientes`, `proveedores`, `bodegas`: todas existen; no fue necesario añadir ni modificar columnas. **No hubo DDL ni DML en producción**.
+- Se creó la rama fuente del backend `feature/crud-clientes-proveedores-bodegas-20261122`, con `EntidadesComercialesControlador` y rutas POST, PUT y DELETE limitadas a esas tres entidades. Se conservan las lecturas paginadas existentes. Validación estricta de campos, permisos por entidad (Clientes `clientes.gestionar`, Proveedores `compras.gestionar`, Bodegas `inventario.gestionar`), 401/403, conflictos de claves y baja lógica (no `DELETE` SQL físico).
+- Los módulos `clientes`, `proveedores` y `bodega` del frontend oficial ahora incluyen listado paginado, crear, editar, desactivar, reactivar en edición, mensajes de validación y modales corporativos violeta, sin almacenamiento local. Las operaciones de Ventas y Órdenes de compra **siguen en lectura** para no crear movimientos contables sin reglas de negocio.
+- **Backend CI real MySQL efímero APROBADO**: https://github.com/msanzana/rutahyd2/actions/runs/44969447525 . Se ejecutaron pruebas de login, catálogos, productos (incluido IVA), permisos y CRUD de las tres entidades, con altas/ediciones/bajas **solo en base temporal**. No usar la prueba contra producción.
+- **Frontend CI Playwright APROBADO (19 pruebas)**: https://github.com/msanzana/rutahyd2front/actions/runs/44969510463 . Se validaron altas, cambios, bajas, no exposición de escritura a usuarios sin permiso y prohibición de escritura genérica sobre Ventas.
+- **Backend publicado por FTPS y verificado**: https://github.com/msanzana/rutahyd2/actions/runs/44969647774 . Controlador y rutas cotejados byte a byte. En navegador sin JWT: `/api/v1/estado` 200; GET Clientes, POST Clientes, PUT Proveedores, DELETE Bodegas e intento con token JWT falso devolvieron 401; POST Ventas por CRUD genérico 405. El gateway PHP y la protección privada permanecieron intactos.
+- **Frontend productivo publicado por FTPS y verificado**: https://github.com/msanzana/rutahyd2/actions/runs/44969783478 . Flujo de producción sin modo demostrativo, sin cambio de configuración de SMTP, JWT, contraseña ni MariaDB.
+- Una auditoría pública adicional que comprueba recursos JS/CSS del CRUD y bloqueo anónimo fue solicitada: https://github.com/msanzana/rutahyd2/actions/runs/44969983128 . Consultar el resultado antes de declararla aprobada.
+- El código de los tres CRUD está funcional en pruebas CI y publicado, pero **no se han ejecutado escrituras reales en la MariaDB de producción con la sesión del titular**; validar altas/ediciones autorizadas antes de declarar esa aceptación real.
+
+**Pendientes de próximas etapas**:
+1. Probar operaciones con el administrador en Clientes, Proveedores y Bodegas y confirmar reglas de negocio, especialmente prohibir la desactivación de bodegas con saldos de stock positivos.
+2. Compras: diseñar órdenes de compra con detalles y recepción de mercancía transaccional.
+3. Ventas y notas de venta: definir estados, detalle, pagos, numeración y DTE sin automatizar su envío al SII.
+4. Inventario: traslados y movimientos transaccionales; separar CRUD de bodegas del manejo de saldos.
+5. Cuentas corrientes e informes: establecer contratos y DDL **previo a cualquier implementación de esquema**.
+6. Refinar correos corporativos y completar pruebas de entrega real desde Laravel si sigue pendiente.
+
+**Políticas permanentes del proyecto**: solo modo PRODUCCIÓN, todo cambio estructural SQL mediante **DDL**, **NO Firecrawl**, nunca guardar credenciales ni tokens en GitHub, chat o JavaScript.

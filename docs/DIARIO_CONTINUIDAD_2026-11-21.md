@@ -428,3 +428,16 @@ Esta instrucción sustituye las recomendaciones anteriores del diario que priori
 - Se incrementó versionado de `produccion.css` a `20261121-2` para evitar caché antigua.
 - Esta revisión solo confirma commits y lectura de código. **No se verificaron todavía CI de estos nuevos commits, navegador público ni despliegue FTPS**. No afirmar que los cambios están visibles en producción.
 - No se modificaron backend, tablas, datos ni credenciales. Próximo paso: ejecutar CI responsivo y publicar solo frontend con respaldo y verificación FTPS, luego smoke real en 1440/820/390 px sin operaciones de escritura.
+
+
+## Rediseño corporativo CRUD v18 y publicación verificada — 21-11-2026 Chile / 22-11-2026 UTC
+
+- Motivo: el titular reportó CRUD visualmente desordenados y que los cambios anteriores no eran visibles en producción. Se realizaron cambios de **componentes y estilos**, no solo un ajuste cosmético local.
+- Fuente publicada: frontend `msanzana/rutahyd2front`, rama `main`, revisión `4ae53efc8e793b40d020e6ed2962788219ee21ed`.
+- Nueva hoja `assets/css/crud-v18.css`: ventanas corporativas violeta con encabezados, subtítulos, cierre visible, campos equilibrados, estados, footer de acciones, formularios Productos/Proveedores productos y CRUD Clientes/Proveedores/Bodegas/Usuarios/Catálogos responsivos; tablas con acciones en última celda a la derecha y scroll horizontal solo de la tabla cuando corresponde.
+- Componentes actualizados: `admin-remoto.js`, `usuarios.js`, `modulos-oficiales.js`, `productos-remotos.js`, `proveedores-productos.js` e `index.html`. Se eliminó el control duplicado **Cerrar sesión remota** en Administración. Único botón de salida: `#authButton`, adyacente al bloque de nombre en la barra superior.
+- CI frontend completa: **33 pruebas Playwright aprobadas**, https://github.com/msanzana/rutahyd2front/actions/runs/44976959711 ; incluye pruebas nuevas en 1440/820/390px, validando diálogos y columnas de acciones. Sin operaciones reales.
+- **Publicación productiva FTPS exitosa**, https://github.com/msanzana/rutahyd2/actions/runs/44977040072 ; respaldo de archivos previos, transferencia de CSS/JS, HTML al final, cotejo por bytes también de `crud-v18.css`, guardia Laravel intacta, rollback preparado (no utilizado).
+- **Smoke navegador independiente sobre https://rutahyd2.free.nf/ exitoso**, https://github.com/msanzana/rutahyd2/actions/runs/44977204463 ; comprobó CSS v18 enlazado, tablas `TD` con `display:table-cell` y acciones a la derecha, un botón de cerrar sesión, modal Clientes con degradado violeta, cierre accesible y sin overflow, en ancho de pantalla 1440, 820 y 390px. Se guardaron capturas de 3 tamaños como artefactos del workflow.
+- La prueba pública usó API interceptada y JWT ficticio en Chromium; **no** realizó autenticación productiva ni escrituras en MariaDB. Backend, estructura SQL, contraseñas y SMTP no se modificaron.
+- Pendiente de aceptación manual por el titular con su cuenta real: ergonomía de los campos y comportamiento de guardado de todos los CRUD con permisos efectivos. Si se ven recursos antiguos por caché del navegador, recargar forzadamente.

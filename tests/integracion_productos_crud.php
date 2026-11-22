@@ -107,6 +107,41 @@ try {
         '/api/v1/productos?por_pagina=10&page=1&buscar=SKU-CRUD-FULLSTACK-CI',[],$token),
         'Listado con búsqueda');
     assertTrue($page['total']>=1 && count($page['data'])>=1,'Debe listar el producto creado');
+    $query=http_build_query([
+        'page'=>1,'por_pagina'=>25,'rubro_id'=>$attrs['rubroId'],
+        'departamento_id'=>$attrs['departamentoId'],'familia_id'=>$attrs['familiaId'],
+        'linea_id'=>$attrs['lineaId'],'marca_id'=>$attrs['marcaId'],
+        'modelo_id'=>$attrs['modeloId'],'tipo_unidad_id'=>$attrs['tipoUnidadId'],
+        'tipo_envasado_id'=>$attrs['tipoEnvasadoId'],
+        'condicion_tributaria_id'=>$attrs['condicionTributariaId'],
+        'activo'=>1,'sku'=>'SKU-CRUD','nombre'=>'fullstack',
+        'descripcion'=>'clasificación','precio_min'=>'1200',
+        'precio_max'=>'1300','iva'=>'0','presentacion'=>'Unidad de',
+        'unidades_min'=>'1','unidades_max'=>'1',
+        'codigo_barras'=>'7801234567890','tipo_codigo_barra_id'=>$ean13
+    ]);
+    $filters=expectCode(200,callApi('GET','/api/v1/productos?'.$query,[],$token),
+        'Filtros avanzados completos');
+    assertTrue(($filters['filtros_aplicados']??false)===true,
+        'Respuesta debe confirmar soporte de filtrado global');
+    assertTrue(in_array($id,array_column($filters['data'],'id'),true),
+        'Producto debe coincidir con todas sus clasificaciones y parámetros');
+    $wrong=expectCode(200,callApi('GET',
+        '/api/v1/productos?sku=SKU-CRUD-FULLSTACK-CI&precio_min=9000',[],$token),
+        'Precio fuera de rango');
+    assertTrue(!in_array($id,array_column($wrong['data'],'id'),true),
+        'No devolver producto con precio fuera de rango');
+    $wrongGroup=expectCode(200,callApi('GET',
+        '/api/v1/productos?sku=SKU-CRUD-FULLSTACK-CI&familia_id=99999999',[],$token),
+        'Familia distinta');
+    assertTrue(!in_array($id,array_column($wrongGroup['data'],'id'),true),
+        'Filtro de familia se aplica antes de la paginación');
+    expectCode(422,callApi('GET',
+        '/api/v1/productos?precio_min=2000&precio_max=1000',[],$token),
+        'Rango inválido bloqueado');
+    expectCode(422,callApi('GET',
+        '/api/v1/productos?activo=no-valido',[],$token),
+        'Estado inválido bloqueado');
 
     $attrs['condicionTributariaId']=$idDe('condiciones_tributarias','Afecto');
     $updated=$payload;

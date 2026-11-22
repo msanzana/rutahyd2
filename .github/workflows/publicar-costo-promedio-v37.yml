@@ -75,9 +75,37 @@ jobs:
           bye
           EOF
           lftp -f /tmp/hdv37/read.lftp >/dev/null
-          cmp -s /tmp/hdv37/index-before-source.html /tmp/hdv37/index-before.html || {
-            echo "::error::HTML remoto difiere de V36; no sobreescribir"; exit 1;
-          }
+          # V35 adapta referencias públicas de marca y caché para InfinityFree.
+          # Verificar esa transformación completa ANTES de modificar solo dos enlaces V37.
+          python3 - <<'PY'
+          from pathlib import Path
+          import difflib
+          base=Path('/tmp/hdv37/index-before-source.html').read_text('utf-8')
+          live=Path('/tmp/hdv37/index-before.html').read_text('utf-8')
+          expected=base.replace('assets/img/prueba-rutahd2.webp',
+            'hd-branding/logo-hd-site.png?v=20261122-prod17')
+          expected=expected.replace('href="assets/css/app.css"',
+            'href="assets/css/app.css?v=20261122-prod17"')
+          expected=expected.replace('correcciones-ui.css?v=20261121-1',
+            'correcciones-ui.css?v=20261122-prod17')
+          expected=expected.replace('menu-oficial.css?v=20261121-2',
+            'menu-oficial.css?v=20261122-prod17')
+          expected=expected.replace('src="assets/js/recuperacion.js"',
+            'src="assets/js/recuperacion.js?v=20261122-prod17"')
+          if live!=expected:
+            diff=list(difflib.unified_diff(expected.splitlines(),live.splitlines(),n=1))
+            print('DIFERENCIAS_HTML_V36_PERSISTEN (primeras 16 líneas, omitir si fueran sensibles):')
+            for line in diff[:16]:print(line[:220])
+            raise SystemExit('HTML productivo V36 divergente: no publicar')
+          old_css='<link rel="stylesheet" href="assets/css/dialogo-estados-v36.css?v=20261122-modal36">'
+          old_js='productos-remotos.js?v=20261122-nav35'
+          assert live.count(old_css)==1 and live.count(old_js)==1
+          updated=live.replace(old_css,
+            old_css+'\n  <link rel="stylesheet" href="assets/css/productos-costo-promedio-v37.css?v=20261122-cost37">')
+          updated=updated.replace(old_js,'productos-remotos.js?v=20261122-cost37')
+          Path('/tmp/hdv37/index-after.html').write_text(updated,'utf-8')
+          print('HTML V36 coincide con versión publicada y marca oficial preservada.')
+          PY
           cmp -s /tmp/hdv37/front-before.js /tmp/hdv37/front-live-before.js || {
             echo "::error::Frontend remoto difiere del origen V36; no sobreescribir"; exit 1;
           }
@@ -208,7 +236,7 @@ jobs:
           put /tmp/hdv37/backend-after.php -o /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php
           put /tmp/hdv37front/assets/js/productos-remotos.js -o /htdocs/assets/js/productos-remotos.js
           put /tmp/hdv37front/assets/css/productos-costo-promedio-v37.css -o /htdocs/assets/css/productos-costo-promedio-v37.css
-          put /tmp/hdv37front/index.html -o /htdocs/index.html
+          put /tmp/hdv37/index-after.html -o /htdocs/index.html
           bye
           EOF
           lftp -f /tmp/hdv37/put.lftp >/dev/null
@@ -234,7 +262,7 @@ jobs:
           bye
           EOF
           lftp -f /tmp/hdv37/verify.lftp >/dev/null
-          cmp -s /tmp/hdv37front/index.html /tmp/hdv37/index-check.html
+          cmp -s /tmp/hdv37/index-after.html /tmp/hdv37/index-check.html
           cmp -s /tmp/hdv37front/assets/js/productos-remotos.js /tmp/hdv37/front-check.js
           cmp -s /tmp/hdv37front/assets/css/productos-costo-promedio-v37.css /tmp/hdv37/cost-check.css
           cmp -s /tmp/hdv37/backend-after.php /tmp/hdv37/backend-check.php

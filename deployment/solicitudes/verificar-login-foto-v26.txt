@@ -1,0 +1,10 @@
+Ruta H&D V2 | Verificación realista login v26 | 2026-11-22
+frontend_commit=a08a6e4a0fa0d3f269184600177638c885b7b511
+frontend_ci=44989018097-success-56
+deploy=44989154999-success
+verification=chromium-public-url
+viewports=1440,390
+photo=WebP-original-embedded-data-uri
+no_real_credentials=true
+no_database_writes=true
+screenshots=true

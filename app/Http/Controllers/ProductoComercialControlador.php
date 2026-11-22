@@ -113,6 +113,55 @@ final class ProductoComercialControlador extends Controller
         return response()->json($paginado);
     }
 
+    private function codigosVenta(int $productoId): array
+    {
+        return DB::table('productos_codigos_barra_venta')
+            ->where('producto_id',$productoId)->orderBy('id')->get()
+            ->map(fn(object $b): array => [
+                'id'=>(int)$b->id,
+                'tipoCodigoBarraId'=>(int)$b->tipo_codigo_barra_id,
+                'codigoBarras'=>$b->codigo_barras,
+                'unidadesPorCodigo'=>(string)$b->unidades_por_codigo,
+                'activo'=>(bool)$b->activo
+            ])->all();
+    }
+
+    private function sincronizarCodigosVenta(int $productoId, array $codigos): void
+    {
+        $ids=[];$seen=[];
+        foreach($codigos as $row){
+            $type=DB::table('tipos_codigos_barras')->where('id',$row['tipoCodigoBarraId'])
+                ->where('activo',1)->first();
+            abort_unless($type,422,'Tipo de código de barras inválido');
+            $code=trim($row['codigoBarras']);
+            abort_if($code===''||isset($seen[$code]),409,'Código de barras repetido o vacío');
+            $seen[$code]=true;
+            $lengths=['EAN13'=>13,'EAN8'=>8,'DUN14'=>14,'ITF14'=>14,'UPCA'=>12,'UPCE'=>8];
+            if(isset($lengths[$type->codigo]))abort_unless(
+                preg_match('/^[0-9]{'.$lengths[$type->codigo].'}$/D',$code)===1,
+                422,'Formato de código de barras incompatible con '.$type->codigo);
+            $data=[
+                'tipo_codigo_barra_id'=>(int)$row['tipoCodigoBarraId'],
+                'codigo_barras'=>$code,'unidades_por_codigo'=>$row['unidadesPorCodigo'],
+                'activo'=>($row['activo']??true)?1:0
+            ];
+            if(!empty($row['id'])){
+                $existing=DB::table('productos_codigos_barra_venta')
+                    ->where('id',(int)$row['id'])->where('producto_id',$productoId)
+                    ->lockForUpdate()->first();
+                abort_unless($existing,422,'El código de barras no pertenece al producto');
+                DB::table('productos_codigos_barra_venta')->where('id',$row['id'])->update($data);
+                $ids[]=(int)$row['id'];
+            }else{
+                $data['producto_id']=$productoId;
+                $ids[]=(int)DB::table('productos_codigos_barra_venta')->insertGetId($data);
+            }
+        }
+        $q=DB::table('productos_codigos_barra_venta')->where('producto_id',$productoId);
+        if($ids) $q->whereNotIn('id',$ids);
+        $q->update(['activo'=>0]); // Baja lógica: conservar trazabilidad de etiquetas históricas.
+    }
+
     public function ver(int $id)
     {
         $producto=DB::table('productos')->where('id',$id)->first();
@@ -121,6 +170,7 @@ final class ProductoComercialControlador extends Controller
             ->where('producto_id',$id)->orderBy('id')->get();
         $data=$this->resultado($producto,$presentaciones->first(),true);
         $data['totalPresentaciones']=$presentaciones->count();
+        $data['codigosVenta']=$this->codigosVenta($id);
         return response()->json($data);
     }
 
@@ -140,6 +190,12 @@ final class ProductoComercialControlador extends Controller
             'presentacion.codigoBarras'=>['sometimes','nullable','string','max:80'],
             'presentacion.unidadesPorEnvase'=>[$required,'numeric','min:0.001','max:99999999999'],
             'presentacion.precioNeto'=>[$required,'numeric','min:0','max:99999999999'],
+            'codigosVenta'=>['sometimes','array','max:100'],
+            'codigosVenta.*.id'=>['sometimes','nullable','integer','min:1'],
+            'codigosVenta.*.tipoCodigoBarraId'=>['required','integer','min:1'],
+            'codigosVenta.*.codigoBarras'=>['required','string','max:100'],
+            'codigosVenta.*.unidadesPorCodigo'=>['required','numeric','gt:0','max:999999999999'],
+            'codigosVenta.*.activo'=>['sometimes','boolean'],
         ];
     }
 
@@ -233,9 +289,14 @@ final class ProductoComercialControlador extends Controller
                 $presentaciones=DB::table('presentaciones_productos')->where('producto_id',$id)->count();
                 abort_if($presentaciones>0,422,'Edita también la presentación al cambiar clasificación tributaria');
             }
+            if(array_key_exists('codigosVenta',$datos)){
+                $this->sincronizarCodigosVenta($id,$datos['codigosVenta']);
+            }
             $producto=DB::table('productos')->where('id',$id)->first();
             $principal=DB::table('presentaciones_productos')->where('producto_id',$id)->orderBy('id')->first();
-            return $this->resultado($producto,$principal,true);
+            $res=$this->resultado($producto,$principal,true);
+            $res['codigosVenta']=$this->codigosVenta($id);
+            return $res;
         });
     }
 

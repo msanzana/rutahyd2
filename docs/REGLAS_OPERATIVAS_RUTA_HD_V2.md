@@ -44,3 +44,11 @@ Origen: instrucción expresa del titular del proyecto.
 - Tooltips de acciones con texto personalizado **debajo del botón**, portados fuera de tablas para evitar recortes por overflow o columnas sticky; navegación por teclado con foco visible.
 - Los listados no deben exhibir avisos tecnológicos persistentes como «CRUD real con JWT» o «Producto actualizado en MariaDB»; los mensajes de error sí deben conservarse.
 - El switch de activo en Lista de precios utiliza diseño violeta compacto específico (42 × 24 px) que prevalece sobre reglas genéricas de inputs.
+
+## Regla de navegación global y paginación doble — v35 (2026-11-22)
+- En todos los módulos de mantenimiento de ítems, los botones **Nuevo/Nueva/Crear/Asociar** destinados a altas de registros van **a la derecha del toolbar del listado**, antes de la tabla; filtros y búsqueda quedan a la izquierda. La ubicación se conserva en vista móvil.
+- Cuando existan varias páginas, se presenta un **paginador numérico circular arriba y otro abajo** de la lista, compartiendo página seleccionada, número de registros y límite de 25 por página. No sustituir paginación remota por segmentación local de una página ya cargada.
+- Al hacer clic en una flecha o número de cualquiera de los dos paginadores, navegar a la página elegida y **desplazar la vista a la parte superior**. El scroll respeta preferencia de movimiento reducido.
+- Al iniciar sesión o al restaurarla, todos los **submenús principales parten contraídos** (Administración, Productos, Proveedores) y el menú móvil se cierra. Solo las interacciones del usuario los expanden nuevamente.
+- Sobre el menú oficial incluir un **buscador compacto de opciones y subopciones**, tolerante a tildes y palabras omitidas, con búsqueda por varios términos y navegación de teclado. Construir resultados desde las opciones oficiales y filtrarlos por permisos JWT/ACL; nunca mostrar opciones ocultas por permisos ni inventar rutas.
+- Mantener paleta violeta, densidad legible, accesibilidad y responsive. Firecrawl continúa prohibido; para cambios de esquema solo DDL manual en phpMyAdmin.

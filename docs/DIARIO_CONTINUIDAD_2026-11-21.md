@@ -573,3 +573,19 @@ El titular pidió reemplazar los triggers propuestos por **funciones de backend 
 - Publicación FTPS con backup, comparación exacta del nuevo CSS y rollback: https://github.com/msanzana/rutahyd2/actions/runs/44989154999 **éxito**.
 - Smoke Chromium en dominio público: https://github.com/msanzana/rutahyd2/actions/runs/44989332484 **éxito** en 1440 y 390 px; imagen decodificada, sin scroll horizontal, logo, email y contraseña presentes. Evidencias en artifact `capturas-login-fotografico-v26`.
 - No se modificaron DDL, triggers, backend ni datos reales; no se usaron credenciales reales para las pruebas.
+
+
+## Productos y galería fotográfica v28 — 22-11-2026
+
+**Solicitud:** CRUD de fotos fuera del editor, foto BLOB + SKU, N fotos por producto; grilla compacta con SKU/Nombre/Rubro/Departamento/Familia/Línea/Marca/Modelo, glóbulos de precios de listas y códigos de barras, encabezados ordenables ASC/DESC globales, margen mínimo predeterminado y reparación Guardar Producto.
+
+**DDL requerido, aún NO aplicado en MariaDB de producción:**
+`database/espanol/25_productos_fotos_ddl_sin_triggers.sql`, rama `feature/proveedores-productos-barcodes-20261122`; contiene `productos_fotos` con `id`, FK `producto_id`, `sku`, `foto LONGBLOB`, MIME, nombre, tamaño, orden y timestamps. Admite N filas; cada envío de 1–6 imágenes JPEG/PNG/WebP hasta 2 MiB cada una. Sin triggers, sincronización SKU realizada por Laravel en la misma transacción.
+
+**Backend v28:** Nuevo `FotosProductoControlador` y rutas `GET/POST/DELETE /api/v1/productos/{productoId}/fotos` y `GET .../{fotoId}` con JWT/permisos; BLOB servido con no-store, no-sniff, sin ruta pública; al faltar DDL25 informa HTTP 503 comprensible. `ProductoComercialControlador` hace clasificación nominal, precios por lista, códigos por tipo, contador de fotos en lote y orden global en SQL antes de paginar mediante lista blanca. No entrega blobs en JSON. Prueba MySQL temporal validada con JWT, 2 PNG, bytes binarios, eliminación, sincronización SKU y sort: https://github.com/msanzana/rutahyd2/actions/runs/44992224364 (éxito). Publicación controlada backend con backup, preflight byte a byte y verificación JWT: https://github.com/msanzana/rutahyd2/actions/runs/44992534805 (éxito); **sin ejecutar DDL25**.
+
+**Frontend v28:** `assets/js/galeria-productos.js` ventana modal responsiva con imagen grande, miniaturas reales autorizadas, prev/sig, drag/drop, Examinar, carga y eliminación confirmada; acceso Fotos por icono exclusivamente en acciones. `productos-remotos.js` agrupa etiquetas de precios violetas y códigos azules, clasificaciones y acciones a la derecha; clickable headers ordenan SQL asc/desc; `productos-densidad-v28.css` reduce densidad general (sin ocultar contenidos) y conserva modo oscuro. `catalogos-api.js` maneja FormData y descarga BLOB con JWT.
+
+**Corrección de guardado:** Validación HTML5 impedía disparar el evento `submit` y no mostraba error (se cambió a validación explícita y avisos con nombre del campo). Restauración jerárquica padre→hijo corregida. Cada nueva lista parte en margen mínimo de Línea; precio calculado al introducir costo, nunca mostrar margen -100%; Laravel sigue validando el mínimo. Errores 422 de backend se muestran con explicación saneada. Pruebas Playwright: https://github.com/msanzana/rutahyd2front/actions/runs/44992820046 **61/61 aprobadas**, incluidas galería en escritorio y móvil, guardado y error 422. Publicación frontend con respaldo, HTML último, cotejo byte a byte: https://github.com/msanzana/rutahyd2/actions/runs/44992955237 **éxito**.
+
+**Seguridad y estado:** No se crearon ni cargaron fotos reales en producción; únicamente pruebas ficticias y MySQL temporal. Para activar galería real es imprescindible importar DDL25 en phpMyAdmin. Los endpoints reales exigen JWT; sin DDL25 muestran 503 explicativo.

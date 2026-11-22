@@ -1,1 +1,3 @@
 Auditoría FTP solo lectura del error HTTP 500 POST /api/v1/listas-precios. Sin SQL, sin modificaciones de datos, sin credenciales en salida. Fecha 22-11-2026.
+
+Relectura posterior al DDL27 confirmado por usuario. Solo FTPS lectura de registros, comparar incidentes previos y posteriores; no generar altas.

@@ -6,12 +6,11 @@
 -- REQUISITO: respaldo verificado y tabla listas_precios existente.
 -- No utilizar Laravel migrations, triggers, API, CI/CD ni SQL automatizado.
 -- No realiza INSERT/UPDATE/DELETE/DROP y no borra históricos.
+-- Todos los SELECT usan tablas directas; no hay consultas a information_schema.
 --
--- Diagnóstico previo (solo lectura, ejecutar en phpMyAdmin antes del ALTER):
-SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='listas_precios'
-ORDER BY ORDINAL_POSITION;
+-- Diagnóstico previo (solo lectura). Consulta DIRECTA a tu tabla en phpMyAdmin:
+-- Como el campo codigo aún puede faltar, usamos SELECT * sin nombrarlo.
+SELECT * FROM listas_precios ORDER BY id DESC LIMIT 25;
 --
 -- REPARACIÓN NO DESTRUCTIVA:
 -- 'codigo' se deja NULL para preservar filas antiguas mientras no se conozca
@@ -32,12 +31,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_lista_codigo
   ON listas_precios (codigo);
 --
 -- COMPROBACIONES SOLO LECTURA después de ejecutar:
-SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='listas_precios'
- AND COLUMN_NAME IN
-  ('codigo','nombre','observacion','activo','es_base','creado_en','actualizado_en')
-ORDER BY ORDINAL_POSITION;
+-- Consulta directa: comprobar las columnas reparadas y sus valores.
+SELECT id, codigo, nombre, observacion, activo, es_base,
+       creado_en, actualizado_en
+FROM listas_precios
+ORDER BY id DESC
+LIMIT 25;
 
 SELECT COUNT(*) AS listas_existentes,
        SUM(CASE WHEN codigo IS NULL OR TRIM(codigo)='' THEN 1 ELSE 0 END)

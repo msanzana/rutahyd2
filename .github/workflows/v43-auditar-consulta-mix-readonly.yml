@@ -1,0 +1,205 @@
+name: V43 - auditoría SQL exacta del mix de proveedores (solo lectura)
+on:
+  push:
+    branches: [diagnostico/v43-mix-500-20261122]
+    paths: [.github/workflows/v43-auditar-consulta-mix-readonly.yml]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  auditar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Preparar cliente FTPS y navegador Chromium
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          mkdir -p /tmp/v43mix/browser
+          cd /tmp/v43mix/browser
+          npm init -y >/dev/null
+          npm install -q --no-fund --no-audit playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Crear auditoría protegida con expiración y SELECT exclusivamente
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          from pathlib import Path
+          import os,secrets,time
+          name='hd_v43_mix_'+secrets.token_hex(16)+'.php'
+          token=secrets.token_hex(32)
+          expires=str(int(time.time()+900))
+          script=r'''<?php
+          declare(strict_types=1);
+          ini_set('display_errors','0');
+          header('Content-Type: application/json; charset=utf-8');
+          header('Cache-Control: no-store');
+          header('X-Content-Type-Options: nosniff');
+          if(($_SERVER['REQUEST_METHOD']??'')!=='POST'
+             || time()>__EXPIRES__
+             || !hash_equals('__TOKEN__',(string)($_SERVER['HTTP_X_HD_MIX_AUDIT']??''))){
+              http_response_code(404);exit;
+          }
+          $out=['auditoria'=>'V43_MIX_SELECT_ONLY','checks'=>[]];
+          try{
+              $root=__DIR__.'/api-v2';
+              require $root.'/vendor/autoload.php';
+              \Dotenv\Dotenv::createImmutable($root)->safeLoad();
+              if(($_ENV['DB_HOST']??'')!=='sql307.infinityfree.com'
+                || ($_ENV['DB_DATABASE']??'')!=='if0_43460400_rutahyd2_es'){
+                  throw new RuntimeException('destino_incorrecto');
+              }
+              $pdo=new PDO('mysql:host='.$_ENV['DB_HOST']
+                 .';port=3306;dbname='.$_ENV['DB_DATABASE'].';charset=utf8mb4',
+                 (string)($_ENV['DB_USERNAME']??''),(string)($_ENV['DB_PASSWORD']??''),
+                 [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,
+                  PDO::ATTR_TIMEOUT=>8,PDO::ATTR_EMULATE_PREPARES=>false]);
+              $pdo->exec('SET SESSION TRANSACTION READ ONLY');
+              $cols=[
+               'proveedores'=>['id','nombre','razon_social','rut','correo_electronico','ciudad_id'],
+               'productos_proveedores'=>['proveedor_id','producto_id','activo'],
+               'ciudades'=>['id','comuna_id','nombre'],
+               'comunas'=>['id','provincia_id','nombre'],
+               'provincias'=>['id','region_id','nombre'],
+               'regiones'=>['id','pais_id','nombre'],
+               'paises'=>['id','nombre']
+              ];
+              $stmt=$pdo->prepare('SELECT COLUMN_NAME FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?');
+              foreach($cols as $table=>$required){
+                  $stmt->execute([$table]);
+                  $actual=$stmt->fetchAll(PDO::FETCH_COLUMN);
+                  $out['checks']['schema_'.$table]=[
+                    'ok'=>count(array_diff($required,$actual))===0,
+                    'faltan'=>array_values(array_diff($required,$actual))];
+              }
+              $sub='(SELECT proveedor_id, COUNT(DISTINCT producto_id) AS cantidad_productos_mix
+                FROM productos_proveedores WHERE activo=1 GROUP BY proveedor_id) AS mix';
+              $from=' FROM proveedores AS prov LEFT JOIN '.$sub.' ON mix.proveedor_id=prov.id
+                LEFT JOIN ciudades AS ci ON ci.id=prov.ciudad_id
+                LEFT JOIN comunas AS co ON co.id=ci.comuna_id
+                LEFT JOIN provincias AS pr ON pr.id=co.provincia_id
+                LEFT JOIN regiones AS re ON re.id=pr.region_id
+                LEFT JOIN paises AS pa ON pa.id=re.pais_id';
+              $queries=[
+                'conteo_proveedores'=>'SELECT COUNT(*) AS aggregate'.$from,
+                'listado_completo'=>'SELECT prov.*,ci.nombre AS ciudad,
+                  co.nombre AS comuna_nombre,pr.nombre AS provincia,
+                  re.nombre AS region,pa.nombre AS pais,
+                  COALESCE(mix.cantidad_productos_mix,0) AS cantidad_productos_mix'
+                  .$from.' ORDER BY prov.nombre,prov.id LIMIT 25',
+                'filtro_nombre'=>'SELECT COUNT(*) AS aggregate'.$from.
+                   " WHERE prov.nombre LIKE '%auditoria-inexistente-v43%'"
+              ];
+              foreach($queries as $name=>$sql){
+                  try{
+                      $stmt=$pdo->query($sql);
+                      if($name==='listado_completo'){
+                          $rows=$stmt->fetchAll(PDO::FETCH_ASSOC);
+                          json_encode($rows,JSON_THROW_ON_ERROR);
+                          $out['checks'][$name]=['ok'=>true,'filas'=>count($rows),'json'=>true];
+                      }else{
+                          $out['checks'][$name]=['ok'=>true,'conteo_valido'=>is_numeric($stmt->fetchColumn())];
+                      }
+                  }catch(Throwable $e){
+                      $info=$e instanceof PDOException ? $e->errorInfo:[];
+                      $missing=preg_match("/Unknown column '([a-zA-Z_][a-zA-Z0-9_.]{0,80})'/",
+                        $e->getMessage(),$m)?$m[1]:'';
+                      $out['checks'][$name]=['ok'=>false,
+                        'clase'=>get_class($e),
+                        'sqlstate'=>(string)($info[0]??$e->getCode()),
+                        'codigo'=>(int)($info[1]??0),
+                        'columna_faltante'=>$missing];
+                  }
+              }
+              $bad=array_filter($out['checks'],fn($v)=>empty($v['ok']));
+              $out['ok']=count($bad)===0;
+              if(!$out['ok'])http_response_code(412);
+          }catch(Throwable $e){
+              http_response_code(503);
+              $out['ok']=false;$out['problema_configuracion']=get_class($e);
+          }
+          echo json_encode($out,JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE);
+          '''
+          script=script.replace('__TOKEN__',token).replace('__EXPIRES__',expires)
+          Path('/tmp/v43mix/probe.php').write_text(script)
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('AUDIT_NAME='+name+'\nAUDIT_KEY='+token+'\n')
+          PY
+          php -l /tmp/v43mix/probe.php
+      - name: Subir exclusivamente sonda efímera de consulta
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/v43mix/put.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/v43mix/probe.php -o /htdocs/$AUDIT_NAME
+          bye
+          EOF
+          lftp -f /tmp/v43mix/put.lftp >/dev/null
+      - name: Comprobar SELECT real desde navegador y clasificar SQLSTATE
+        working-directory: /tmp/v43mix/browser
+        run: |
+          set -euo pipefail
+          set +x
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:55000});
+            await page.waitForTimeout(4000);
+            const audit=await page.evaluate(async({name,key})=>{
+              const ctl=new AbortController();const timeout=setTimeout(()=>ctl.abort(),25000);
+              try{
+                const r=await fetch('/'+name,{method:'POST',
+                  headers:{'X-HD-Mix-Audit':key,'Accept':'application/json'},
+                  credentials:'same-origin',cache:'no-store',signal:ctl.signal});
+                const body=await r.json();
+                return {http:r.status,...body};
+              }finally{clearTimeout(timeout);}
+            },{name:process.env.AUDIT_NAME,key:process.env.AUDIT_KEY});
+            console.log('V43_MIX_SQL_AUDIT',JSON.stringify(audit));
+            if(![200,412].includes(audit.http) || audit.auditoria!=='V43_MIX_SELECT_ONLY'){
+              throw new Error('La auditoría SQL no tuvo respuesta válida');
+            }
+            if(audit.http===412) console.log('::warning::La consulta SQL del mix tiene fallos. Revisar los checks.');
+          }finally{await browser.close();}
+          JS
+          echo 'V43: consulta exacta del mix solo por SELECT y metadatos, sin DML ni datos comerciales en logs.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Borrar sonda efímera siempre (con alerta si falla)
+        if: always()
+        run: |
+          set +x
+          if [[ -n "$AUDIT_NAME" ]];then
+            cat >/tmp/v43mix/delete.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 3
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          rm /htdocs/$AUDIT_NAME
+          bye
+          EOF
+            lftp -f /tmp/v43mix/delete.lftp >/dev/null ||
+              echo '::error::ATENCIÓN: inspeccionar y eliminar sonda V43 con caducidad de 15 minutos.'
+          fi
+          rm -rf /tmp/v43mix

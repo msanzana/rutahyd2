@@ -73,6 +73,24 @@ jobs:
                 });
                 console.log('API_HTTP:',api.status);
                 console.log('API_JSON:',api.content_type.includes('json')?'SI':'NO');
+                if(api.status===200){
+                  const authDiag=await page.evaluate(async()=>{
+                    const probe=async(headers={})=>{
+                      const response=await fetch('/api/v1/perfil',{cache:'no-store',
+                        headers:{Accept:'application/json',...headers}});
+                      const json=(response.headers.get('content-type')||'').includes('json')?
+                        await response.json():{};
+                      return {http:response.status,message:String(json.message||'').slice(0,100)};
+                    };
+                    const none=await probe();
+                    const fake=await probe({Authorization:'Bearer aaaa.bbbb.cccc'});
+                    return {none: none.http, fake: fake.http,
+                      distinct_error_messages:none.message!==fake.message,
+                      fake_reaches_jwt:fake.message.toLowerCase().includes('jwt')};
+                  });
+                  console.log('TRANSPORTE_BEARER_LARAVEL',JSON.stringify(authDiag));
+                  if(authDiag.none!==401||authDiag.fake!==401)process.exitCode=1;
+                }
                 if(api.status===503 && api.content_type.includes('json')&&api.estado==='no_habilitada'){
                   console.log('API_MODO=CERRADA_SEGURO');
                 } else if(api.status===200 && api.content_type.includes('json')&&

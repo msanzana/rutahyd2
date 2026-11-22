@@ -2,6 +2,7 @@
 declare(strict_types=1);
 namespace App\Http\Controllers;
 use Illuminate\Http\Request;
+use App\Services\PermisosSubmodulos;
 use Illuminate\Support\Facades\DB;
 final class RecursoControlador extends Controller
 {
@@ -53,6 +54,7 @@ final class RecursoControlador extends Controller
                 ->where('permisos.codigo',$definicion[1])->exists();
             abort_unless($autorizado,403);
         }
+        if($recurso==='proveedores') PermisosSubmodulos::exigir($usuario,'proveedores.listado','ver');
         $clase=$definicion[0];
         return new $clase();
     }

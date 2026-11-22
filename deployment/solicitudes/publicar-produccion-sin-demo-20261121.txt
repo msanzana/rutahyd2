@@ -198,3 +198,16 @@ datos=NO_MODIFICAR_BBDD
 backend=NO_MODIFICAR
 firecrawl=PROHIBIDO
 rollback=habilitado
+
+release=20261122-v35-menu-search-top-bottom-paginators-new-buttons-right
+frontend_sha=84f211f82f3f9dac1d00545649e10d0c9f590cbc
+frontend_ci=https://github.com/msanzana/rutahyd2front/actions/runs/45001581911-82-passed
+scope=frontend-html-js-css-only
+menu_after_login=todos_submenus_cerrados_mobile_sidebar_cerrada
+menu_search=opciones_y_subopciones_permisos_jwt_acentos_busqueda_por_palabras
+pagination=arriba_y_abajo_sincronizados_scroll_automatico_inicio_25_por_pagina
+create_buttons=derecha_en_toolbar_de_listados
+database=NO_EJECUTAR_SQL_NO_DDL
+backend=NO_MODIFICAR
+firecrawl=PROHIBIDO
+rollback=habilitado

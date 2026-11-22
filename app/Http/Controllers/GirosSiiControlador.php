@@ -30,9 +30,20 @@ final class GirosSiiControlador extends Controller
         $query=DB::table('giros_sii')->where('activo',1);
         if(isset($v['codigo']))$query->where('codigo',$v['codigo']);
         if(!empty($v['buscar'])){
-            $like='%'.trim($v['buscar']).'%';
-            $query->where(static fn($q)=>$q->where('codigo','like',$like)
-                ->orWhere('descripcion','like',$like));
+            $term=trim($v['buscar']);
+            if($term!==''){
+                $like='%'.$term.'%';
+                // codigo es CHAR(6) ascii_bin y descripcion es utf8mb4:
+                // comparar texto acentuado contra codigo provoca SQLSTATE HY000/1267
+                // (mezcla de collations) en MariaDB. Filtrar texto sólo por
+                // descripción; aceptar búsquedas por código únicamente con dígitos.
+                if(preg_match('/^[0-9]{1,6}$/D',$term)===1){
+                    $query->where(static fn($q)=>$q->where('codigo','like',$like)
+                        ->orWhere('descripcion','like',$like));
+                }else{
+                    $query->where('descripcion','like',$like);
+                }
+            }
         }
         $page=$query->select(['codigo','descripcion','afecta_iva',
             'categoria_tributaria','disponible_internet','rubro_sii'])

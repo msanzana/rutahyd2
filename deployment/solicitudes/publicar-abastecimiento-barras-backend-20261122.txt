@@ -1,0 +1,7 @@
+version=20261122-proveedores-productos-codigos-barras
+preflight_sql20_21=44974987537-aprobada
+backend_ci=44974547076-aprobada
+jwt=preservar
+mysql=sin_escrituras
+rollback=habilitado
+firecrawl=no

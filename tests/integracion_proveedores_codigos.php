@@ -91,6 +91,27 @@ try{
         'unidades_por_codigo'=>1
     ],$admin),'Añadir código venta');
     checkAb((int)$sales['producto_id']===$prodId,'Código venta sin proveedor');
+    $batch=abExpect(200,abRequest('PUT','/api/v1/productos/'.$prodId,[
+        'codigosVenta'=>[
+            ['id'=>(int)$sales['id'],'tipoCodigoBarraId'=>$ean13,
+                'codigoBarras'=>'7809876543210','unidadesPorCodigo'=>'1','activo'=>true],
+            ['tipoCodigoBarraId'=>$code128,'codigoBarras'=>'PACK-VTA-CI-24',
+                'unidadesPorCodigo'=>'24','activo'=>true]
+        ]
+    ],$admin),'Actualizar múltiples códigos de venta en una transacción');
+    checkAb(count($batch['codigosVenta'])===2,'Producto retorna dos códigos venta');
+    $detail=abExpect(200,abRequest('GET','/api/v1/productos/'.$prodId,[], $admin),
+        'Ficha con códigos de barras venta');
+    checkAb(count($detail['codigosVenta'])===2,'Ficha expone listado codigosVenta');
+    $one=abExpect(200,abRequest('PUT','/api/v1/productos/'.$prodId,[
+        'codigosVenta'=>[
+            ['id'=>(int)$sales['id'],'tipoCodigoBarraId'=>$ean13,
+                'codigoBarras'=>'7809876543210','unidadesPorCodigo'=>'1','activo'=>true]
+        ]
+    ],$admin),'Quitar código mediante baja lógica del listado');
+    checkAb(count(array_filter($one['codigosVenta'],fn($b)=>$b['activo']))===1,
+        'Código retirado permanece pero inactivo');
+
     $purchase=abExpect(201,abRequest('POST',
         '/api/v1/proveedores-productos/'.$linkId.'/codigos-compra',[
         'tipo_codigo_barra_id'=>$code128,'codigo_barras'=>'PACK-PROV-001',

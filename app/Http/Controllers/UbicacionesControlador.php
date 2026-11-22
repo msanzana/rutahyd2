@@ -141,7 +141,8 @@ final class UbicacionesControlador extends Controller
         }
         if($tipo==='ciudades'){
             $db['tipo_localidad']=trim($data['tipoLocalidad']??'CIUDAD')?:'CIUDAD';
-            $db['fuente']='Mantenedor Ruta H&D (revisión manual)';
+            // Conservar la procedencia oficial/registrada de las filas importadas.
+            if($new)$db['fuente']='Mantenedor Ruta H&D (revisión manual)';
         }
         return DB::transaction(function()use($tipo,$id,$db,$new){
             if(!$new){
@@ -157,6 +158,7 @@ final class UbicacionesControlador extends Controller
                     abort_if((int)$original->{$fk}!==$db[$fk],422,
                         'No se cambia el padre de una ubicación ya registrada');
                 }
+                if((bool)$original->activo && !$db['activo'])$this->validarDesactivacion($tipo,$id);
                 DB::table($tipo)->where('id',$id)->update($db);
             }else $id=(int)DB::table($tipo)->insertGetId($db);
             return DB::table($tipo)->where('id',$id)->first();
@@ -184,25 +186,30 @@ final class UbicacionesControlador extends Controller
         }
     }
 
+    private function validarDesactivacion(string $tipo,int $id): void
+    {
+        $children=['paises'=>['regiones','pais_id'],'regiones'=>['provincias','region_id'],
+            'provincias'=>['comunas','provincia_id'],'comunas'=>['ciudades','comuna_id']];
+        if(isset($children[$tipo])){
+            [$table,$foreign]=$children[$tipo];
+            abort_if(DB::table($table)->where($foreign,$id)->exists(),409,
+                'La ubicación tiene subdivisiones vinculadas');
+            return;
+        }
+        foreach(['proveedores','clientes','usuarios','bodegas','empresas'] as $table){
+            if(Schema::hasTable($table) && Schema::hasColumn($table,'ciudad_id') &&
+                DB::table($table)->where('ciudad_id',$id)->exists())
+                abort(409,'La ciudad está siendo utilizada por '.$table);
+        }
+    }
+
     public function desactivar(Request $request,string $tipo,int $id)
     {
         $this->tabla($tipo);$this->permitir($request,true);
-        $children=['paises'=>['regiones','pais_id'],'regiones'=>['provincias','region_id'],
-            'provincias'=>['comunas','provincia_id'],'comunas'=>['ciudades','comuna_id']];
-        DB::transaction(function()use($tipo,$id,$children){
+        DB::transaction(function()use($tipo,$id){
             $row=DB::table($tipo)->where('id',$id)->lockForUpdate()->first();
             abort_unless($row,404,'Ubicación no encontrada');
-            if(isset($children[$tipo])){
-                [$table,$foreign]=$children[$tipo];
-                abort_if(DB::table($table)->where($foreign,$id)->exists(),409,
-                    'La ubicación tiene subdivisiones vinculadas');
-            }else{
-                foreach(['proveedores','clientes','usuarios','bodegas','empresas'] as $table){
-                    if(Schema::hasTable($table) && Schema::hasColumn($table,'ciudad_id')
-                        && DB::table($table)->where('ciudad_id',$id)->exists())
-                        abort(409,'La ciudad está siendo utilizada por '.$table);
-                }
-            }
+            $this->validarDesactivacion($tipo,$id);
             DB::table($tipo)->where('id',$id)->update(['activo'=>0]);
         });
         return response()->json(['id'=>$id,'activo'=>false,'eliminacion'=>'logica']);

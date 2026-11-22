@@ -5,6 +5,8 @@ on:
     paths:
       - .github/workflows/v44-recepciones-ddl-ci.yml
       - database/espanol/36_recepciones_mercaderia_borrador_ddl.sql
+      - app/Services/CalculadoraCostoPromedioRecepcion.php
+      - tests/calculadora_cpp_v44.php
 permissions:
   contents: read
 jobs:
@@ -53,6 +55,32 @@ jobs:
           test "$(mysql -h 127.0.0.1 -uroot -N rutahyd2_es_local -e 'SELECT COUNT(*) FROM recepciones_mercaderia')" = 0
           test "$(mysql -h 127.0.0.1 -uroot -N rutahyd2_es_local -e 'SELECT COUNT(*) FROM recepciones_mercaderia_detalle')" = 0
           echo 'V44_DDL_OK: esquema de recepción validado dos veces en MariaDB efímera. No se tocó InfinityFree.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: pdo_mysql, mbstring, xml, dom, curl, openssl, fileinfo
+      - name: Probar CPP DECIMAL exacto sobre MariaDB temporal
+        env:
+          APP_NAME: RutaHD2_CI
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_DATABASE: rutahyd2_es_local
+          DB_USERNAME: root
+          DB_PASSWORD: solo_ci_no_productivo
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+        run: |
+          set -euo pipefail
+          php -l app/Services/CalculadoraCostoPromedioRecepcion.php
+          php -l tests/calculadora_cpp_v44.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/calculadora_cpp_v44.php
+          echo 'CPP exacto con DECIMAL, sin floats ni escrituras en producción.' >> "$GITHUB_STEP_SUMMARY"
       - name: Limpiar artefactos SQL temporales
         if: always()
         run: rm -f /tmp/v44_*.columns /tmp/v44_*.create

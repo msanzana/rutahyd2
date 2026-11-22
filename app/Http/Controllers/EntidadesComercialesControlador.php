@@ -33,12 +33,9 @@ final class EntidadesComercialesControlador extends Controller
         ],
         'proveedores' => [
             'nombre', 'razon_social', 'nombre_fantasia', 'rut', 'giro',
-            'actividad_economica_codigo', 'tipo_contribuyente', 'inicio_actividades',
-            'situacion_tributaria', 'correo_electronico', 'correo_dte', 'telefono',
-            'telefono_secundario', 'sitio_web', 'representante_legal', 'representante_rut',
-            'contacto_nombre', 'contacto_cargo', 'contacto_telefono', 'contacto_correo',
-            'direccion', 'direccion_numero', 'direccion_detalle', 'codigo_postal',
-            'ciudad_id', 'observaciones', 'moneda_preferida', 'plazo_pago_dias', 'activo'
+            'actividad_economica_codigo', 'tipo_contribuyente',
+            'correo_electronico', 'telefono',
+            'direccion', 'direccion_numero', 'ciudad_id', 'plazo_pago_dias', 'activo'
         ],
         'bodegas' => ['codigo', 'nombre', 'tipo', 'ciudad_id', 'activo'],
     ];
@@ -86,25 +83,10 @@ final class EntidadesComercialesControlador extends Controller
             'nombre_fantasia'=>array_merge($opcional,['string','max:190']),
             'giro'=>array_merge($opcional,['string','max:255']),
             'actividad_economica_codigo'=>array_merge($opcional,
-                ['regex:/^[0-9]{4,8}$/D','max:12']),
+                ['regex:/^[0-9]{6}$/D',Rule::exists('giros_sii','codigo')->where('activo',1)]),
             'tipo_contribuyente'=>array_merge($opcional,
                 ['in:PERSONA_NATURAL,PERSONA_JURIDICA,EXTRANJERO']),
-            'inicio_actividades'=>array_merge($opcional,['date_format:Y-m-d']),
-            'situacion_tributaria'=>array_merge($opcional,['string','max:80']),
-            'correo_dte'=>array_merge($opcional,['email','max:190']),
-            'telefono_secundario'=>array_merge($opcional,['string','max:50']),
-            'sitio_web'=>array_merge($opcional,['url','max:255']),
-            'representante_legal'=>array_merge($opcional,['string','max:190']),
-            'representante_rut'=>array_merge($opcional,['string','max:25']),
-            'contacto_nombre'=>array_merge($opcional,['string','max:190']),
-            'contacto_cargo'=>array_merge($opcional,['string','max:120']),
-            'contacto_telefono'=>array_merge($opcional,['string','max:50']),
-            'contacto_correo'=>array_merge($opcional,['email','max:190']),
             'direccion_numero'=>array_merge($opcional,['string','max:30']),
-            'direccion_detalle'=>array_merge($opcional,['string','max:120']),
-            'codigo_postal'=>array_merge($opcional,['string','max:16']),
-            'observaciones'=>array_merge($opcional,['string','max:10000']),
-            'moneda_preferida'=>array_merge($opcional,['regex:/^[A-Z]{3}$/D']),
             'plazo_pago_dias'=>array_merge($opcional,['integer','min:0','max:3650']),
         ]);
         return [
@@ -130,30 +112,33 @@ final class EntidadesComercialesControlador extends Controller
             if (is_string($valor)) {
                 $valor = trim($valor);
                 // Los campos opcionales vacíos no se convierten en cadenas sin valor.
-                if ($valor === '' && in_array($clave, ['codigo', 'rut', 'correo_electronico',
-                    'telefono', 'direccion', 'sector', 'observaciones',
-                    'razon_social','nombre_fantasia','giro','actividad_economica_codigo',
-                    'situacion_tributaria','correo_dte','telefono_secundario','sitio_web',
-                    'representante_legal','representante_rut','contacto_nombre',
-                    'contacto_cargo','contacto_telefono','contacto_correo',
-                    'direccion_numero','direccion_detalle','codigo_postal',
-                    'tipo_contribuyente','moneda_preferida'], true)
+                if ($valor === '' && in_array($clave, [
+                    'codigo','rut','correo_electronico','telefono','direccion',
+                    'sector','observaciones','razon_social','nombre_fantasia','giro',
+                    'actividad_economica_codigo','direccion_numero','tipo_contribuyente'
+                ],true)
                     && !($recurso === 'bodegas' && $clave === 'codigo')) {
                     $valor = null;
                 }
                 $datos[$clave] = $valor;
             }
         }
-        if($recurso==='proveedores'){
-            foreach(['rut','representante_rut'] as $rutCampo){
-                if(isset($datos[$rutCampo])){
-                    $canonico=RutChileno::normalizar((string)$datos[$rutCampo]);
-                    abort_unless($canonico,422,'RUT inválido o dígito verificador incorrecto: '.$rutCampo);
-                    $datos[$rutCampo]=$canonico;
-                }
-            }
-            if(isset($datos['razon_social']) && $datos['razon_social']==='')
-                $datos['razon_social']=null;
+        // Validación real MOD 11 para todos los campos RUT comerciales.
+        // En blanco siguen siendo opcionales (proveedores extranjeros).
+        if(in_array($recurso,['clientes','proveedores'],true)&&isset($datos['rut'])){
+            $canonico=RutChileno::normalizar((string)$datos['rut']);
+            abort_unless($canonico!==null,422,
+                'RUT inválido: verifica cuerpo y dígito verificador');
+            $datos['rut']=$canonico;
+        }
+        if($recurso==='proveedores'&&!empty($datos['actividad_economica_codigo'])){
+            // La glosa depende del código seleccionado; no aceptar un nombre de giro
+            // incoherente con el código oficial SII por manipulación del navegador.
+            $actividad=DB::table('giros_sii')
+                ->where('codigo',$datos['actividad_economica_codigo'])
+                ->where('activo',1)->first(['descripcion']);
+            abort_unless($actividad,422,'El giro SII seleccionado no existe o está inactivo');
+            $datos['giro']=$actividad->descripcion;
         }
         abort_if(array_key_exists('nombre', $datos) && $datos['nombre'] === '',
             422, 'Nombre obligatorio');

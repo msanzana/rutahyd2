@@ -1,0 +1,85 @@
+name: V38 · Preflight copia comercial en producción (solo lectura)
+on:
+  push:
+    branches: [feature/v39-proveedores-rut-giros-buscador-20261122]
+    paths: [.github/workflows/auditar-textos-productivos-v38.yml]
+permissions:
+  contents: read
+jobs:
+  cotejar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    env:
+      FTP_USER: if0_43460400
+      FTP_HOST: ftpupload.net
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FRONT_BASE: a36bc7b81d653061ed3b2646091d31a2d5c9fbbc
+    steps:
+      - name: Preparar FTPS y código V38
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          git clone -q --branch feature/v39-proveedores-rut-giros-buscador-20261122 --depth 1 https://github.com/msanzana/rutahyd2front.git /tmp/rv39
+          git -C /tmp/rv39 fetch -q --depth 1 origin "$FRONT_BASE"
+          mkdir -p /tmp/pcopy/remote
+          cat >/tmp/pcopy/files.txt <<'EOF'
+          assets/js/admin-remoto.js
+          assets/js/app-produccion.js
+          assets/js/galeria-productos.js
+          assets/js/listas-precios.js
+          assets/js/login-produccion.js
+          assets/js/menu-usuario.js
+          assets/js/perfiles.js
+          assets/js/productos-remotos.js
+          assets/js/recuperacion.js
+          assets/js/usuarios.js
+          assets/js/modulos-oficiales.js
+          assets/js/proveedores-productos.js
+          assets/js/ventas-precios.js
+          EOF
+      - name: Descargar copias actuales (GET FTPS exclusivamente)
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          {
+            echo 'set cmd:fail-exit yes'
+            echo 'set net:timeout 45'
+            echo 'set net:max-retries 2'
+            echo 'set ftp:ssl-force yes'
+            echo 'set ftp:ssl-protect-data yes'
+            echo 'set ssl:verify-certificate yes'
+            printf 'open -u "%s","%s" ftp://%s\n' "$FTP_USER" "$FTP_PASSWORD" "$FTP_HOST"
+            while IFS= read -r file; do
+              mkdir -p "/tmp/pcopy/remote/$(dirname "$file")"
+              printf 'get "/htdocs/%s" -o "/tmp/pcopy/remote/%s"\n' "$file" "$file"
+            done </tmp/pcopy/files.txt
+            echo 'get /htdocs/index.html -o /tmp/pcopy/remote/index.html'
+            echo 'bye'
+          } > /tmp/pcopy/get.lftp
+          lftp -f /tmp/pcopy/get.lftp >/dev/null
+      - name: Comparar remoto con base V38 y detectar frases visibles
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess,pathlib
+          root=pathlib.Path('/tmp/pcopy')
+          names=(root/'files.txt').read_text().splitlines()
+          divergent=[]
+          for name in names:
+              baseline=subprocess.check_output(['git','-C','/tmp/rv39',
+                'show','a36bc7b81d653061ed3b2646091d31a2d5c9fbbc:'+name])
+              remote=(root/'remote'/name).read_bytes()
+              status='IDENTICO_V38' if baseline==remote else 'DISTINTO_V38'
+              print(status,name)
+              if status=='DISTINTO_V38':divergent.append(name)
+          html=(root/'remote/index.html').read_text('utf-8')
+          assert 'hd-branding/logo-hd-site.png' in html
+          assert 'productos-costo-promedio-v37.css' in html
+          assert 'id="ubicacionesSubnav"' in html
+          print('HTML_PRODUCTIVO_V38',len(html),'bytes')
+          print('DIVERGENCIAS',divergent)
+          assert 'Administración MySQL' in (root/'remote/assets/js/admin-remoto.js').read_text('utf-8')
+          print('PRECHECK_SOLO_LECTURA_OK')
+          PY

@@ -1,0 +1,37 @@
+name: V39 · generar semillas oficiales SII (sin tocar MySQL)
+on:
+  push:
+    branches: [feature/v39-proveedores-rut-giros-buscador-20261122]
+    paths:
+      - scripts/generar_ddl_giros_sii_v39.py
+      - .github/workflows/generar-giro-sii-v39.yml
+permissions:
+  contents: write
+jobs:
+  generar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - run: python3 -m pip install --break-system-packages -q beautifulsoup4
+      - name: Consultar HTML oficial SII y validar 674 giros distintos
+        run: |
+          python3 scripts/generar_ddl_giros_sii_v39.py
+          test "$(grep -Ec "^  \('[0-9]{6}'," database/espanol/34_semillas_giros_sii_completo_674.sql)" -eq 674
+          grep -Fq '011101' database/espanol/34_semillas_giros_sii_completo_674.sql
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DDL34-catalogo-sii-674-verificado
+          path: database/espanol/34_semillas_giros_sii_completo_674.sql
+          retention-days: 30
+      - name: Versionar SQL reproducible para importación manual
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add database/espanol/34_semillas_giros_sii_completo_674.sql
+          if ! git diff --cached --quiet; then
+            git commit -m "ddl34: importar 674 actividades económicas del SII, fuente y verificación"
+            git push origin HEAD:feature/v39-proveedores-rut-giros-buscador-20261122
+          fi

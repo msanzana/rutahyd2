@@ -1,0 +1,23 @@
+Ruta H&D V39 · Publicación controlada de fullstack
+Fecha: 2026-11-22
+
+Confirmación del titular: «ddls ejecutados».
+Auditoría SQL de solo lectura en base correcta:
+https://github.com/msanzana/rutahyd2/actions/runs/45062694022
+DDL33: giros_sii creada
+DDL34: 674 códigos únicos de 6 dígitos, todos activos y con glosa no vacía
+DDL35: 15 de 15 columnas retiradas de proveedores, campos esenciales conservados
+
+Validaciones de fuentes:
+Backend https://github.com/msanzana/rutahyd2/actions/runs/45062871444
+Frontend https://github.com/msanzana/rutahyd2front/actions/runs/45061433476
+Preflight FTPS SIN CAMBIOS de código productivo:
+https://github.com/msanzana/rutahyd2/actions/runs/45063054068 (éxito)
+Comparó archivos previos de V38+limpieza del mensaje MySQL; integró Laravel 3-way
+y ensambló HTML conservando logo, menú y caché.
+
+Despliegue: 5 backend, 20 frontend, vía FTPS con respaldos, verificación
+byte a byte y smoke HTTP sin JWT. NO ejecutar SQL, NO modificar .env,
+gateway, .htaccess, ni datos de clientes, proveedores o inventario.
+Si falla cualquier comprobación posterior al upload: rollback automático.
+No publicar el archivo JS demo login-ui.js.

@@ -1,0 +1,260 @@
+name: Publicar Ruta HD V39 giros RUT y buscador con backup y rollback
+on:
+  push:
+    branches: [feature/v39-proveedores-rut-giros-buscador-20261122]
+    paths: [deployment/solicitudes/publicar-v39.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  verificar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 38
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACK_BASE: cf61e34aa195cc41fab9513f1959dd7d51e3246c
+      FRONT_BASE: a36bc7b81d653061ed3b2646091d31a2d5c9fbbc
+      FRONT_COPY: 978068533a66153ec2eacdacf1c8293ef8f62177
+      BACK_SOURCE: 5c1fcfe011b84b17546b04514f14357af77fd310
+      FRONT_SOURCE: 6a78b5fc5b11ddc3bd8ac4a35be587f2c144ab6d
+    steps:
+      - name: Clonar versiones validadas sin depender de cambios futuros
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          git clone --quiet --depth 1 --branch feature/v39-proveedores-rut-giros-buscador-20261122 https://github.com/msanzana/rutahyd2.git /tmp/v39back
+          git -C /tmp/v39back fetch --quiet --depth 1 origin "$BACK_BASE" "$BACK_SOURCE"
+          git -C /tmp/v39back checkout --quiet --detach "$BACK_SOURCE"
+          test "$(git -C /tmp/v39back rev-parse HEAD)" = "$BACK_SOURCE"
+          git clone --quiet --depth 1 --branch feature/v39-proveedores-rut-giros-buscador-20261122 https://github.com/msanzana/rutahyd2front.git /tmp/v39front
+          git -C /tmp/v39front fetch --quiet --depth 1 origin "$FRONT_BASE" "$FRONT_COPY" "$FRONT_SOURCE"
+          git -C /tmp/v39front checkout --quiet --detach "$FRONT_SOURCE"
+          test "$(git -C /tmp/v39front rev-parse HEAD)" = "$FRONT_SOURCE"
+          mkdir -p /tmp/v39/{before_back,after_back,before_front,after_front}
+      - name: Leer archivos publicados FTPS exclusivamente GET
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import pathlib,runpy
+          d=runpy.run_path('/tmp/v39back/scripts/ensamblar_deploy_v39.py')
+          root=pathlib.Path('/tmp/v39')
+          with (root/'read.lftp').open('w') as f:
+            for line in [
+              'set cmd:fail-exit yes','set net:timeout 45',
+              'set net:max-retries 2','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes'
+            ]:print(line,file=f)
+            import os
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for path in d['BACK_EXISTING']:
+              dest=root/'before_back'/path;dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get "/htdocs/api-v2/'+path+'" -o "'+str(dest)+'"',file=f)
+            for path in d['FRONT_EXISTING']+['index.html']:
+              dest=root/'before_front'/path;dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get "/htdocs/'+path+'" -o "'+str(dest)+'"',file=f)
+            for path,dest in [
+              ('/htdocs/api-v2/.htaccess','/tmp/v39/protect-private'),
+              ('/htdocs/api/.htaccess','/tmp/v39/protect-gateway'),
+              ('/htdocs/api/index.php','/tmp/v39/gateway')]:
+              print('get "'+path+'" -o "'+dest+'"',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v39/read.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/v39/protect-private
+          grep -Fq 'HTTP_AUTHORIZATION' /tmp/v39/protect-gateway
+          grep -Fq 'rutahd2_api_ready' /tmp/v39/gateway
+      - name: Reconstruir V38 de producción y fusionar solamente cambios V39
+        run: |
+          set -euo pipefail
+          python3 /tmp/v39back/scripts/ensamblar_deploy_v39.py
+          for path in routes/api.php app/Http/Controllers/EntidadesComercialesControlador.php app/Models/Proveedor.php app/Http/Controllers/BuscadorProductosControlador.php app/Http/Controllers/GirosSiiControlador.php; do
+            php -l "/tmp/v39/after_back/$path"
+          done
+          for file in /tmp/v39/after_front/assets/js/*.js; do node --check "$file"; done
+          grep -Fq 'giros-sii' /tmp/v39/after_back/routes/api.php
+          grep -Fq 'productos/buscador' /tmp/v39/after_back/routes/api.php
+          grep -Fq 'rut-chileno-v39.js' /tmp/v39/after_front/index.html
+          grep -Fq 'hd-branding/logo-hd-site.png' /tmp/v39/after_front/index.html
+          test "$(find /tmp/v39/after_front -type f | wc -l)" -eq 20
+          test "$(find /tmp/v39/after_back -type f | wc -l)" -eq 5
+          echo 'V39 preflight OK: 5 backend, 20 frontend, sin escrituras de producción.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Preparar Chromium aislado para el smoke de producción
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v39/browser
+          cd /tmp/v39/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Respaldo anterior descargable para recuperación
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v39-backup-antes-de-publicacion
+          path: |
+            /tmp/v39/before_back/
+            /tmp/v39/before_front/
+            /tmp/v39/protect-private
+            /tmp/v39/protect-gateway
+            /tmp/v39/gateway
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar primero Laravel, después JavaScript y HTML de último
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/v39/upload-started
+          python3 - <<'PY'
+          import pathlib,os,runpy
+          d=runpy.run_path('/tmp/v39back/scripts/ensamblar_deploy_v39.py')
+          root=pathlib.Path('/tmp/v39')
+          with (root/'upload.lftp').open('w') as f:
+            for line in ['set cmd:fail-exit yes','set net:timeout 45','set net:max-retries 2',
+              'set ftp:ssl-force yes','set ftp:ssl-protect-data yes',
+              'set ssl:verify-certificate yes']:print(line,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for path in d['BACK_EXISTING']+d['BACK_NEW']:
+              print('put "/tmp/v39/after_back/'+path+'" -o "/htdocs/api-v2/'+path+'"',file=f)
+            for path in d['FRONT_EXISTING']+d['FRONT_NEW']:
+              print('put "/tmp/v39/after_front/'+path+'" -o "/htdocs/'+path+'"',file=f)
+            print('put "/tmp/v39/after_front/index.html" -o "/htdocs/index.html"',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v39/upload.lftp >/dev/null
+      - name: Descargar todo otra vez y validar integridad de 25 archivos
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import pathlib,os,runpy
+          d=runpy.run_path('/tmp/v39back/scripts/ensamblar_deploy_v39.py')
+          root=pathlib.Path('/tmp/v39')
+          with (root/'verify.lftp').open('w') as f:
+            for line in ['set cmd:fail-exit yes','set net:timeout 45','set net:max-retries 2',
+              'set ftp:ssl-force yes','set ftp:ssl-protect-data yes',
+              'set ssl:verify-certificate yes']:print(line,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for path in d['BACK_EXISTING']+d['BACK_NEW']:
+              dest=root/'verified_back'/path;dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get "/htdocs/api-v2/'+path+'" -o "'+str(dest)+'"',file=f)
+            for path in d['FRONT_EXISTING']+d['FRONT_NEW']+['index.html']:
+              dest=root/'verified_front'/path;dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get "/htdocs/'+path+'" -o "'+str(dest)+'"',file=f)
+            for path,dest in [
+              ('/htdocs/api-v2/.htaccess','/tmp/v39/protect-private-after'),
+              ('/htdocs/api/.htaccess','/tmp/v39/protect-gateway-after'),
+              ('/htdocs/api/index.php','/tmp/v39/gateway-after')]:
+              print('get "'+path+'" -o "'+dest+'"',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v39/verify.lftp >/dev/null
+          python3 - <<'PY'
+          import pathlib,runpy
+          d=runpy.run_path('/tmp/v39back/scripts/ensamblar_deploy_v39.py')
+          root=pathlib.Path('/tmp/v39')
+          for path in d['BACK_EXISTING']+d['BACK_NEW']:
+            assert (root/'after_back'/path).read_bytes()==(root/'verified_back'/path).read_bytes(),path
+          for path in d['FRONT_EXISTING']+d['FRONT_NEW']+['index.html']:
+            assert (root/'after_front'/path).read_bytes()==(root/'verified_front'/path).read_bytes(),path
+          for name in ['protect-private','protect-gateway','gateway']:
+            assert (root/name).read_bytes()==(root/(name+'-after')).read_bytes(),name
+          print('V39_UPLOAD_VERIFIED: 25 archivos (5 backend / 20 frontend), gateway y .htaccess intactos.')
+          PY
+      - name: Smoke sin credenciales del sitio y rutas privadas V39
+        working-directory: /tmp/v39/browser
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/?v39=20261122',{
+              waitUntil:'domcontentloaded',timeout:55000});
+            await page.waitForTimeout(9500);
+            const output=await page.evaluate(async()=>{
+              const links=[
+                '/api/v1/estado',
+                '/api/v1/giros-sii',
+                '/api/v1/productos/buscador',
+                '/assets/js/rut-chileno-v39.js?v=20261122-v39prod',
+                '/assets/js/giros-sii-v39.js?v=20261122-v39prod',
+                '/assets/js/buscador-productos-v39.js?v=20261122-v39prod',
+                '/assets/css/acciones-buscadores-v39.css?v=20261122-v39prod'
+              ];
+              const calls=await Promise.all(links.map(async url=>{
+                const r=await fetch(url,{cache:'no-store',headers:{Accept:'application/json'}});
+                return {url,status:r.status};
+              }));
+              const scripts=[...document.querySelectorAll('script[src]')].map(e=>e.src);
+              return {
+                logo:!!document.querySelector('.brand-logo'),
+                geoMenu:!!document.querySelector('#ubicacionesSubnav'),
+                noMySql:!document.documentElement.outerHTML.includes('Administración MySQL'),
+                rut:!!window.RutaHDRut,
+                picker:!!window.RutaHDBuscadorProductos,
+                giros:!!window.RutaHDGirosSii,
+                scripts,siiCount:links.length,
+                calls
+              };
+            });
+            console.log('V39_SMOKE',JSON.stringify({
+              logo:output.logo,geoMenu:output.geoMenu,noMySql:output.noMySql,
+              rut:output.rut,picker:output.picker,giros:output.giros,calls:output.calls
+            }));
+            const status=path=>output.calls.find(x=>x.url.startsWith(path))?.status;
+            if(!output.logo||!output.geoMenu||!output.noMySql||
+              !output.rut||!output.picker||!output.giros||
+              status('/api/v1/estado')!==200||
+              status('/api/v1/giros-sii')!==401||
+              status('/api/v1/productos/buscador')!==401||
+              output.calls.some(x=>x.url.startsWith('/assets/')&&x.status!==200))
+              throw Error('Smoke V39 falló, iniciar rollback automático.');
+          }finally{await browser.close();}
+          JS
+          echo 'V39 online: catálogo SII y buscador protegidos (401), JS/CSS 200, logo y ubicación intactos.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Restauración de los archivos anteriores si falló un paso tras la carga
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/v39/upload-started ] && [ -s /tmp/v39/before_front/index.html ]; then
+            python3 - <<'PY'
+            import pathlib,os,runpy
+            d=runpy.run_path('/tmp/v39back/scripts/ensamblar_deploy_v39.py')
+            root=pathlib.Path('/tmp/v39')
+            with (root/'rollback.lftp').open('w') as f:
+              for line in ['set cmd:fail-exit yes','set net:timeout 45','set net:max-retries 3',
+                'set ftp:ssl-force yes','set ftp:ssl-protect-data yes',
+                'set ssl:verify-certificate yes']:print(line,file=f)
+              print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+              for path in d['BACK_EXISTING']:
+                print('put "/tmp/v39/before_back/'+path+'" -o "/htdocs/api-v2/'+path+'"',file=f)
+              for path in d['FRONT_EXISTING']:
+                print('put "/tmp/v39/before_front/'+path+'" -o "/htdocs/'+path+'"',file=f)
+              print('put "/tmp/v39/before_front/index.html" -o "/htdocs/index.html"',file=f)
+              print('set cmd:fail-exit no',file=f)
+              for path in d['BACK_NEW']:
+                print('rm "/htdocs/api-v2/'+path+'"',file=f)
+              for path in d['FRONT_NEW']:
+                print('rm "/htdocs/'+path+'"',file=f)
+              print('bye',file=f)
+            PY
+            lftp -f /tmp/v39/rollback.lftp >/dev/null ||
+              echo '::error::Rollback incompleto: restaurar el artefacto rutahd-v39-backup-antes-de-publicacion'
+          else
+            echo 'No se detectó inicio de carga: sin cambios en archivos publicados.'
+          fi
+      - name: Destruir scripts temporales con secretos
+        if: always()
+        run: rm -f /tmp/v39/read.lftp /tmp/v39/upload.lftp /tmp/v39/verify.lftp /tmp/v39/rollback.lftp /tmp/v39/upload.lftp /tmp/v39/verify.lftp /tmp/v39/rollback.lftp
+      - name: Limpiar comando con contraseña
+        if: always()
+        run: rm -f /tmp/v39/read.lftp

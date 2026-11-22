@@ -1,0 +1,191 @@
+name: V39 - auditoría giros SII y estado DDL35 (solo lectura)
+on:
+  push:
+    branches: [feature/v39-proveedores-rut-giros-buscador-20261122]
+    paths:
+      - .github/workflows/auditar-ddl33-35-v39.yml
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  auditar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar herramientas FTPS y navegador
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          mkdir -p /tmp/rutahd-v38-audit/browser
+          cd /tmp/rutahd-v38-audit/browser
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund -q playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Crear sonda temporal protegida y de consulta exclusivamente SQL
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import pathlib, secrets, time, os
+          name='hd_v39_schema_'+secrets.token_hex(16)+'.php'
+          token=secrets.token_hex(32)
+          expires=str(int(time.time()+900))
+          php=r'''<?php
+          declare(strict_types=1);
+          ini_set('display_errors','0');
+          header('Content-Type: application/json; charset=utf-8');
+          header('Cache-Control: no-store');
+          header('X-Content-Type-Options: nosniff');
+          if(($_SERVER['REQUEST_METHOD']??'')!=='POST' ||
+             time()>__EXPIRES__ ||
+             !hash_equals('__TOKEN__',(string)($_SERVER['HTTP_X_HD_V38_AUDIT']??''))){
+             http_response_code(404);exit;
+          }
+          try{
+            $root=__DIR__.'/api-v2';
+            require $root.'/vendor/autoload.php';
+            \Dotenv\Dotenv::createImmutable($root)->safeLoad();
+            if(($_ENV['DB_HOST']??'')!=='sql307.infinityfree.com' ||
+               ($_ENV['DB_DATABASE']??'')!=='if0_43460400_rutahyd2_es'){
+               throw new RuntimeException('destino_inesperado');
+            }
+            $pdo=new PDO('mysql:host='.$_ENV['DB_HOST'].
+              ';port=3306;dbname='.$_ENV['DB_DATABASE'].';charset=utf8mb4',
+              (string)($_ENV['DB_USERNAME']??''),(string)($_ENV['DB_PASSWORD']??''),
+              [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,
+               PDO::ATTR_TIMEOUT=>8,PDO::ATTR_EMULATE_PREPARES=>false]);
+            $pdo->exec('SET SESSION TRANSACTION READ ONLY');
+            $tables=$pdo->query('SELECT TABLE_NAME FROM information_schema.TABLES
+              WHERE TABLE_SCHEMA=DATABASE()')->fetchAll(PDO::FETCH_COLUMN);
+            $required=['codigo','descripcion','afecta_iva','categoria_tributaria',
+              'disponible_internet','rubro_sii','activo','fuente'];
+            $cols=$pdo->query("SELECT TABLE_NAME,COLUMN_NAME FROM information_schema.COLUMNS
+              WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('giros_sii','proveedores')")
+              ->fetchAll(PDO::FETCH_ASSOC);
+            $by=[];foreach($cols as $c)$by[$c['TABLE_NAME']][]=$c['COLUMN_NAME'];
+            $exists=in_array('giros_sii',$tables,true);
+            $missing=array_values(array_diff($required,$by['giros_sii']??[]));
+            $counts=['total'=>0,'distintos'=>0,'codigos_seis_digitos'=>0,
+               'activos'=>0,'no_vacios'=>0,'codigos_control'=>0];
+            if($exists && !$missing){
+              $counts['total']=(int)$pdo->query('SELECT COUNT(*) FROM giros_sii')->fetchColumn();
+              $counts['distintos']=(int)$pdo->query('SELECT COUNT(DISTINCT codigo) FROM giros_sii')->fetchColumn();
+              $counts['codigos_seis_digitos']=(int)$pdo->query("SELECT COUNT(*) FROM giros_sii
+                WHERE codigo REGEXP '^[0-9]{6}$'")->fetchColumn();
+              $counts['activos']=(int)$pdo->query("SELECT COUNT(*) FROM giros_sii WHERE activo=1")->fetchColumn();
+              $counts['no_vacios']=(int)$pdo->query("SELECT COUNT(*) FROM giros_sii
+                WHERE descripcion IS NOT NULL AND LENGTH(TRIM(descripcion))>0")->fetchColumn();
+              $counts['codigos_control']=(int)$pdo->query("SELECT COUNT(*) FROM giros_sii
+                WHERE codigo IN ('011101','469000','990000')")->fetchColumn();
+            }
+            $dropped=['inicio_actividades','direccion_detalle','codigo_postal',
+              'situacion_tributaria','correo_dte','telefono_secundario','sitio_web',
+              'representante_legal','representante_rut','contacto_nombre','contacto_cargo',
+              'contacto_telefono','contacto_correo','moneda_preferida','observaciones'];
+            $remaining=array_values(array_intersect($dropped,$by['proveedores']??[]));
+            $essentials=['id','nombre','razon_social','rut','giro','actividad_economica_codigo',
+              'ciudad_id','correo_electronico','telefono','activo'];
+            $essentialMissing=array_values(array_diff($essentials,$by['proveedores']??[]));
+            $state=count($remaining)===15?'pending':
+              (count($remaining)===0?'executed':'partial');
+            $ready=$exists && !$missing && !$essentialMissing && $state!=='partial'
+              && $counts['total']===674 && $counts['distintos']===674
+              && $counts['codigos_seis_digitos']===674
+              && $counts['activos']===674 && $counts['no_vacios']===674
+              && $counts['codigos_control']===3;
+            if(!$ready)http_response_code(412);
+            echo json_encode(['ready'=>$ready,'ddl33'=>$exists&&!$missing,
+              'ddl34'=>$counts['total']===674&&$counts['distintos']===674,
+              'ddl35'=>$state,'removed_fields_count'=>15-count($remaining),
+              'missing_columns_giros'=>$missing,'missing_essential_provider_columns'=>$essentialMissing,
+              'giros'=>$counts],JSON_UNESCAPED_UNICODE);
+          }catch(Throwable $e){
+            http_response_code(503);
+            echo json_encode(['ready'=>false,'stage'=>'DDL33_35_READ_ONLY',
+              'error_class'=>get_class($e)],JSON_UNESCAPED_UNICODE);
+          }
+          '''
+          php=php.replace('__TOKEN__',token).replace('__EXPIRES__',expires)
+          pathlib.Path('/tmp/rutahd-v38-audit/audit.php').write_text(php,encoding='utf-8')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+            f.write('AUDIT_NAME='+name+'\nAUDIT_KEY='+token+'\n')
+          PY
+          php -l /tmp/rutahd-v38-audit/audit.php
+      - name: Subir sonda temporal que solo consulta columnas y totales
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/rutahd-v38-audit/upload.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/rutahd-v38-audit/audit.php -o "/htdocs/$AUDIT_NAME"
+          bye
+          EOF
+          lftp -f /tmp/rutahd-v38-audit/upload.lftp >/dev/null
+      - name: Comprobar DDL29-32 en base exacta con SQL sin escrituras
+        working-directory: /tmp/rutahd-v38-audit/browser
+        run: |
+          set -euo pipefail
+          set +x
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try {
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/',{
+              waitUntil:'domcontentloaded',timeout:55000
+            });
+            await page.waitForTimeout(9000);
+            const result=await page.evaluate(async({name,key})=>{
+              const controller=new AbortController();
+              const timer=setTimeout(()=>controller.abort(),25000);
+              try{
+                const r=await fetch('/'+name,{method:'POST',cache:'no-store',
+                  credentials:'same-origin',headers:{
+                    'X-HD-V38-Audit':key,Accept:'application/json'
+                  },signal:controller.signal});
+                const data=(r.headers.get('content-type')||'').includes('json')
+                  ?await r.json():{};
+                return {http:r.status,...data};
+              }finally{clearTimeout(timer);}
+            },{name:process.env.AUDIT_NAME,key:process.env.AUDIT_KEY});
+            console.log('DDL33_35_READ_ONLY_AUDIT',JSON.stringify(result));
+            if(result.http!==200||result.ready!==true)
+              throw Error('V39 no puede publicarse: comprobación SQL incompleta');
+          }finally{await browser.close();}
+          JS
+          echo 'DDL33–35 verificadas en base productiva mediante SELECT/metadata exclusivamente.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Eliminar sonda temporal incluso ante fallo
+        if: always()
+        run: |
+          set +x
+          if [[ -n "$AUDIT_NAME" ]]; then
+            cat >/tmp/rutahd-v38-audit/delete.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 40
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          rm "/htdocs/$AUDIT_NAME"
+          bye
+          EOF
+            lftp -f /tmp/rutahd-v38-audit/delete.lftp >/dev/null || echo '::warning::Revisar sonda temporal de 15 minutos.'
+          fi
+          rm -f /tmp/rutahd-v38-audit/audit.php /tmp/rutahd-v38-audit/*.lftp

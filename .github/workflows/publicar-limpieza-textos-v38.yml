@@ -1,0 +1,211 @@
+name: V38 · Quitar textos técnicos de producción con respaldo y rollback
+on:
+  push:
+    branches: [feature/v39-proveedores-rut-giros-buscador-20261122]
+    paths: [deployment/solicitudes/limpiar-textos-produccion-v38.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar-copias:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 32
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FRONT_BASE: a36bc7b81d653061ed3b2646091d31a2d5c9fbbc
+      FRONT_TARGET: 978068533a66153ec2eacdacf1c8293ef8f62177
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar el código aprobado, FTPS y validación de navegador
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lftp
+          git clone -q --branch feature/v39-proveedores-rut-giros-buscador-20261122 --depth 1 https://github.com/msanzana/rutahyd2front.git /tmp/rv39front
+          git -C /tmp/rv39front fetch -q --depth 1 origin "$FRONT_BASE" "$FRONT_TARGET"
+          git -C /tmp/rv39front checkout -q --detach "$FRONT_TARGET"
+          test "$(git -C /tmp/rv39front rev-parse HEAD)" = "$FRONT_TARGET"
+          mkdir -p /tmp/copyprod/{previous/assets/js,next/assets/js,verified/assets/js}
+          cd /tmp/copyprod
+          npm init -y >/dev/null
+          npm install -q --no-fund --no-audit playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Obtener originales publicados, sin cambiar archivos
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          {
+            echo 'set cmd:fail-exit yes'
+            echo 'set net:timeout 45'
+            echo 'set net:max-retries 2'
+            echo 'set ftp:ssl-force yes'
+            echo 'set ftp:ssl-protect-data yes'
+            echo 'set ssl:verify-certificate yes'
+            printf 'open -u "%s","%s" ftp://%s\n' "$FTP_USER" "$FTP_PASSWORD" "$FTP_HOST"
+            for name in admin-remoto app-produccion galeria-productos listas-precios login-produccion menu-usuario perfiles productos-remotos recuperacion usuarios modulos-oficiales proveedores-productos ventas-precios; do
+              printf 'get "/htdocs/assets/js/%s.js" -o "/tmp/copyprod/previous/assets/js/%s.js"\n' "$name" "$name"
+            done
+            echo 'get /htdocs/index.html -o /tmp/copyprod/previous/index.html'
+            echo 'get /htdocs/api-v2/.htaccess -o /tmp/copyprod/guard-private-before'
+            echo 'get /htdocs/api/.htaccess -o /tmp/copyprod/guard-public-before'
+            echo 'get /htdocs/api/index.php -o /tmp/copyprod/gateway-before'
+            echo 'bye'
+          } >/tmp/copyprod/originals.lftp
+          lftp -f /tmp/copyprod/originals.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/copyprod/guard-private-before
+          grep -Fq 'HTTP_AUTHORIZATION' /tmp/copyprod/guard-public-before
+          grep -Fq 'rutahd2_api_ready' /tmp/copyprod/gateway-before
+      - name: Crear parche exclusivamente textual y validar sintaxis
+        run: |
+          set -euo pipefail
+          python3 scripts/v38_limpieza_copy_prod.py
+          for js in /tmp/copyprod/next/assets/js/*.js; do node --check "$js"; done
+          grep -Fq 'Administración' /tmp/copyprod/next/assets/js/admin-remoto.js
+          ! grep -Fq 'Administración MySQL' /tmp/copyprod/next/assets/js/admin-remoto.js
+          ! grep -Fq 'Conexión Laravel' /tmp/copyprod/next/index.html
+          test "$(grep -o 'copyprod38' /tmp/copyprod/next/index.html | wc -l)" -eq 13
+          echo 'Cambio exclusivamente visual verificado. V39 y SQL no se publican.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Guardar respaldo previo disponible para reversión
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v38-respaldo-antes-de-limpieza-textos
+          path: |
+            /tmp/copyprod/previous/
+            /tmp/copyprod/guard-private-before
+            /tmp/copyprod/guard-public-before
+            /tmp/copyprod/gateway-before
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar 13 JS y el HTML al final, por FTPS
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/copyprod/upload-started
+          {
+            echo 'set cmd:fail-exit yes'
+            echo 'set net:timeout 45'
+            echo 'set net:max-retries 2'
+            echo 'set ftp:ssl-force yes'
+            echo 'set ftp:ssl-protect-data yes'
+            echo 'set ssl:verify-certificate yes'
+            printf 'open -u "%s","%s" ftp://%s\n' "$FTP_USER" "$FTP_PASSWORD" "$FTP_HOST"
+            for name in admin-remoto app-produccion galeria-productos listas-precios login-produccion menu-usuario perfiles productos-remotos recuperacion usuarios modulos-oficiales proveedores-productos ventas-precios; do
+              printf 'put "/tmp/copyprod/next/assets/js/%s.js" -o "/htdocs/assets/js/%s.js"\n' "$name" "$name"
+            done
+            echo 'put /tmp/copyprod/next/index.html -o /htdocs/index.html'
+            echo 'bye'
+          } >/tmp/copyprod/upload.lftp
+          lftp -f /tmp/copyprod/upload.lftp >/dev/null
+      - name: Verificar integridad exacta de todos los archivos subidos
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          {
+            echo 'set cmd:fail-exit yes'
+            echo 'set net:timeout 45'
+            echo 'set net:max-retries 2'
+            echo 'set ftp:ssl-force yes'
+            echo 'set ftp:ssl-protect-data yes'
+            echo 'set ssl:verify-certificate yes'
+            printf 'open -u "%s","%s" ftp://%s\n' "$FTP_USER" "$FTP_PASSWORD" "$FTP_HOST"
+            for name in admin-remoto app-produccion galeria-productos listas-precios login-produccion menu-usuario perfiles productos-remotos recuperacion usuarios modulos-oficiales proveedores-productos ventas-precios; do
+              printf 'get "/htdocs/assets/js/%s.js" -o "/tmp/copyprod/verified/assets/js/%s.js"\n' "$name" "$name"
+            done
+            echo 'get /htdocs/index.html -o /tmp/copyprod/verified/index.html'
+            echo 'get /htdocs/api-v2/.htaccess -o /tmp/copyprod/guard-private-after'
+            echo 'get /htdocs/api/.htaccess -o /tmp/copyprod/guard-public-after'
+            echo 'get /htdocs/api/index.php -o /tmp/copyprod/gateway-after'
+            echo 'bye'
+          } >/tmp/copyprod/check.lftp
+          lftp -f /tmp/copyprod/check.lftp >/dev/null
+          for name in admin-remoto app-produccion galeria-productos listas-precios login-produccion menu-usuario perfiles productos-remotos recuperacion usuarios modulos-oficiales proveedores-productos ventas-precios; do
+            cmp "/tmp/copyprod/next/assets/js/$name.js" "/tmp/copyprod/verified/assets/js/$name.js"
+          done
+          cmp /tmp/copyprod/next/index.html /tmp/copyprod/verified/index.html
+          cmp /tmp/copyprod/guard-private-before /tmp/copyprod/guard-private-after
+          cmp /tmp/copyprod/guard-public-before /tmp/copyprod/guard-public-after
+          cmp /tmp/copyprod/gateway-before /tmp/copyprod/gateway-after
+          echo '14 archivos coinciden por bytes con lo publicado; gateway y protecciones Apache sin cambios.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Prueba pública del sitio y los textos sin credenciales
+        working-directory: /tmp/copyprod
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/?copyprod38=20261122',{
+              waitUntil:'domcontentloaded',timeout:55000
+            });
+            await page.waitForTimeout(9000);
+            const result=await page.evaluate(async()=>{
+              const paths=[
+                '/api/v1/estado','/api/v1/ubicaciones/paises',
+                '/assets/js/admin-remoto.js?v=20261122-copyprod38'
+              ];
+              const calls=await Promise.all(paths.map(async path=>{
+                const r=await fetch(path,{cache:'no-store'});
+                return {path,http:r.status,text:path.includes('admin-remoto.js')?await r.text():null};
+              }));
+              const admin=calls.find(x=>x.path.includes('admin-remoto.js'));
+              return {
+                title:document.title,
+                logo:!!document.querySelector('.brand-logo'),
+                geoMenu:!!document.querySelector('#ubicacionesSubnav'),
+                description:document.querySelector('#workspaceDescription')?.textContent||'',
+                cache:!!document.querySelector('script[src*="admin-remoto.js?v=20261122-copyprod38"]'),
+                indexClean:!document.documentElement.outerHTML.includes('Servidor Laravel · Acceso JWT protegido'),
+                jsClean:admin?.text?.includes('Administración')&&
+                  !admin.text.includes('Administración MySQL')&&
+                  !admin.text.includes('Los cambios se guardan en MariaDB'),
+                calls:calls.map(({path,http})=>({path,http}))
+              };
+            });
+            console.log('COPYPROD38_SMOKE',JSON.stringify(result));
+            const status=p=>result.calls.find(x=>x.path.startsWith(p))?.http;
+            if(!result.logo||!result.geoMenu||!result.cache||
+              !result.indexClean||!result.jsClean||
+              status('/api/v1/estado')!==200||
+              status('/api/v1/ubicaciones/paises')!==401||
+              status('/assets/js/admin-remoto.js')!==200)
+              throw Error('Fallo smoke de interfaz comercial: activar rollback');
+          }finally{await browser.close();}
+          JS
+          echo 'SMOKE aprobado: textos limpios, logo y menú, API 200, JWT 401 sin sesión.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Restaurar todos los archivos anteriores ante cualquier fallo tras escritura
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/copyprod/upload-started ] && [ -s /tmp/copyprod/previous/index.html ]; then
+            {
+              echo 'set cmd:fail-exit yes'
+              echo 'set net:timeout 45'
+              echo 'set net:max-retries 3'
+              echo 'set ftp:ssl-force yes'
+              echo 'set ftp:ssl-protect-data yes'
+              echo 'set ssl:verify-certificate yes'
+              printf 'open -u "%s","%s" ftp://%s\n' "$FTP_USER" "$FTP_PASSWORD" "$FTP_HOST"
+              for name in admin-remoto app-produccion galeria-productos listas-precios login-produccion menu-usuario perfiles productos-remotos recuperacion usuarios modulos-oficiales proveedores-productos ventas-precios; do
+                printf 'put "/tmp/copyprod/previous/assets/js/%s.js" -o "/htdocs/assets/js/%s.js"\n' "$name" "$name"
+              done
+              echo 'put /tmp/copyprod/previous/index.html -o /htdocs/index.html'
+              echo 'bye'
+            } >/tmp/copyprod/rollback.lftp
+            lftp -f /tmp/copyprod/rollback.lftp >/dev/null ||
+              echo '::error::Rollback incompleto: restaurar desde artifact rutahd-v38-respaldo-antes-de-limpieza-textos'
+          else
+            echo 'No se modificaron archivos en producción.'
+          fi
+      - name: Limpiar comandos con variables sensibles
+        if: always()
+        run: |
+          rm -f /tmp/copyprod/originals.lftp /tmp/copyprod/upload.lftp /tmp/copyprod/check.lftp /tmp/copyprod/rollback.lftp

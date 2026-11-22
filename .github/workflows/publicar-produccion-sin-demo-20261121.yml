@@ -32,7 +32,7 @@ jobs:
           grep -Fq 'crud-v18.css?v=20261122-fix19' /tmp/front/index.html
           grep -Fq 'listados-tema-v20.css?v=20261122-v31' /tmp/front/index.html
           grep -Fq 'menu-usuario.js?v=20261122-ui20' /tmp/front/index.html
-          grep -Fq 'listados-ui.js?v=20261122-page33' /tmp/front/index.html
+          grep -Fq 'listados-ui.js?v=20261122-status34' /tmp/front/index.html
           test -s /tmp/front/assets/js/menu-usuario.js
           test -s /tmp/front/assets/js/listados-ui.js
           test -s /tmp/front/assets/js/validacion-ui.js
@@ -47,16 +47,19 @@ jobs:
           grep -Fq "button('Nuevo Producto'" /tmp/front/assets/js/productos-remotos.js
           grep -Fq 'login-foto-v26.css?v=20261122-login26' /tmp/front/index.html
           grep -Fq 'data:image/webp;base64,' /tmp/front/assets/css/login-foto-v26.css
-          grep -Fq 'listas-precios.js?v=20261122-page33' /tmp/front/index.html
+          grep -Fq 'listas-precios.js?v=20261122-status34' /tmp/front/index.html
           grep -Fq 'ventas-precios.js?v=20261122-v31' /tmp/front/index.html
-          grep -Fq 'modulos-oficiales.js?v=20261122-page33' /tmp/front/index.html
-          grep -Fq 'admin-remoto.js?v=20261122-page33' /tmp/front/index.html
+          grep -Fq 'modulos-oficiales.js?v=20261122-status34' /tmp/front/index.html
+          grep -Fq 'admin-remoto.js?v=20261122-status34' /tmp/front/index.html
           grep -Fq 'data-nav="listas_precios"' /tmp/front/index.html
           grep -Fq 'validacion-ui.js?v=20261122-filters22' /tmp/front/index.html
-          grep -Fq 'productos-remotos.js?v=20261122-page33' /tmp/front/index.html
+          grep -Fq 'productos-remotos.js?v=20261122-status34' /tmp/front/index.html
           grep -Fq 'switches-v32.css?v=20261122-page33' /tmp/front/index.html
           test -s /tmp/front/assets/css/switches-v32.css
           test -s /tmp/front/assets/css/controles-v33.css
+          grep -Fq 'productos-estados-v34.css?v=20261122-status34' /tmp/front/index.html
+          test -s /tmp/front/assets/css/productos-estados-v34.css
+          grep -Fq 'statusSwitch' /tmp/front/assets/js/listados-ui.js
           grep -Fq 'controles-v33.css?v=20261122-page33' /tmp/front/index.html
           grep -Fq 'renderPager' /tmp/front/assets/js/listados-ui.js
           grep -Fq 'catalogos-api.js?v=20261122-v31' /tmp/front/index.html
@@ -201,6 +204,7 @@ jobs:
           get /htdocs/assets/css/listados-tema-v20.css -o /tmp/listados_css_after.css
           get /htdocs/assets/css/switches-v32.css -o /tmp/switches_css_after.css
           get /htdocs/assets/css/controles-v33.css -o /tmp/controles_css_after.css
+          get /htdocs/assets/css/productos-estados-v34.css -o /tmp/estados_css_after.css
           get /htdocs/assets/js/listados-ui.js -o /tmp/listados_js_after.js
           get /htdocs/assets/js/validacion-ui.js -o /tmp/validacion_after.js
           get /htdocs/assets/js/menu-usuario.js -o /tmp/menu_usuario_after.js
@@ -227,6 +231,7 @@ jobs:
           cmp -s /tmp/front/assets/css/listados-tema-v20.css /tmp/listados_css_after.css
           cmp -s /tmp/front/assets/css/switches-v32.css /tmp/switches_css_after.css
           cmp -s /tmp/front/assets/css/controles-v33.css /tmp/controles_css_after.css
+          cmp -s /tmp/front/assets/css/productos-estados-v34.css /tmp/estados_css_after.css
           cmp -s /tmp/front/assets/js/listados-ui.js /tmp/listados_js_after.js
           cmp -s /tmp/front/assets/js/validacion-ui.js /tmp/validacion_after.js
           cmp -s /tmp/front/assets/js/menu-usuario.js /tmp/menu_usuario_after.js

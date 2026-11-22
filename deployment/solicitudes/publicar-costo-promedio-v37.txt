@@ -11,3 +11,4 @@ archivo_php=app/Http/Controllers/ProductoComercialControlador.php
 archivos_frontend=index.html;assets/js/productos-remotos.js;assets/css/productos-costo-promedio-v37.css
 politica=preflight_V36_respaldo_verificacion_bytes_rollback
 autorizacion=JWT_intacto_sin_escrituras_BD
+reintento_2=preservar_branding_y_versionado_original_del_HTML_V36;preflight_estricto_sin_sobrescribir_archivos_ajenos

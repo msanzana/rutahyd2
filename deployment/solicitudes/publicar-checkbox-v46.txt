@@ -1,0 +1,1 @@
+Ruta H&D V46: activar hotfix de checkbox después de CI Chromium 45082128727 exitosa. Fuente d4c1b4ab0912310ce910bdb71fef9a4c6746cde1. Descargar archivos productivos V45, parchear 2 recursos y versionar caché, respaldar, subir por FTPS, verificar byte a byte y rollback si falla. No modificar backend ni base de datos. 2026-11-22.

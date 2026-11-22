@@ -1,0 +1,4 @@
+auditoria=preflight_produccion_SQL20_21
+solo_lectura=verdadero
+schema=if0_43460400_rutahyd2_es
+sin_firecrawl=si

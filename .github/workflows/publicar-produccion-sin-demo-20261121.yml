@@ -30,9 +30,9 @@ jobs:
           grep -Fq 'supplier-products-module' /tmp/front/assets/js/proveedores-productos.js
           test -f /tmp/front/assets/css/crud-v18.css
           grep -Fq 'crud-v18.css?v=20261122-fix19' /tmp/front/index.html
-          grep -Fq 'listados-tema-v20.css?v=20261122-prices25' /tmp/front/index.html
+          grep -Fq 'listados-tema-v20.css?v=20261122-v31' /tmp/front/index.html
           grep -Fq 'menu-usuario.js?v=20261122-ui20' /tmp/front/index.html
-          grep -Fq 'listados-ui.js?v=20261122-photos28' /tmp/front/index.html
+          grep -Fq 'listados-ui.js?v=20261122-v31' /tmp/front/index.html
           test -s /tmp/front/assets/js/menu-usuario.js
           test -s /tmp/front/assets/js/listados-ui.js
           test -s /tmp/front/assets/js/validacion-ui.js
@@ -41,20 +41,20 @@ jobs:
           test -s /tmp/front/assets/css/login-foto-v26.css
           test -s /tmp/front/assets/css/productos-densidad-v28.css
           test -s /tmp/front/assets/js/galeria-productos.js
-          grep -Fq 'productos-densidad-v28.css?v=20261122-margin30' /tmp/front/index.html
-          grep -Fq 'galeria-productos.js?v=20261122-photos28' /tmp/front/index.html
+          grep -Fq 'productos-densidad-v28.css?v=20261122-v31' /tmp/front/index.html
+          grep -Fq 'galeria-productos.js?v=20261122-v31' /tmp/front/index.html
           grep -Fq 'uploadProductPhotos:' /tmp/front/assets/js/catalogos-api.js
           grep -Fq "button('Nuevo Producto'" /tmp/front/assets/js/productos-remotos.js
           grep -Fq 'login-foto-v26.css?v=20261122-login26' /tmp/front/index.html
           grep -Fq 'data:image/webp;base64,' /tmp/front/assets/css/login-foto-v26.css
-          grep -Fq 'listas-precios.js?v=20261122-prices25' /tmp/front/index.html
-          grep -Fq 'ventas-precios.js?v=20261122-prices25' /tmp/front/index.html
+          grep -Fq 'listas-precios.js?v=20261122-v31' /tmp/front/index.html
+          grep -Fq 'ventas-precios.js?v=20261122-v31' /tmp/front/index.html
           grep -Fq 'modulos-oficiales.js?v=20261122-prices25' /tmp/front/index.html
           grep -Fq 'admin-remoto.js?v=20261122-prices25' /tmp/front/index.html
           grep -Fq 'data-nav="listas_precios"' /tmp/front/index.html
           grep -Fq 'validacion-ui.js?v=20261122-filters22' /tmp/front/index.html
-          grep -Fq 'productos-remotos.js?v=20261122-margin30' /tmp/front/index.html
-          grep -Fq 'catalogos-api.js?v=20261122-photos28' /tmp/front/index.html
+          grep -Fq 'productos-remotos.js?v=20261122-v31' /tmp/front/index.html
+          grep -Fq 'catalogos-api.js?v=20261122-v31' /tmp/front/index.html
           grep -Fq "event.target.closest('#infoClose')" /tmp/front/assets/js/app-produccion.js
           grep -Fq 'app-produccion.js?v=20261122-prices25' /tmp/front/index.html
           test -s /tmp/front/assets/css/listados-tema-v20.css

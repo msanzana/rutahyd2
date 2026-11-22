@@ -1,0 +1,15 @@
+Ruta H&D V2 | Solicitud de publicación precios v25 | 2026-11-22
+usuario_confirmo_ddls_importados=si
+triggers_aplicados=no
+fuente_validada=4aee794027f79d2bb4fb11012ba920cd14a85d35
+prueba_integracion_mysql=44986961000-success
+frontend_ci=44987088666-success-53
+archivos=10
+modo=solo_funciones_laravel_sin_triggers
+preflight=backup_ftps_y_comparacion_bytes_exactos
+base_anterior=88635dae023c2507a5c80b475b4fa7b6958984bb
+producto_anterior=e80574c9a9c9564317da16766682aa85f8663d83
+ddl=no_ejecutar
+datos=no_modificar_ni_poblar
+jwt=mantener
+rollback=si

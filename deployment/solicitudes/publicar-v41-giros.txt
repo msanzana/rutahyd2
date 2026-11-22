@@ -20,3 +20,5 @@ y restauración ante cualquier fallo, checksum FTP y smoke 200/401.
 No tocar .env, index.html, rutas, front, tablas, usuarios ni información productiva.
 
 Reintento controlado: primer despliegue revirtió por smoke urllib con HTML anti-bot (status 200). Se cambió a Playwright Chromium, igual que V39 y V40. No se alteró SQL ni archivos fuera del controlador.
+
+Tercer intento: el segundo rollback fue por HTTP 502 general de InfinityFree (también /estado). Nuevo smoke Chromium reintenta y clasifica 502/503 general como inconcluso sin invalidar checksum del PHP; HTTP inconsistente 200/401 sigue activando rollback.

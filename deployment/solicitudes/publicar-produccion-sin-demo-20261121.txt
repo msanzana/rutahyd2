@@ -36,3 +36,12 @@ frontend_ci_main=44975486466-success
 frontend_source_sha=cacafb109f27c102741515d6e2a06aeed7e547a1
 rollback=habilitado
 sin_firecrawl=si
+
+release=20261122-crud-visual-corporativo-v18
+frontend_source_sha=4ae53efc8e793b40d020e6ed2962788219ee21ed
+frontend_ci=44976959711-success
+new_css=assets/css/crud-v18.css
+frontend_only=true
+backend=no_modificar
+mariadb=no_modificar
+rollback=habilitado

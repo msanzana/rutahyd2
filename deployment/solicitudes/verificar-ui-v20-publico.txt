@@ -1,0 +1,11 @@
+RUTAHD2_VERIFICAR_UI_V20
+fecha=2026-11-22
+frontend_sha=259a251ecb3cb3455d6ff7f7630413b14412f9b4
+frontend_ci=44980054689-success-45
+ftps_release=44980175533-success
+visual=1440,390
+scope=busqueda-avanzada,avatar,iconos,modo-oscuro
+api_mock=true
+jwt_ficticio=true
+sin_credenciales=true
+sin_escrituras_productivas=true

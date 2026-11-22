@@ -17,7 +17,7 @@ jobs:
       FTP_USER: if0_43460400
       FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
       FRONT_BEFORE: 3803b8946d7e809aaceba63f21e74edbec507d19
-      FRONT_AFTER: ce12744ad45e7eaebd07e0b945813fc39c2bce04
+      FRONT_AFTER: d4c1b4ab0912310ce910bdb71fef9a4c6746cde1
     steps:
       - uses: actions/checkout@v4
       - name: Preparar fuente V46 y FTPS
@@ -75,7 +75,7 @@ jobs:
             shutil.copy2(p/'before'/name,target)
           patch=subprocess.run(['git','-C','/tmp/v46-source','diff','--no-ext-diff',
               '--binary','3803b8946d7e809aaceba63f21e74edbec507d19',
-              'ce12744ad45e7eaebd07e0b945813fc39c2bce04','--',*scripts],capture_output=True,check=True).stdout
+              'd4c1b4ab0912310ce910bdb71fef9a4c6746cde1','--',*scripts],capture_output=True,check=True).stdout
           assert patch.count(b'diff --git')==2,'Diff V46 incluye archivos inesperados'
           output=subprocess.run(['patch','--batch','--fuzz=0','-p1','-d',str(p/'after')],
               input=patch,capture_output=True)

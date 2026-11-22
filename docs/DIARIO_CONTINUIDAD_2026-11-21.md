@@ -494,3 +494,13 @@ Esta instrucción sustituye las recomendaciones anteriores del diario que priori
 - Workflow `https://github.com/msanzana/rutahyd2/actions/runs/44980390561` **aprobado** en navegador Chromium real contra `https://rutahyd2.free.nf/`. Recursos v20 descargados, login con JWT ficticio interceptado (sin credenciales reales), menú avatar, interruptor oscuro, botones de acción convertidos en iconos y popup de búsqueda avanzada comprobados.
 - Resoluciones 1440 px y 390 px: diálogos dentro del viewport y sin overflow horizontal. Capturas de evidencia guardadas como artefactos `ui-v20-capturas`. Backend y base productivos intactos.
 - Estado final de la solicitud visual: frontend v20 publicado con pruebas exitosas. Autorización real de tres listados y preferencia sincronizada entre dispositivos **siguen pendientes de importar DDL23 y publicar backend preparado**. No afirmar que esos dos puntos ya están activos en el servidor.
+
+
+### Hotfix INFO21 — cierre de popup «Información de conexión» (22-11-2026)
+
+El botón `#infoClose` («Entendido») no cerraba `#infoDialog`: el único listener estaba en `assets/js/app.js` de demostración, que no se carga en producción. Se agregó manejo delegado en `assets/js/app-produccion.js`, que llama `dialog.close()` si está abierto sin tocar la sesión, el JWT ni la navegación. `index.html` cambia la versión del script a `app-produccion.js?v=20261122-info21` para evitar caché antigua.
+
+- CI frontend: 46/46 pruebas Playwright aprobadas https://github.com/msanzana/rutahyd2front/actions/runs/44980983284. Nueva prueba reproduce apertura por icono de información y por botón «Más información», cierre por «Entendido», cierre por Escape y preservación de sesión.
+- Publicación FTPS: https://github.com/msanzana/rutahyd2/actions/runs/44981109548, éxito con respaldo, cotejo byte a byte y protección del backend sin cambios.
+- Validación navegador en sitio real: https://github.com/msanzana/rutahyd2/actions/runs/44981280562, éxito a 1440 px y 390 px, incluido abrir `#infoDialog` y cerrarlo con `#infoClose` sin disparar login. API interceptada y credenciales ficticias, sin escritura de datos.
+- Sin cambios de MariaDB, Laravel ni DDL23.

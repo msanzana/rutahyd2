@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use Illuminate\Database\QueryException;
+use App\Services\PermisosSubmodulos;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -37,6 +38,7 @@ final class EntidadesComercialesControlador extends Controller
         abort_unless(isset(self::PERMISOS[$recurso]), 404, 'Entidad no administrable');
         $usuario = $request->user();
         abort_unless($usuario && $usuario->activo, 401);
+        if($recurso==='proveedores') PermisosSubmodulos::exigir($usuario,'proveedores.listado','gestionar');
         if ($usuario->rol?->codigo === 'administrador') return;
         $puede = DB::table('roles_permisos')
             ->join('permisos', 'permisos.id', '=', 'roles_permisos.permiso_id')

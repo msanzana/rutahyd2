@@ -1,0 +1,70 @@
+name: Verificar CRUD comerciales publicados sin credenciales
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/verificar-crud-publico-20261122.txt]
+permissions:
+  contents: read
+jobs:
+  inspeccion:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar navegador de prueba
+        run: |
+          mkdir -p /tmp/rutahd-crud-publico && cd /tmp/rutahd-crud-publico
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Verificar fuentes Javascript realmente servidas por InfinityFree
+        working-directory: /tmp/rutahd-crud-publico
+        run: |
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({locale:'es-CL'});
+            const response=await page.goto('https://rutahyd2.free.nf/',{
+              waitUntil:'domcontentloaded',timeout:45000
+            });
+            await page.waitForTimeout(12000);
+            const result=await page.evaluate(async()=>{
+              async function text(path) {
+                const r=await fetch(path,{cache:'no-store',credentials:'same-origin'});
+                return {code:r.status,body:r.status===200?await r.text():''};
+              }
+              const [mod,api,css]=await Promise.all([
+                text('/assets/js/modulos-oficiales.js'),
+                text('/assets/js/catalogos-api.js'),
+                text('/assets/css/produccion.css')
+              ]);
+              const health=await fetch('/api/v1/estado',{
+                headers:{Accept:'application/json'},cache:'no-store'
+              });
+              const anonymous=await fetch('/api/v1/recursos/clientes',{
+                headers:{Accept:'application/json'},cache:'no-store'
+              });
+              return {
+                home:document.querySelectorAll('.sidebar .nav > .nav-link,.sidebar .nav > .nav-group').length,
+                moduleHttp:mod.code,apiHttp:api.code,cssHttp:css.code,
+                editor:mod.body.includes('official-editor')&&mod.body.includes('createResource'),
+                supplier:mod.body.includes('proveedores')&&mod.body.includes('confirmDeactivate'),
+                apiCreate:api.body.includes('createResource:')&&api.body.includes('deactivateResource:'),
+                whitelist:api.body.includes("new Set(['clientes','proveedores','bodegas'])"),
+                css:css.body.includes('.official-editor-grid'),
+                health:health.status,anonymous:anonymous.status,
+                loginVisible:document.querySelector('#loginDialog')?.open===true
+              };
+            });
+            console.log('CRUD_PUBLICO',JSON.stringify(result));
+            if(!response||response.status()!==200||result.home!==8||
+              result.moduleHttp!==200||result.apiHttp!==200||result.cssHttp!==200||
+              !result.editor||!result.supplier||!result.apiCreate||!result.whitelist||
+              !result.css||result.health!==200||result.anonymous!==401||
+              !result.loginVisible)process.exitCode=1;
+          }finally{await browser.close();}
+          JS
+          echo 'Frontend CRUD publicado y gateway JWT sin acceso anónimo. Sin escrituras en MariaDB.' >> "$GITHUB_STEP_SUMMARY"

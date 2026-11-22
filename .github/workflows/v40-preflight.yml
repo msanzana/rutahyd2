@@ -1,0 +1,82 @@
+name: V40 - preflight mix multiple FTPS sin publicar
+on:
+  push:
+    branches: [feature/v40-mix-proveedor-seleccion-multiple-20261122]
+    paths: [.github/workflows/v40-preflight.yml]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  verificar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 17
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACK_BASE: 5c1fcfe011b84b17546b04514f14357af77fd310
+      FRONT_BASE: 6a78b5fc5b11ddc3bd8ac4a35be587f2c144ab6d
+      FRONT_PIN: d93ac2b8ab187c44f2cc1faaa67bc6092dbe1834
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar herramientas y fuentes fijadas
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          git clone -q --depth 1 --branch feature/v40-mix-proveedor-seleccion-multiple-20261122 https://github.com/msanzana/rutahyd2.git /tmp/v40back
+          git -C /tmp/v40back fetch -q --depth 1 origin "$BACK_BASE"
+          git clone -q --depth 1 --branch feature/v40-mix-proveedor-seleccion-multiple-20261122 https://github.com/msanzana/rutahyd2front.git /tmp/v40front
+          git -C /tmp/v40front fetch -q --depth 1 origin "$FRONT_BASE" "$FRONT_PIN"
+          git -C /tmp/v40front checkout -q --detach "$FRONT_PIN"
+          test "$(git -C /tmp/v40front rev-parse HEAD)" = "$FRONT_PIN"
+          mkdir -p /tmp/v40/{before_back,before_front,after_back,after_front}
+      - name: Descargar archivos productivos de V39, sin modificar nada
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import os,pathlib,runpy
+          d=runpy.run_path('scripts/ensamblar_mix_v40.py')
+          root=pathlib.Path('/tmp/v40')
+          with (root/'read.lftp').open('w') as f:
+            for x in ['set cmd:fail-exit yes','set net:timeout 45','set net:max-retries 2',
+              'set ftp:ssl-force yes','set ftp:ssl-protect-data yes',
+              'set ssl:verify-certificate yes']:print(x,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for path in d['BACK_FILES']:
+              target=root/'before_back'/path;target.parent.mkdir(parents=True,exist_ok=True)
+              print('get "/htdocs/api-v2/'+path+'" -o "'+str(target)+'"',file=f)
+            for path in d['FRONT_FILES']+['index.html']:
+              target=root/'before_front'/path;target.parent.mkdir(parents=True,exist_ok=True)
+              print('get "/htdocs/'+path+'" -o "'+str(target)+'"',file=f)
+            print('cls -1 /htdocs/assets/css > /tmp/v40/css-list',file=f)
+            print('get /htdocs/api-v2/.htaccess -o /tmp/v40/private-protection',file=f)
+            print('get /htdocs/api/.htaccess -o /tmp/v40/gateway-protection',file=f)
+            print('get /htdocs/api/index.php -o /tmp/v40/gateway',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v40/read.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/v40/private-protection
+          grep -Fq 'HTTP_AUTHORIZATION' /tmp/v40/gateway-protection
+          grep -Fq 'rutahd2_api_ready' /tmp/v40/gateway
+          ! grep -Fxq 'mix-proveedores-v40.css' /tmp/v40/css-list
+      - name: Fusionar cambios con producción y validar frontend y Laravel
+        run: |
+          set -euo pipefail
+          python3 scripts/ensamblar_mix_v40.py
+          php -l /tmp/v40/after_back/routes/api.php
+          php -l /tmp/v40/after_back/app/Http/Controllers/ProductosProveedoresControlador.php
+          node --check /tmp/v40/after_front/assets/js/catalogos-api.js
+          node --check /tmp/v40/after_front/assets/js/proveedores-productos.js
+          test -s /tmp/v40/after_front/assets/css/mix-proveedores-v40.css
+          grep -Fq 'proveedores-productos/lote' /tmp/v40/after_back/routes/api.php
+          grep -Fq 'Buscar y agregar productos' /tmp/v40/after_front/assets/js/proveedores-productos.js
+          grep -Fq 'mix-proveedores-v40.css' /tmp/v40/after_front/index.html
+          echo 'PRECHECK V40 OK; archivos comparados, sintaxis correcta, sin subir ni cambiar datos.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Limpiar comandos temporales con contraseña
+        if: always()
+        run: rm -f /tmp/v40/read.lftp

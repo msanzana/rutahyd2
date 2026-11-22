@@ -68,6 +68,10 @@ final class ProductoComercialControlador extends Controller
             'descripcion'=>$producto->descripcion,
             'activo'=>(bool)$producto->activo,
             'costoNeto'=>isset($producto->costo_neto)?(string)$producto->costo_neto:'0',
+            // Se lee del esquema; nunca se modifica desde el CRUD de Productos.
+            // NULL indica que aún no se importó el DDL28 en la base consultada.
+            'costoPromedioPonderado'=>isset($producto->costo_promedio_ponderado)
+                ? (string)$producto->costo_promedio_ponderado : null,
             'proveedorId'=>$producto->proveedor_id===null ? null : (int)$producto->proveedor_id,
             'categoriaLegadaId'=>$producto->categoria_id===null ? null : (int)$producto->categoria_id,
             'clasificacion'=>$clasificacion,
@@ -366,6 +370,9 @@ final class ProductoComercialControlador extends Controller
             'presentacion.unidadesPorEnvase'=>[$required,'numeric','min:0.001','max:99999999999'],
             'presentacion.precioNeto'=>[$required,'numeric','min:0','max:99999999999'],
             'costoNeto'=>['sometimes','numeric','min:0','max:99999999999'],
+            // El costo promedio no se acepta desde el navegador ni clientes API;
+            // su cálculo futuro corresponderá al módulo de recepciones.
+            'costoPromedioPonderado'=>['prohibited'],
             'precios'=>['sometimes','array','max:100'],
             'precios.*.listaPrecioId'=>['required','integer','min:1'],
             'precios.*.precioVenta'=>['sometimes','nullable','numeric','min:0','max:99999999999'],

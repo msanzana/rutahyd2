@@ -416,3 +416,15 @@ Esta instrucción sustituye las recomendaciones anteriores del diario que priori
 - Los tipos de códigos de barras nuevos tienen permisos específicos de lectura/gestión en el catálogo, configurables desde Perfiles. El administrador dispone de ellos. Un rol de compras sin el permiso de catálogo podría necesitarlo para visualizar la lista de tipos.
 - El catálogo de clientes/proveedores/bodegas anterior permanece operativo, y no se habilita escritura genérica de ventas ni movimientos de inventario.
 - No pedir contraseñas, tokens de JWT ni correos de recuperación; no usar Firecrawl; cualquier cambio estructural adicional debe prepararse en SQL DDL separado de semillas DML.
+
+
+## Ajustes de interfaz CRUD y sesión — revisión 21-11-2026
+
+- Fuentes: inspección de frontend `msanzana/rutahyd2front` rama `main` y este diario; búsqueda en Google Drive por Ruta H&D, diario y fuente de conocimiento sin coincidencias.
+- Cambios confirmados en GitHub frontend `main`: CSS `assets/css/produccion.css` commit `e9d7321d3bae9f90f5f7a40aa4237ddf730a5fb2` y HTML `index.html` commit `2d28f119201f8c4ad5f922fd765c5df80e0dcaa9`.
+- Listados: contenedores con desplazamiento horizontal cuando sea necesario; última columna de acciones alineada a la derecha sin convertir `td` en contenedores flex; controles de acciones agrupados visualmente.
+- Diálogos: estilo transversal de inputs, focus visible, límites de ancho/alto y acciones adaptables. Se mantienen formularios especializados de Producto (1120 px), Proveedores productos (840 px) y Clientes/Proveedores/Bodegas (770 px).
+- Sesión: el único botón de salir sigue siendo `#authButton` gobernado por `login-produccion.js`; se reubica en el HTML después del bloque de perfil/nombre en la barra superior. No se añadió otro logout.
+- Se incrementó versionado de `produccion.css` a `20261121-2` para evitar caché antigua.
+- Esta revisión solo confirma commits y lectura de código. **No se verificaron todavía CI de estos nuevos commits, navegador público ni despliegue FTPS**. No afirmar que los cambios están visibles en producción.
+- No se modificaron backend, tablas, datos ni credenciales. Próximo paso: ejecutar CI responsivo y publicar solo frontend con respaldo y verificación FTPS, luego smoke real en 1440/820/390 px sin operaciones de escritura.

@@ -1,0 +1,13 @@
+RUTA_HD_V2_SMOKE_PUBLICO_FILTROS_V22
+fecha=2026-11-22
+frontend_ci=44982165926_success_50
+backend_ci=44981828295_success
+backend_deploy=44982058267_success
+frontend_deploy=44982279574_success
+browser=chromium
+viewports=1440,390
+modal=advanced_product_filters
+fields=classification_hierarchy,state,price
+validation=custom_styled_error
+api_data=mocked_no_real_writes
+mysql=untouched

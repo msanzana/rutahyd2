@@ -4,3 +4,4 @@ frontend_deploy=44973237940
 sin_credenciales=si
 sin_sql=si
 sin_firecrawl=si
+retest=recargar_spa_para_mock_api_20261122

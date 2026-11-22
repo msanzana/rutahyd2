@@ -1,0 +1,12 @@
+Ruta H&D V2 · Hotfix de galería y listado de Productos · 2026-11-22
+backend_sha=8bc6863b1f33a62fabd8952467f428a75414a355
+ci_mysql_temporal=44992224364-success
+ddl25_generado=database/espanol/25_productos_fotos_ddl_sin_triggers.sql
+ddl25_ejecutar_en_este_deploy=no
+triggers=no
+componentes=ProductoComercialControlador.php,FotosProductoControlador.php,routes/api.php
+preflight=backup_y_comparacion_exacta_archivos_existentes
+rollback=restaurar_rutas_y_controlador_si_falla
+api_jwt=obligatorio
+bd_productiva=no_writes
+funcionalidad=galeria_de_fotos,SKU_sincronizado,orden_global_clasificaciones,precios_y_codigos_por_fila

@@ -1,0 +1,51 @@
+name: Diagnosticar conservacion de URL InfinityFree sin credenciales
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/diagnosticar-enlaces-recuperacion-20261121.txt]
+permissions:
+  contents: read
+jobs:
+  diagnostico:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          mkdir -p /tmp/url-test && cd /tmp/url-test
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Simular links frios URL query, path y hash con valores FICTICIOS
+        working-directory: /tmp/url-test
+        run: |
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          const base='https://rutahyd2.free.nf';
+          const samples=[
+            ['/','#recuperar?token='+'a'.repeat(64)],
+            ['/?hd_prueba=test-url-123',''],
+            ['/recuperar/?hd_prueba=test-url-123',''],
+            ['/recuperar-prueba-123?hd_prueba=test-url-123','']
+          ];
+          try {
+            for(const [path,fragment] of samples) {
+              const context=await browser.newContext({locale:'es-CL'});
+              const page=await context.newPage();
+              try {
+                const response=await page.goto(base+path+fragment,{waitUntil:'domcontentloaded',timeout:45000});
+                await page.waitForTimeout(3000);
+                const info=await page.evaluate(()=>({
+                  pathname:location.pathname, search:location.search, 
+                  hash:location.hash.replace(/token=[a-f0-9]{64}/ig,'token=[REDACTED]')
+                }));
+                console.log('INFINITYFREE_URL_DIAG',JSON.stringify({input:path+fragment.replace(/token=[a-f0-9]{64}/ig,'token=[REDACTED]'),status:response?.status(),...info}));
+              } catch(err) {
+                console.log('INFINITYFREE_URL_ERROR',path,err.name);
+              } finally {await context.close();}
+            }
+          }finally{await browser.close();}
+          JS

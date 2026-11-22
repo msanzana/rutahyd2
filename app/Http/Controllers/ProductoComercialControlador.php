@@ -66,6 +66,7 @@ final class ProductoComercialControlador extends Controller
             'nombre'=>$producto->nombre,
             'descripcion'=>$producto->descripcion,
             'activo'=>(bool)$producto->activo,
+            'costoNeto'=>isset($producto->costo_neto)?(string)$producto->costo_neto:'0',
             'proveedorId'=>$producto->proveedor_id===null ? null : (int)$producto->proveedor_id,
             'categoriaLegadaId'=>$producto->categoria_id===null ? null : (int)$producto->categoria_id,
             'clasificacion'=>$clasificacion,
@@ -247,6 +248,17 @@ final class ProductoComercialControlador extends Controller
         $data=$this->resultado($producto,$presentaciones->first(),true);
         $data['totalPresentaciones']=$presentaciones->count();
         $data['codigosVenta']=$this->codigosVenta($id);
+        $minimo=DB::table('lineas')->where('id',$producto->linea_id)
+            ->value('minimo_margen_precio_venta');
+        $data['minimoMargenPrecioVenta']=(string)($minimo??0);
+        $data['precios']=DB::table('listas_precios_detalle as d')
+            ->join('listas_precios as l','l.id','=','d.lista_precio_id')
+            ->where('d.producto_id',$id)->orderByDesc('l.es_base')
+            ->orderBy('l.nombre')->get([
+                'd.lista_precio_id as listaPrecioId','l.nombre as listaNombre',
+                'l.es_base as esBase','d.precio_venta as precioVenta',
+                'd.margen_porcentaje as margenPorcentaje','d.costo','d.activo'
+            ])->toArray();
         return response()->json($data);
     }
 
@@ -266,6 +278,12 @@ final class ProductoComercialControlador extends Controller
             'presentacion.codigoBarras'=>['sometimes','nullable','string','max:80'],
             'presentacion.unidadesPorEnvase'=>[$required,'numeric','min:0.001','max:99999999999'],
             'presentacion.precioNeto'=>[$required,'numeric','min:0','max:99999999999'],
+            'costoNeto'=>['sometimes','numeric','min:0','max:99999999999'],
+            'precios'=>['sometimes','array','max:100'],
+            'precios.*.listaPrecioId'=>['required','integer','min:1'],
+            'precios.*.precioVenta'=>['sometimes','nullable','numeric','min:0','max:99999999999'],
+            'precios.*.margenPorcentaje'=>['sometimes','nullable','numeric','min:0','max:999999'],
+            'precios.*.activo'=>['sometimes','boolean'],
             'codigosVenta'=>['sometimes','array','max:100'],
             'codigosVenta.*.id'=>['sometimes','nullable','integer','min:1'],
             'codigosVenta.*.tipoCodigoBarraId'=>['required','integer','min:1'],
@@ -308,6 +326,9 @@ final class ProductoComercialControlador extends Controller
             if (array_key_exists('clasificacion',$datos)) {
                 [$columnas,$codigoTributario]=$this->validarClasificacion($datos['clasificacion']);
                 $cambios=array_merge($cambios,$columnas);
+            }
+            if(array_key_exists('costoNeto',$datos)){
+                $cambios['costo_neto']=$datos['costoNeto'];
             }
             if ($nuevo) {
                 $cambios['activo']=$cambios['activo']??1;
@@ -368,12 +389,44 @@ final class ProductoComercialControlador extends Controller
             if(array_key_exists('codigosVenta',$datos)){
                 $this->sincronizarCodigosVenta($id,$datos['codigosVenta']);
             }
-            // Reemplazo de triggers de Producto: misma transacción del alta/edición.
+            // Alta/edición de listas sin triggers y dentro de ESTA transacción.
             if ($nuevo) {
                 $this->listasPrecios->asegurarPrecioBaseProducto($id);
-            } elseif (array_key_exists('sku', $cambios)) {
-                $this->listasPrecios->sincronizarSkuProducto($id, (string)$cambios['sku']);
+            } elseif (array_key_exists('sku',$cambios)) {
+                $this->listasPrecios->sincronizarSkuProducto($id,(string)$cambios['sku']);
             }
+            $costo=(float)DB::table('productos')->where('id',$id)->value('costo_neto');
+            $precios=$datos['precios']??[];
+            $enviadas=[];
+            foreach($precios as $detalle){
+                $listaId=(int)$detalle['listaPrecioId'];
+                abort_if(in_array($listaId,$enviadas,true),422,
+                    'Una lista de precios no puede repetirse en un producto');
+                $enviadas[]=$listaId;
+                $this->listasPrecios->guardarPrecioLista($id,$listaId,$costo,
+                    isset($detalle['precioVenta'])?(float)$detalle['precioVenta']:null,
+                    isset($detalle['margenPorcentaje'])?(float)$detalle['margenPorcentaje']:null,
+                    (bool)($detalle['activo']??true),false);
+            }
+            // Contrato legado: precioNeto de presentación corresponde a LISTA BASE.
+            // Cuando el nuevo editor no envía una fila base, conservar funcionalidad
+            // del cliente anterior sincronizando el precio general.
+            $baseId=$this->listasPrecios->listaBaseId();
+            if(!in_array($baseId,$enviadas,true) && isset($datos['presentacion'])){
+                $precioLegado=(float)$datos['presentacion']['precioNeto'];
+                $this->listasPrecios->guardarPrecioLista($id,$baseId,$costo,
+                    $precioLegado,null,true,false);
+            }
+            if(in_array($baseId,$enviadas,true)){
+                $precioBase=DB::table('listas_precios_detalle')
+                    ->where('producto_id',$id)->where('lista_precio_id',$baseId)
+                    ->value('precio_venta');
+                DB::table('presentaciones_productos')->where('producto_id',$id)
+                    ->orderBy('id')->limit(1)->update(['precio_neto'=>$precioBase]);
+            }
+            // Recalcular márgenes de todas las listas, incluidas las no editadas,
+            // y rechazar costos que incumplen el mínimo de su línea.
+            $this->listasPrecios->sincronizarCostoProducto($id);
             $producto=DB::table('productos')->where('id',$id)->first();
             $principal=DB::table('presentaciones_productos')->where('producto_id',$id)->orderBy('id')->first();
             $res=$this->resultado($producto,$principal,true);

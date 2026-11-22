@@ -14,10 +14,11 @@ final class ListasPreciosClientesControlador extends Controller
     {
         $u=$request->user();abort_unless($u&&$u->activo,401);
         if($u->rol?->codigo==='administrador')return;
+        $codes=$codigo==='ventas.ver'?['ventas.ver','ventas.gestionar']:[$codigo];
         abort_unless(DB::table('roles_permisos')
             ->join('permisos','permisos.id','=','roles_permisos.permiso_id')
             ->where('roles_permisos.rol_id',$u->rol_id)
-            ->where('permisos.codigo',$codigo)->exists(),403);
+            ->whereIn('permisos.codigo',$codes)->exists(),403);
     }
     public function listaCliente(Request $request,int $clienteId)
     {

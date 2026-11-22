@@ -302,3 +302,23 @@ Esta instrucción sustituye las recomendaciones anteriores del diario que priori
 - Instrucción operativa actual para el titular: entrar a `https://rutahyd2.free.nf/` en el navegador donde abrirá el correo, esperar a que cargue; desde ese mismo navegador abrir el mensaje nuevo de recuperación y seguir su enlace. Si la primera visita al enlace acaba en login, volver al correo y pulsarlo otra vez sin cambiar de navegador, incógnito ni app. El enlace de recuperación vence a los 30 minutos; solicitar uno nuevo si es necesario.
 - **Pendiente solución definitiva de enlace de un solo clic:** la infraestructura InfinityFree fuerza desafío que descarta fragmento. Se requiere replantear URL de recuperación/hosting de forma segura para preservar un token de un solo uso, con evaluación de exposición en logs antes de moverlo del fragmento al path o query. No afirmar que ese problema esté reparado solo por JS. La apariencia del correo HTML también puede perfeccionarse en una publicación futura, pero no modificar plantilla actual ni API autenticada sin backup.
 - El hash de contraseña aportado no coincide con la contraseña temporal del correo original. No almacenar ninguna de las dos en el repositorio; preferir restablecimiento con contraseña nueva y prueba de JWT.
+
+## Recuperación robusta de contraseña — cierre técnico 21-11-2026
+
+**Incidente reportado:** el enlace del correo de restablecimiento abría brevemente el formulario y después lo sustituía el login; la presentación no cumplía el estilo corporativo.
+
+**Causa confirmada con navegador sin cookies:** InfinityFree agrega `?i=1` y su redirección elimina `#recuperar?token=...`. La SPA no recibe el token en la primera visita y abre el login. Diagnóstico probado con enlaces sintéticos sin revelar credenciales: https://github.com/msanzana/rutahyd2/actions/runs/44966085112 . Con `/?recuperar=<token>`, InfinityFree **conserva** el parámetro y añade `&i=1`.
+
+**Corrección implementada:**
+- Frontend `msanzana/rutahyd2front`: `recuperacion.js` admite query nuevo y fragmento heredado, elimina inmediatamente el token de la barra URL y lo mantiene solo en memoria; login/router reconocen recuperación activa y no la reemplazan. `index.html` lleva `referrer=no-referrer`.
+- Nueva presentación violeta H&D con logotipo, pasos guiados, mostrar/ocultar contraseña, mensajes de validación y adaptación móvil.
+- CI frontend con pruebas de nueva URL `?recuperar=...`, simulación `&i=1`, cambio de contraseña con API simulada y navegación móvil: https://github.com/msanzana/rutahyd2front/actions/runs/44966369462 (aprobada).
+- **Frontend v14 publicado y verificado por FTPS**: https://github.com/msanzana/rutahyd2/actions/runs/44966479180 (éxito).
+- **Prueba en servidor real de primer clic con navegador sin cookies:** https://github.com/msanzana/rutahyd2/actions/runs/44966681348 (éxito). Confirmó `RECUPERACION_QUERY_PRIMER_CLICK`: formulario visible, login oculto, token fuera de URL, `no-referrer`, layout `grid`, API JWT productiva disponible.
+- Backend Laravel: rama versionada `feature/recuperacion-query-link-20261121` actualiza `RecuperacionContrasenaControlador::enviarEnlace` para los **nuevos correos** con `/?recuperar=<token>`.
+- Primer despliegue de backend https://github.com/msanzana/rutahyd2/actions/runs/44966567780 falló en FTP rename, rollback completado. Se sustituyó rename por PUT directo con respaldo y comparación. **Segundo despliegue de backend aprobado**: https://github.com/msanzana/rutahyd2/actions/runs/44966773942 . Solo controlador PHP, API JWT, SMTP, .env, frontend y MariaDB intactos.
+- No se tocó el hash de administrador ni se importó SQL. DDL sigue siendo la vía exclusiva para estructuras; **Firecrawl descartado**.
+
+**Acción final pendiente del titular:** desde `https://rutahyd2.free.nf/` solicitar un **correo nuevo** en “Recuperar contraseña”, usar el enlace **nuevo** (los anteriores tienen formato hash), definir una contraseña privada de al menos 12 caracteres y comprobar login y logout. No compartir contraseñas ni enlaces con token.
+
+**Limitación de seguridad documentada:** al usar query, el token llega al servidor web; se mitiga con enlace de un solo uso, 30 minutos, `Referrer-Policy: no-referrer` y limpieza inmediata de la URL. En un hosting que permita conservar fragmentos sin desafío se preferirá volver al modelo de fragmento o un flujo de intercambio más robusto. No se ha probado un cambio de contraseña real de la cuenta del titular; las pruebas fueron con tokens sintéticos.

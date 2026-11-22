@@ -64,6 +64,11 @@ jobs:
           start=latest.index('    // Fotos de productos - solo JWT')
           end=latest.index('    // Listas de precios:',start)
           photos=latest[start:end]
+          # DDL23 de permisos de submódulos no se presume instalado.
+          # Mantener la autorización fuerte de productos.gestionar sin
+          # agregar dependencias no confirmadas al runtime actual.
+          photos=photos.replace("->middleware('submodulo.rutahd:productos_listado,ver')",'')
+          photos=photos.replace("->middleware('submodulo.rutahd:productos_listado,gestionar')",'')
           assert photos.count("Route::get('/productos/{productoId}/fotos'")==1
           final=old.replace(anchor,anchor+'\n'+imp)
           marker='    // Listas de precios: precio base y listas especiales.'

@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use App\Services\GestionListasPrecios;
 
@@ -93,6 +94,8 @@ final class ProductoComercialControlador extends Controller
         $datos=$request->validate([
             'page'=>['sometimes','integer','min:1','max:10000'],
             'por_pagina'=>['sometimes','integer','min:1','max:100'],
+            'orden'=>['sometimes','string','in:sku,nombre,rubro,departamento,familia,linea,marca,modelo,activo'],
+            'direccion'=>['sometimes','string','in:asc,desc'],
             'buscar'=>['sometimes','nullable','string','max:120'],
             'incluye_inactivos'=>['sometimes','boolean'],
             'sku'=>['sometimes','nullable','string','max:80'],
@@ -176,14 +179,78 @@ final class ProductoComercialControlador extends Controller
                 }
             });
         }
-        $paginado=$q->orderByDesc('id')->paginate((int)($datos['por_pagina']??25));
+        // Ordenar ANTES de paginar. Solo campos permitidos, no SQL dinámico del cliente.
+        $orden=$datos['orden']??'id';
+        $direccion=strtolower((string)($datos['direccion']??'asc'));
+        $orderColumns=['sku'=>'sku','nombre'=>'nombre','activo'=>'activo'];
+        $sortCatalogs=[
+            'rubro'=>['rubros','rubro_id'],
+            'departamento'=>['departamentos','departamento_id'],
+            'familia'=>['familias','familia_id'],
+            'linea'=>['lineas','linea_id'],
+            'marca'=>['marcas','marca_id'],
+            'modelo'=>['modelos','modelo_id']
+        ];
+        if(isset($sortCatalogs[$orden])){
+            [$catalog,$col]=$sortCatalogs[$orden];
+            $sub=DB::table($catalog)->select('nombre')
+                ->whereColumn($catalog.'.id','productos.'.$col)->limit(1);
+            $q->orderBy($sub,$direccion);
+        }elseif(isset($orderColumns[$orden])){
+            $q->orderBy('productos.'.$orderColumns[$orden],$direccion);
+        }else{
+            $q->orderByDesc('productos.id');
+        }
+        $paginado=$q->orderBy('productos.id')->paginate((int)($datos['por_pagina']??25));
         $ids=$paginado->getCollection()->pluck('id')->all();
         $presentaciones=empty($ids) ? collect() :
             DB::table('presentaciones_productos')->whereIn('producto_id',$ids)
                 ->orderBy('id')->get()->groupBy('producto_id');
-        $paginado->getCollection()->transform(function(object $p)use($presentaciones){
+        // Completar exclusivamente los productos de la página (sin N+1).
+        $catalogNames=[];
+        foreach(self::CLASIFICACIONES as $key=>$cfg){
+            if(!in_array($key,['rubroId','departamentoId','familiaId','lineaId','marcaId','modeloId'],true))continue;
+            $idsCatalog=$paginado->getCollection()->pluck($cfg[1])->filter()->unique()->all();
+            $catalogNames[$key]=empty($idsCatalog)?collect():
+                DB::table($cfg[0])->whereIn('id',$idsCatalog)->pluck('nombre','id');
+        }
+        $precios=empty($ids)?collect():DB::table('listas_precios_detalle as d')
+            ->join('listas_precios as l','l.id','=','d.lista_precio_id')
+            ->whereIn('d.producto_id',$ids)
+            ->where('d.activo',1)->where('l.activo',1)
+            ->orderByDesc('l.es_base')->orderBy('l.nombre')
+            ->get(['d.producto_id','d.lista_precio_id as listaPrecioId',
+                'l.nombre as listaNombre','d.precio_venta as precioVenta'])
+            ->groupBy('producto_id');
+        $barcodes=empty($ids)?collect():DB::table('productos_codigos_barra_venta as b')
+            ->join('tipos_codigos_barras as t','t.id','=','b.tipo_codigo_barra_id')
+            ->whereIn('b.producto_id',$ids)->where('b.activo',1)
+            ->orderBy('t.nombre')->orderBy('b.id')
+            ->get(['b.producto_id','t.nombre as tipoNombre',
+                'b.codigo_barras as codigoBarras'])->groupBy('producto_id');
+        $fotos=collect();
+        $fotosDisponibles=Schema::hasTable('productos_fotos');
+        if($fotosDisponibles && $ids){
+            $fotos=DB::table('productos_fotos')->select('producto_id')
+                ->selectRaw('COUNT(*) as cantidad')->whereIn('producto_id',$ids)
+                ->groupBy('producto_id')->pluck('cantidad','producto_id');
+        }
+        $paginado->getCollection()->transform(function(object $p)use(
+            $presentaciones,$catalogNames,$precios,$barcodes,$fotos,$fotosDisponibles
+        ){
             $presentacion=$presentaciones->get($p->id)?->first();
-            return $this->resultado($p,$presentacion);
+            $data=$this->resultado($p,$presentacion);
+            $names=[];
+            foreach($catalogNames as $key=>$namesById){
+                $id=$data['clasificacion'][$key]??null;
+                $names[$key]=$id===null?null:$namesById->get($id);
+            }
+            $data['clasificacionNombres']=$names;
+            $data['precios']=$precios->get($p->id,collect())->values()->all();
+            $data['codigosVenta']=$barcodes->get($p->id,collect())->values()->all();
+            $data['cantidadFotos']=(int)$fotos->get($p->id,0);
+            $data['galeriaDisponible']=$fotosDisponibles;
+            return $data;
         });
         $respuesta=$paginado->toArray();
         $respuesta['filtros_aplicados']=true;
@@ -394,6 +461,12 @@ final class ProductoComercialControlador extends Controller
                 $this->listasPrecios->asegurarPrecioBaseProducto($id);
             } elseif (array_key_exists('sku',$cambios)) {
                 $this->listasPrecios->sincronizarSkuProducto($id,(string)$cambios['sku']);
+                // Fotografías: mismo SKU actualizado en la misma transacción.
+                // Compatibilidad con servidores que aún no importaron DDL25.
+                if (Schema::hasTable('productos_fotos')) {
+                    DB::table('productos_fotos')->where('producto_id',$id)
+                        ->update(['sku'=>(string)$cambios['sku'],'actualizado_en'=>now()]);
+                }
             }
             $costo=(float)DB::table('productos')->where('id',$id)->value('costo_neto');
             $precios=$datos['precios']??[];

@@ -40,7 +40,7 @@ final class EntidadesComercialesControlador extends Controller
             'direccion', 'direccion_numero', 'direccion_detalle', 'codigo_postal',
             'ciudad_id', 'observaciones', 'moneda_preferida', 'plazo_pago_dias', 'activo'
         ],
-        'bodegas' => ['codigo', 'nombre', 'tipo', 'activo'],
+        'bodegas' => ['codigo', 'nombre', 'tipo', 'ciudad_id', 'activo'],
     ];
 
     private function exigirPermiso(Request $request, string $recurso): void

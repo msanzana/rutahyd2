@@ -1,0 +1,22 @@
+Solicitud: limpieza de textos de producción V38 · 2026-11-22
+
+Origen: petición de retirar en todos los módulos mensajes de infraestructura
+tipo «CONEXIÓN SEGURA / Administración MySQL / Los cambios se guardan en MariaDB».
+La V39 funcional continúa sin despliegue a falta de DDL33/DDL34.
+
+Preflight FTPS de solo lectura OK:
+https://github.com/msanzana/rutahyd2/actions/runs/45061142421
+13 JS idénticos al SHA base a36bc7b81d653061ed3b2646091d31a2d5c9fbbc;
+HTML productivo presente con logo oficial y diseño V37/V38.
+
+Actualizar exclusivamente 13 JS y las frases/copias/cache de index.html:
+* 10 JS con cambios exclusivamente de copy desde SHA fijo V39
+  978068533a66153ec2eacdacf1c8293ef8f62177
+* modulos-oficiales, proveedores-productos y ventas-precios sólo con
+  reemplazos literales V38, SIN funciones V39.
+* Conservar logo, submenús, HTML, estilos, API, rutas de permisos.
+* NO subir SQL, V39, ni modificar .env, gateway, tablas o valores.
+* Respaldo descargable, chequeo bytes, smoke sin credenciales y rollback.
+
+La publicación requiere pasar todas las anclas de text-copy y seguridad; abortar
+sin escribir si alguna difiere.

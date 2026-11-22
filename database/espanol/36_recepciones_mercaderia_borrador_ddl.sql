@@ -4,6 +4,8 @@
 -- podrá ejecutarlo MANUALMENTE en phpMyAdmin con respaldo previo y auditoría.
 -- No altera productos, saldos, movimientos ni productos_proveedores; no hay DML.
 -- SIN TRIGGERS, SIN MIGRACIONES AUTOMÁTICAS, SIN DROP.
+-- El estado del confirmador FK se valida por backend: MariaDB no admite
+-- columna participante en FOREIGN KEY dentro de CHECK de la misma tabla.
 -- Requisitos verificados por revisión: esquema español 01 y DDL20 proveedor-producto.
 
 CREATE TABLE IF NOT EXISTS recepciones_mercaderia (
@@ -42,7 +44,7 @@ CREATE TABLE IF NOT EXISTS recepciones_mercaderia (
    REFERENCES usuarios(id) ON DELETE SET NULL,
  CONSTRAINT chk_hd_rx_estado CHECK (estado IN ('borrador','confirmada')),
  CONSTRAINT chk_hd_rx_confirmacion CHECK (
-   (estado='borrador' AND confirmado_en IS NULL AND confirmado_por IS NULL)
+   (estado='borrador' AND confirmado_en IS NULL)
    OR (estado='confirmada' AND confirmado_en IS NOT NULL AND token_idempotencia IS NOT NULL)
  )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

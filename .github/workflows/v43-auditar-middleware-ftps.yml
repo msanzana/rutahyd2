@@ -1,0 +1,75 @@
+name: V43 - cotejar middleware y bootstrap productivo (solo FTPS GET)
+on:
+  push:
+    branches: [diagnostico/v43-mix-500-20261122]
+    paths: [.github/workflows/v43-auditar-middleware-ftps.yml]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  inspeccionar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar FTPS
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+      - name: Leer archivos de arranque publicados y protecciones sin modificarlos
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          mkdir -p /tmp/v43-middleware
+          cat >/tmp/v43-middleware/read.lftp <<EOF
+          set cmd:fail-exit no
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/bootstrap/app.php -o /tmp/v43-middleware/bootstrap.php
+          get /htdocs/api-v2/app/Http/Middleware/AutorizarSubmodulo.php -o /tmp/v43-middleware/submodulo.php
+          get /htdocs/api-v2/routes/api.php -o /tmp/v43-middleware/api.php
+          get /htdocs/api-v2/.htaccess -o /tmp/v43-middleware/htaccess
+          bye
+          EOF
+          lftp -f /tmp/v43-middleware/read.lftp >/dev/null 2>&1 || true
+      - name: Imprimir matriz de presencia de alias y clases sin contenido sensible
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/v43-middleware')
+          files={name:(p/name).read_text(errors='replace') if (p/name).exists() else ''
+            for name in ['bootstrap.php','submodulo.php','api.php','htaccess']}
+          checks={
+            'bootstrap_presente':bool(files['bootstrap.php']),
+            'clase_submodulo_presente':'class AutorizarSubmodulo' in files['submodulo.php'],
+            'import_submodulo_bootstrap':'use App\\Http\\Middleware\\AutorizarSubmodulo;' in files['bootstrap.php'],
+            'alias_submodulo_bootstrap':"'submodulo.rutahd'=>AutorizarSubmodulo::class" in files['bootstrap.php'],
+            'alias_token_bootstrap':"'token.rutahd'=>AutenticarToken::class" in files['bootstrap.php'],
+            'alias_permiso_bootstrap':"'permiso.rutahd'=>AutorizarPermiso::class" in files['bootstrap.php'],
+            'mix_ruta_protegida':"Route::get('/proveedores/mix'" in files['api.php']
+              and 'submodulo.rutahd:proveedores_productos,ver' in files['api.php'],
+            'htaccess_protegido':'Require all denied' in files['htaccess'],
+          }
+          for k,v in checks.items():print('V43_MIDDLEWARE',k,'OK' if v else 'FALTA')
+          print('V43_SOSPECHA_ALIAS_AUSENTE',checks['mix_ruta_protegida']
+            and checks['clase_submodulo_presente'] and not checks['alias_submodulo_bootstrap'])
+          assert checks['bootstrap_presente'] and checks['htaccess_protegido'],'Faltan archivos esenciales'
+          PY
+          php -l /tmp/v43-middleware/bootstrap.php
+          echo 'FTPS GET únicamente; sin SQL ni escritura en hosting. Resultado del alias inspeccionado.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Destruir archivos temporales de lectura
+        if: always()
+        run: rm -rf /tmp/v43-middleware

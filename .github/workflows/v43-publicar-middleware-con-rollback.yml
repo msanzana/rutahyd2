@@ -1,0 +1,218 @@
+name: V43 - publicar hotfix de middleware submodulo con rollback
+on:
+  push:
+    branches: [diagnostico/v43-mix-500-20261122]
+    paths: [deployment/solicitudes/publicar-middleware-v43.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  desplegar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar FTPS
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          mkdir -p /tmp/v43-hotfix/{old,new,verified}
+      - name: Preflight remoto solo lectura y respaldo de guards
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          d=Path('/tmp/v43-hotfix')
+          files={
+            '/htdocs/api-v2/bootstrap/app.php':'bootstrap.php',
+            '/htdocs/api-v2/app/Http/Middleware/AutorizarSubmodulo.php':'submodulo.php',
+            '/htdocs/api-v2/app/Services/PermisosSubmodulos.php':'servicio.php',
+            '/htdocs/api-v2/routes/api.php':'routes.php',
+            '/htdocs/api-v2/.htaccess':'private-guard',
+            '/htdocs/api/.htaccess':'gateway-guard',
+            '/htdocs/api/index.php':'gateway'
+          }
+          with (d/'read.lftp').open('w') as f:
+            for x in ['set cmd:fail-exit no','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 2']:print(x,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for src,dst in files.items():
+              print('get '+src+' -o '+str(d/'old'/dst),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v43-hotfix/read.lftp >/dev/null 2>&1 || true
+      - name: Parche minimalista, sin sobrescribir componentes existentes
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/v43-hotfix')
+          old=p/'old';new=p/'new'
+          bootstrap=(old/'bootstrap.php').read_text(encoding='utf-8')
+          routes=(old/'routes.php').read_text(encoding='utf-8')
+          assert 'Require all denied' in (old/'private-guard').read_text()
+          assert 'HTTP_AUTHORIZATION' in (old/'gateway-guard').read_text()
+          assert 'rutahd2_api_ready' in (old/'gateway').read_text()
+          assert "Route::get('/proveedores/mix'" in routes and 'submodulo.rutahd:proveedores_productos,ver' in routes
+          assert "'token.rutahd'=>AutenticarToken::class" in bootstrap
+          assert "'permiso.rutahd'=>AutorizarPermiso::class" in bootstrap
+          assert "'submodulo.rutahd'" not in bootstrap,'El alias ya existe; revisar antes de aplicar'
+          anchor='use App\\Http\\Middleware\\AutorizarPermiso;'
+          assert bootstrap.count(anchor)==1
+          assert 'use App\\Http\\Middleware\\AutorizarSubmodulo;' not in bootstrap
+          bootstrap=bootstrap.replace(anchor,anchor+'\nuse App\\Http\\Middleware\\AutorizarSubmodulo;',1)
+          anchor="'permiso.rutahd'=>AutorizarPermiso::class,"
+          assert bootstrap.count(anchor)==1
+          bootstrap=bootstrap.replace(anchor,anchor+"\n            'submodulo.rutahd'=>AutorizarSubmodulo::class,",1)
+          (new/'bootstrap.php').write_text(bootstrap,encoding='utf-8')
+          missing=[]
+          for file,source,classname in [
+            ('submodulo.php','app/Http/Middleware/AutorizarSubmodulo.php','class AutorizarSubmodulo'),
+            ('servicio.php','app/Services/PermisosSubmodulos.php','class PermisosSubmodulos')
+          ]:
+            dest=old/file
+            if dest.exists() and dest.stat().st_size:
+              assert classname in dest.read_text(errors='replace'),file+' diferente: abortar'
+            else:
+              src=Path(source)
+              assert classname in src.read_text(),source+' falta en repositorio'
+              (new/file).write_bytes(src.read_bytes())
+              missing.append(file)
+          (p/'manifest.txt').write_text('\n'.join(['bootstrap.php']+missing)+'\n')
+          print('V43_PREFLIGHT_ALIAS_AUSENTE SI')
+          print('V43_FILES_TO_UPLOAD',','.join(['bootstrap.php']+missing))
+          PY
+          php -l /tmp/v43-hotfix/new/bootstrap.php
+          php -l app/Http/Middleware/AutorizarSubmodulo.php
+          php -l app/Services/PermisosSubmodulos.php
+      - name: Guardar respaldo previo para rollback
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v43-respaldo-middleware-antes
+          path: /tmp/v43-hotfix/old/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar únicamente clases ausentes y bootstrap al final
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/v43-hotfix/upload-started
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v43-hotfix')
+          mapping={'submodulo.php':'/htdocs/api-v2/app/Http/Middleware/AutorizarSubmodulo.php',
+            'servicio.php':'/htdocs/api-v2/app/Services/PermisosSubmodulos.php',
+            'bootstrap.php':'/htdocs/api-v2/bootstrap/app.php'}
+          listed=(p/'manifest.txt').read_text().splitlines()
+          with (p/'upload.lftp').open('w') as f:
+            for x in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(x,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in ['servicio.php','submodulo.php','bootstrap.php']:
+              if name in listed:print('put '+str(p/'new'/name)+' -o '+mapping[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v43-hotfix/upload.lftp >/dev/null
+      - name: Cotejar bytes y protecciones Apache sin tocar BD
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v43-hotfix')
+          mapping={'submodulo.php':'/htdocs/api-v2/app/Http/Middleware/AutorizarSubmodulo.php',
+            'servicio.php':'/htdocs/api-v2/app/Services/PermisosSubmodulos.php',
+            'bootstrap.php':'/htdocs/api-v2/bootstrap/app.php',
+            'private-guard':'/htdocs/api-v2/.htaccess',
+            'gateway-guard':'/htdocs/api/.htaccess',
+            'gateway':'/htdocs/api/index.php'}
+          files=(p/'manifest.txt').read_text().splitlines()+['private-guard','gateway-guard','gateway']
+          with (p/'verify.lftp').open('w') as f:
+            for x in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(x,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:print('get '+mapping[name]+' -o '+str(p/'verified'/name),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v43-hotfix/verify.lftp >/dev/null
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/v43-hotfix')
+          files=(p/'manifest.txt').read_text().splitlines()
+          for name in files:
+            assert (p/'verified'/name).read_bytes()==(p/'new'/name).read_bytes(),name
+          for name in ['private-guard','gateway-guard','gateway']:
+            assert (p/'verified'/name).read_bytes()==(p/'old'/name).read_bytes(),name
+          assert "'submodulo.rutahd'=>AutorizarSubmodulo::class" in (p/'verified/bootstrap.php').read_text()
+          print('V43_MIDDLEWARE_BYTES_OK',len(files),'archivos, guards intactos')
+          PY
+      - name: Smoke HTTP sin JWT ni datos de producción
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import urllib.request,urllib.error
+          for path in ['/api/v1/estado','/api/v1/proveedores/mix']:
+            request=urllib.request.Request('https://rutahyd2.free.nf'+path,
+              headers={'Accept':'application/json','User-Agent':'Mozilla/5.0'})
+            try:
+              with urllib.request.urlopen(request,timeout=20) as r:
+                code=r.status;ctype=r.headers.get('Content-Type','')
+            except urllib.error.HTTPError as e:
+              code=e.code;ctype=e.headers.get('Content-Type','')
+            except Exception as e:
+              print('::warning::SMOKE_NO_CONCLUYENTE',path,type(e).__name__);continue
+            print('V43_SMOKE_PUBLICO',path,code,'json' if 'json' in ctype else 'no-json')
+            if code in [502,503,504,403] or 'json' not in ctype.lower():
+              print('::warning::Respuesta de intermediario/no JSON, smoke inconcluso');continue
+            if path.endswith('/estado') and code!=200:
+              raise RuntimeError('API estado falló tras publicación')
+            if path.endswith('/mix') and code!=401:
+              raise RuntimeError('Middleware no protegió endpoint sin JWT')
+          PY
+          echo 'V43: middleware de submódulos registrado. No hubo SQL ni pruebas de escritura.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Restaurar bootstrap y borrar componentes nuevos si falla la publicación
+        if: failure()
+        run: |
+          set +x
+          if [[ -f /tmp/v43-hotfix/upload-started && -s /tmp/v43-hotfix/old/bootstrap.php ]]; then
+            python3 - <<'PY'
+            from pathlib import Path
+            import os
+            p=Path('/tmp/v43-hotfix')
+            manifest=(p/'manifest.txt').read_text().splitlines()
+            mapping={'submodulo.php':'/htdocs/api-v2/app/Http/Middleware/AutorizarSubmodulo.php',
+              'servicio.php':'/htdocs/api-v2/app/Services/PermisosSubmodulos.php'}
+            with (p/'rollback.lftp').open('w') as f:
+              for x in ['set cmd:fail-exit no','set ftp:ssl-force yes',
+                'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+                'set net:timeout 45','set net:max-retries 3']:print(x,file=f)
+              print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+              print('put '+str(p/'old/bootstrap.php')+' -o /htdocs/api-v2/bootstrap/app.php',file=f)
+              for n,remote in mapping.items():
+                if n in manifest and not (p/'old'/n).exists():
+                  print('rm '+remote,file=f)
+              print('bye',file=f)
+            PY
+            lftp -f /tmp/v43-hotfix/rollback.lftp >/dev/null ||
+              echo '::error::Rollback incompleto: restaurar desde el artefacto V43'
+          fi
+      - name: Destruir archivos temporales de FTPS
+        if: always()
+        run: rm -rf /tmp/v43-hotfix

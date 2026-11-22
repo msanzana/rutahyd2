@@ -1,0 +1,1 @@
+Ruta H&D V43: publicar únicamente alias y clase middleware de submódulos, comprobado ausente en FTPS por run 45072310414. Preflight, respaldo, comparación por bytes, rollback. Sin DDL ni DML. 2026-11-22.

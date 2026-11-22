@@ -1,0 +1,43 @@
+name: V39 · validar Laravel y DDL33–35 sin ejecutar SQL productivo
+on:
+  push:
+    branches: [feature/v39-proveedores-rut-giros-buscador-20261122]
+    paths:
+      - app/**
+      - routes/**
+      - database/espanol/3[345]_**
+      - scripts/generar_ddl_giros_sii_v39.py
+      - .github/workflows/v39-laravel-ci.yml
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 13
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sintaxis de controladores/modelos y contrato API
+        run: |
+          set -euo pipefail
+          for file in             app/Http/Controllers/EntidadesComercialesControlador.php             app/Http/Controllers/GirosSiiControlador.php             app/Http/Controllers/BuscadorProductosControlador.php             app/Models/Proveedor.php             app/Support/RutChileno.php routes/api.php; do php -l "$file"; done
+          grep -Fq "Route::get('/productos/buscador'" routes/api.php
+          grep -Fq "Route::get('/giros-sii'" routes/api.php
+          grep -Fq "Rule::exists('giros_sii','codigo')" app/Http/Controllers/EntidadesComercialesControlador.php
+          ! grep -Fq "'correo_dte'" app/Http/Controllers/EntidadesComercialesControlador.php
+          php -r 'require "app/Support/RutChileno.php"; use App\Support\RutChileno; assert(RutChileno::normalizar("12.345.678-5")==="12345678-5"); assert(RutChileno::normalizar("12345678-0")===null); echo "RUT DV OK\n";'
+      - name: Semillas oficiales: 674 giros sin duplicados, preservar ceros iniciales
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          seed=Path('database/espanol/34_semillas_giros_sii_completo_674.sql').read_text('utf-8')
+          codes=re.findall(r"^\s*\('([0-9]{6})','",seed,re.M)
+          assert len(codes)==674 and len(set(codes))==674,(len(codes),len(set(codes)))
+          assert {'011101','469000','990000'}.issubset(codes)
+          assert 'https://www.sii.cl/ayudas/ayudas_por_servicios/1956-codigos-1959.html' in seed
+          dropped=re.findall(r'DROP COLUMN IF EXISTS (\w+)',
+             Path('database/espanol/35_proveedores_eliminar_campos_v39_ddl.sql').read_text())
+          assert len(dropped)==15 and len(set(dropped))==15
+          assert not {'rut','ciudad_id','giro','actividad_economica_codigo','correo_electronico'}.intersection(dropped)
+          print('Semillas SII: 674 únicas, DDL35: 15 columnas, esenciales preservadas')
+          PY

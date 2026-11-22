@@ -1,0 +1,11 @@
+Ruta H&D V2 | Smoke navegador real v25 | 2026-11-22
+frontend_ci=44987984534-success-53
+frontend_deploy=44988125009-success
+backend_deploy=44987328292-success
+sales_catalog_deploy=44987782821-success
+screen_widths=1440,390
+new_screens=Productos_Precios,Lista_Base,Especial,Lista_cliente,Ventas
+api_simulada=si
+reales_escrituras=no
+jwt_real=no
+evidencia=capturas

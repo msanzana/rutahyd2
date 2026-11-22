@@ -1,0 +1,146 @@
+name: Corregir Authorization JWT en Apache InfinityFree
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/corregir-authorization-apache-20261122.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Instalar cliente FTPS y Chromium
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+          mkdir -p /tmp/hd-auth-verify && cd /tmp/hd-auth-verify
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Respaldar solo .htaccess público, conservar protección de Laravel
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/apache-read.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api/.htaccess -o /tmp/api-before.htaccess
+          get /htdocs/api/index.php -o /tmp/gateway-before.php
+          get /htdocs/api-v2/.htaccess -o /tmp/private-before.htaccess
+          bye
+          EOF
+          lftp -f /tmp/apache-read.lftp >/dev/null
+          grep -Fq 'RewriteBase /api/' /tmp/api-before.htaccess
+          grep -Fq 'RewriteRule ^(.+)$ index.php [L,QSA]' /tmp/api-before.htaccess
+          grep -Fq 'Require all denied' /tmp/private-before.htaccess
+          grep -Fq 'rutahd2_api_ready' /tmp/gateway-before.php
+      - name: Aplicar regla probada y preservar directivas existentes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          a=Path('/tmp/api-before.htaccess')
+          text=a.read_text()
+          rule="RewriteCond %{HTTP:Authorization} .\nRewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]\n"
+          assert rule not in text,'Regla ya presente; no sobrescribir'
+          assert text.count('RewriteBase /api/')==1
+          assert text.count('RewriteRule ^(.+)$ index.php [L,QSA]')==1
+          updated=text.replace('RewriteBase /api/','RewriteBase /api/\n'+rule)
+          Path('/tmp/api-after.htaccess').write_text(updated)
+          print('Regla de Apache añadida sin cambiar el resto del gateway.')
+          PY
+      - name: Publicar .htaccess con respaldo para rollback
+        run: |
+          set +x
+          touch /tmp/apache-upload-started
+          cat >/tmp/apache-write.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/api-after.htaccess -o /htdocs/api/.htaccess
+          bye
+          EOF
+          lftp -f /tmp/apache-write.lftp >/dev/null
+      - name: Confirmar bytes y acceso público seguro
+        working-directory: /tmp/hd-auth-verify
+        run: |
+          set -euo pipefail
+          set +x
+          cat >/tmp/apache-verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api/.htaccess -o /tmp/api-confirmed.htaccess
+          get /htdocs/api/index.php -o /tmp/gateway-confirmed.php
+          get /htdocs/api-v2/.htaccess -o /tmp/private-confirmed.htaccess
+          bye
+          EOF
+          lftp -f /tmp/apache-verify.lftp >/dev/null
+          cmp -s /tmp/api-after.htaccess /tmp/api-confirmed.htaccess
+          cmp -s /tmp/gateway-before.php /tmp/gateway-confirmed.php
+          cmp -s /tmp/private-before.htaccess /tmp/private-confirmed.htaccess
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try {
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:45000});
+            await page.waitForTimeout(12000);
+            const result=await page.evaluate(async()=>{
+              async function request(path,headers={}){
+                const resp=await fetch('/api/v1/'+path,{cache:'no-store',
+                  headers:{Accept:'application/json',...headers}});
+                const data=(resp.headers.get('content-type')||'').includes('json')?await resp.json():{};
+                return {http:resp.status,estado:data.estado||null};
+              }
+              return {
+                estado:await request('estado'),
+                perfil:await request('perfil'),
+                falso:await request('perfil',{Authorization:'Bearer aaaa.bbbb.cccc'})
+              };
+            });
+            console.log('AUTH_APACHE_SMOKE',JSON.stringify(result));
+            if(result.estado.http!==200||result.estado.estado!=='disponible'||
+              result.perfil.http!==401||result.falso.http!==401)
+              process.exitCode=1;
+          }finally{await browser.close();}
+          JS
+          echo 'Authorization habilitado para PHP por regla Apache; JWT sigue validado por Laravel.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No se cambiaron DB, SMTP, secretos, usuario ni gateway PHP.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Restaurar .htaccess anterior ante cualquier fallo
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/apache-upload-started ] && [ -s /tmp/api-before.htaccess ]; then
+            cat >/tmp/apache-rollback.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/api-before.htaccess -o /htdocs/api/.htaccess
+          bye
+          EOF
+            lftp -f /tmp/apache-rollback.lftp >/dev/null || echo "::error::No se verificó la reversión."
+          fi
+      - name: Borrar respaldos locales
+        if: always()
+        run: |
+          set +x
+          rm -f /tmp/apache-*.lftp /tmp/api-*.htaccess /tmp/gateway-*.php
+          rm -f /tmp/private-*.htaccess

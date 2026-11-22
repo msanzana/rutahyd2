@@ -12,7 +12,7 @@ $http=$app->make(\Illuminate\Contracts\Http\Kernel::class);
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Symfony\Component\HttpFoundation\File\UploadedFile;
+use Illuminate\Http\UploadedFile;
 
 function photosAssert(bool $okay,string $message): void {
     if(!$okay)throw new RuntimeException($message);

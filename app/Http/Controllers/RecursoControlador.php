@@ -54,7 +54,7 @@ final class RecursoControlador extends Controller
                 ->where('permisos.codigo',$definicion[1])->exists();
             abort_unless($autorizado,403);
         }
-        if($recurso==='proveedores') PermisosSubmodulos::exigir($usuario,'proveedores.listado','ver');
+        if($recurso==='proveedores') PermisosSubmodulos::exigir($usuario,'proveedores_listado','ver');
         $clase=$definicion[0];
         return new $clase();
     }

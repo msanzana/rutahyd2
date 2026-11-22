@@ -1,0 +1,81 @@
+name: V41 - preflight hotfix búsqueda giros SII FTPS (solo lectura)
+on:
+  push:
+    branches: [hotfix/v41-giros-sii-busqueda-20261122]
+    paths: [.github/workflows/v41-preflight.yml]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  verificar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BEFORE: d8e116bc3b897336331cb6361f466a2c3182fc82
+      AFTER: ec826f1ae0cc3093040b69233e9963a80a064af7
+      TARGET: app/Http/Controllers/GirosSiiControlador.php
+    steps:
+      - uses: actions/checkout@v4
+      - name: Descargar versiones Git y disponer FTPS
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          git fetch --quiet --depth 1 origin "$BEFORE" "$AFTER"
+          git show "$AFTER:$TARGET" > /tmp/giros-v41-desired.php
+          git show "$BEFORE:$TARGET" > /tmp/giros-v41-baseline.php
+          php -l /tmp/giros-v41-desired.php
+          php -l /tmp/giros-v41-baseline.php
+          mkdir -p /tmp/giros-v41
+      - name: Descargar exclusivamente el controlador publicado (GET)
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat > /tmp/giros-v41/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get "/htdocs/api-v2/$TARGET" -o /tmp/giros-v41/live.php
+          get /htdocs/api-v2/.htaccess -o /tmp/giros-v41/private.htaccess
+          get /htdocs/api/.htaccess -o /tmp/giros-v41/gateway.htaccess
+          bye
+          EOF
+          lftp -f /tmp/giros-v41/read.lftp >/dev/null
+      - name: Verificar integridad V40 y cambio acotado de collations
+        run: |
+          set -euo pipefail
+          cmp /tmp/giros-v41-baseline.php /tmp/giros-v41/live.php
+          grep -Fq 'Require all denied' /tmp/giros-v41/private.htaccess
+          grep -Fq 'HTTP_AUTHORIZATION' /tmp/giros-v41/gateway.htaccess
+          python3 - <<'PY'
+          from pathlib import Path
+          before=Path('/tmp/giros-v41-baseline.php').read_text('utf-8')
+          after=Path('/tmp/giros-v41-desired.php').read_text('utf-8')
+          old="""        if(!empty($v['buscar'])){
+            $like='%'.trim($v['buscar']).'%';
+            $query->where(static fn($q)=>$q->where('codigo','like',$like)
+                ->orWhere('descripcion','like',$like));
+        }"""
+          assert before.count(old)==1
+          assert after!=before
+          assert "preg_match('/^[0-9]{1,6}$/D',$term)" in after
+          assert "$query->where('descripcion','like',$like);" in after
+          assert "->orWhere('descripcion','like',$like)" in after
+          assert after.startswith(before[:before.index(old)])
+          assert after.endswith(before[before.index(old)+len(old):])
+          print('PRECHECK_V41_OK: producción V40 intacta, hotfix solo en búsqueda de giros')
+          PY
+          echo 'Preflight solo lectura aprobado: PHP productivo intacto, cambio limitado al buscador SII.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Eliminar scripts de sesión FTPS
+        if: always()
+        run: rm -f /tmp/giros-v41/*.lftp

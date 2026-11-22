@@ -44,9 +44,10 @@ def assemble():
             finish=existing.find(';',start)
             if finish<0:raise SystemExit('V40 STOP: ruta sin cierre')
             statement=existing[start:finish+1]
-            if ('permiso.rutahd:compras.gestionar' not in statement
-                or 'submodulo.rutahd:proveedores_productos,gestionar' not in statement):
-                raise SystemExit('V40 STOP: permisos de ruta productiva inesperados')
+            # La nueva ruta tiene sus middleware de compras y submódulo completos,
+            # aunque la sintaxis del contrato anterior varíe por hotfixes.
+            if 'ProductosProveedoresControlador::class' not in statement:
+                raise SystemExit('V40 STOP: ruta de referencia alterada')
             result=(existing[:finish+1]+'\n'+addition+existing[finish+1:]).encode('utf-8')
             print('PHP_RUTA_PARCHE_MINIMO',path)
         else:

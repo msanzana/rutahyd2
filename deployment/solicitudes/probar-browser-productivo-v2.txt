@@ -8,3 +8,4 @@ verificacion=2026-11-21-produccion-jwt-prod12
 verificar_api_jwt_200_y_401=2026-11-21-post-activacion-controlada
 smoke_recuperacion_contra_produccion=20261121-v13
 diagnostico_de_recovery_prod=20261122-redirect-check
+probar_segundo_click_misma_cookie=20261122

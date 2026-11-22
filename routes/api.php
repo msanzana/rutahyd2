@@ -11,6 +11,8 @@ use App\Http\Controllers\InventarioControlador;
 use App\Http\Controllers\CatalogoComercialControlador;
 use App\Http\Controllers\ClasificacionProductoControlador;
 use App\Http\Controllers\ProductoComercialControlador;
+use App\Http\Controllers\ListasPreciosControlador;
+use App\Http\Controllers\ListasPreciosClientesControlador;
 use App\Http\Controllers\ProductosProveedoresControlador;
 use App\Http\Controllers\CodigosBarrasProductoControlador;
 use App\Http\Controllers\PerfilesCatalogosControlador;
@@ -38,6 +40,22 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::delete('/productos/{id}',[ProductoComercialControlador::class,'desactivar'])->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos_listado,gestionar')->whereNumber('id');
     Route::get('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'ver'])->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos_listado,ver')->whereNumber('id');
     Route::patch('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'guardar'])->middleware('permiso.rutahd:productos.gestionar')->middleware('submodulo.rutahd:productos_listado,gestionar')->whereNumber('id');
+
+    // Listas de precios: precio base y listas especiales. JWT + autorización backend.
+    Route::get('/listas-precios',[ListasPreciosControlador::class,'listar']);
+    Route::post('/listas-precios',[ListasPreciosControlador::class,'crear']);
+    Route::put('/listas-precios/{id}',[ListasPreciosControlador::class,'actualizar'])->whereNumber('id');
+    Route::delete('/listas-precios/{id}',[ListasPreciosControlador::class,'desactivar'])->whereNumber('id');
+    Route::get('/productos/{productoId}/precios',[ListasPreciosControlador::class,'detallesProducto'])->whereNumber('productoId');
+    Route::put('/productos/{productoId}/precios/{listaId}',[ListasPreciosControlador::class,'guardarDetalle'])
+        ->whereNumber('productoId')->whereNumber('listaId');
+    Route::delete('/productos/{productoId}/precios/{listaId}',[ListasPreciosControlador::class,'quitarDetalle'])
+        ->whereNumber('productoId')->whereNumber('listaId');
+    Route::get('/clientes/{clienteId}/lista-precio',[ListasPreciosClientesControlador::class,'listaCliente'])
+        ->whereNumber('clienteId');
+    Route::put('/clientes/{clienteId}/lista-precio',[ListasPreciosClientesControlador::class,'asignar'])
+        ->whereNumber('clienteId');
+    Route::get('/ventas/precio-cliente',[ListasPreciosClientesControlador::class,'cotizar']);
 
     // Catálogo de productos de cada proveedor. No modifica inventario, costos históricos ni recepciones.
     Route::get('/proveedores-productos',[ProductosProveedoresControlador::class,'listar'])

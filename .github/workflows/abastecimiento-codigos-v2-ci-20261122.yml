@@ -28,12 +28,14 @@ jobs:
       - name: Comprobar sintaxis PHP y SQL exclusivamente versionado
         run: |
           set -euo pipefail
-          for source in app/Http/Controllers/ProductoComercialControlador.php app/Http/Controllers/CatalogoComercialControlador.php app/Http/Controllers/ClasificacionProductoControlador.php app/Http/Controllers/ProductosProveedoresControlador.php app/Http/Controllers/CodigosBarrasProductoControlador.php app/Http/Controllers/EntidadesComercialesControlador.php app/Services/PermisosCatalogos.php app/Services/GestionListasPrecios.php app/Services/ServicioVenta.php app/Services/ServicioNotaVenta.php app/Http/Controllers/ListasPreciosControlador.php app/Http/Controllers/ListasPreciosClientesControlador.php routes/api.php tests/integracion_proveedores_codigos.php tests/integracion_listas_precios_sin_triggers.php tests/integracion_entidades_crud.php; do
+          for source in app/Http/Controllers/ProductoComercialControlador.php app/Http/Controllers/CatalogoComercialControlador.php app/Http/Controllers/ClasificacionProductoControlador.php app/Http/Controllers/ProductosProveedoresControlador.php app/Http/Controllers/CodigosBarrasProductoControlador.php app/Http/Controllers/EntidadesComercialesControlador.php app/Services/PermisosCatalogos.php app/Services/GestionListasPrecios.php app/Services/ServicioVenta.php app/Services/ServicioNotaVenta.php app/Http/Controllers/ListasPreciosControlador.php app/Http/Controllers/ListasPreciosClientesControlador.php app/Http/Controllers/FotosProductoControlador.php routes/api.php tests/integracion_proveedores_codigos.php tests/integracion_listas_precios_sin_triggers.php tests/integracion_entidades_crud.php tests/integracion_fotos_productos_v28.php; do
             php -l "$source"
           done
           test -s database/espanol/20_proveedores_productos_codigos_barras_ddl.sql
           test -s database/espanol/21_catalogos_referencia_semillas.sql
           test -s database/espanol/24_listas_precios_sin_triggers.sql
+          test -s database/espanol/25_productos_fotos_ddl_sin_triggers.sql
+          ! grep -Eiq '^[[:space:]]*(CREATE|DROP)[[:space:]]+TRIGGER' database/espanol/25_productos_fotos_ddl_sin_triggers.sql
           if grep -Eiq '^[[:space:]]*(CREATE|DROP)[[:space:]]+TRIGGER' database/espanol/24_listas_precios_sin_triggers.sql; then
             echo "::error::DDL24 no debe contener triggers"; exit 1
           fi
@@ -43,13 +45,13 @@ jobs:
           set -euo pipefail
           mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente < database/espanol/01_esquema_completo_34_tablas_es.sql
           mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente < database/espanol/05_semillas_es.sql
-          for f in 12_tokens_acceso_opcional.sql 13_catalogos_comerciales_aditivos.sql 14_productos_clasificacion_campos.sql 16_permisos_modulos_producto.sql 18_recuperacion_contrasenas.sql 20_proveedores_productos_codigos_barras_ddl.sql 21_catalogos_referencia_semillas.sql 23_preferencias_usuarios_permisos_submodulos_ddl.sql 24_listas_precios_sin_triggers.sql; do
+          for f in 12_tokens_acceso_opcional.sql 13_catalogos_comerciales_aditivos.sql 14_productos_clasificacion_campos.sql 16_permisos_modulos_producto.sql 18_recuperacion_contrasenas.sql 20_proveedores_productos_codigos_barras_ddl.sql 21_catalogos_referencia_semillas.sql 23_preferencias_usuarios_permisos_submodulos_ddl.sql 24_listas_precios_sin_triggers.sql 25_productos_fotos_ddl_sin_triggers.sql; do
             mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < "database/espanol/$f"
           done
           mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/20_proveedores_productos_codigos_barras_ddl.sql
           mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/21_catalogos_referencia_semillas.sql
           mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/23_preferencias_usuarios_permisos_submodulos_ddl.sql
-          mysql -N -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='rutahyd2_es_local' AND table_type='BASE TABLE'" | grep -Fxq '55'
+          mysql -N -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='rutahyd2_es_local' AND table_type='BASE TABLE'" | grep -Fxq '56'
           mysql -N -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local -e "SELECT COUNT(*) FROM tipos_codigos_barras" | grep -Fxq '11'
           # Ejecutar exactamente el SQL22 corregido en la base efímera CI:
           # reemplazar SOLO el identificador de esquema, nunca usar producción.
@@ -92,5 +94,6 @@ jobs:
           php tests/integracion_productos_crud.php
           php tests/integracion_entidades_crud.php
           php tests/integracion_listas_precios_sin_triggers.php
+          php tests/integracion_fotos_productos_v28.php
           php tests/integracion_proveedores_codigos.php
-          echo 'DDL20, semillas21, DDL23 y DDL24 SIN TRIGGERS validados sobre MySQL temporal. Sin conexión a InfinityFree.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'DDL20, semillas21, DDL23, DDL24 y DDL25 SIN TRIGGERS validados sobre MySQL temporal. Sin conexión a InfinityFree.' >> "$GITHUB_STEP_SUMMARY"

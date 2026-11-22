@@ -63,6 +63,7 @@ jobs:
               $controller=$app->make(\App\Http\Controllers\ProductosProveedoresControlador::class);
               $response=$controller->mix($req);
               $json=json_decode((string)$response->getContent(),true,512,JSON_THROW_ON_ERROR);
+              $app->make(\Illuminate\Contracts\Http\Kernel::class);
               $aliases=$app->make('router')->getMiddleware();
               $out['alias_submodulo']=($aliases['submodulo.rutahd']??null)===
                 \App\Http\Middleware\AutorizarSubmodulo::class;

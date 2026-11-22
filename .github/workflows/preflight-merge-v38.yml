@@ -76,6 +76,13 @@ jobs:
             (root/out).write_bytes(result.stdout)
             if result.returncode:
               print('CONFLICTO_REAL',path,'estado',result.returncode)
+              if path=='index.html':
+                text=result.stdout.decode('utf-8')
+                lines=text.splitlines()
+                ix=[i for i,s in enumerate(lines) if s.startswith(('<<<<<<<','=======','>>>>>>>'))]
+                selected=sorted(set(j for i in ix for j in range(max(0,i-5),min(len(lines),i+6))))
+                for j in selected[:75]:
+                  print('HTML_CONTEXTO',j+1,lines[j][:240])
               raise SystemExit('Detener V38: merge conflictivo, sin modificación productiva')
             merged=result.stdout.decode('utf-8')
             assert '<<<<<<< ' not in merged and '>>>>>>> ' not in merged

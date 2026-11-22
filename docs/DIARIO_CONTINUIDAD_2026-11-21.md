@@ -708,3 +708,14 @@ El titular pidió reemplazar los triggers propuestos por **funciones de backend 
 
 
 - **Cierre de CI frontend V38 (rama feature, no despliegue)**: último commit `a36bc7b81d653061ed3b2646091d31a2d5c9fbbc`, Playwright con API simulada **26/26 pruebas aprobadas** en https://github.com/msanzana/rutahyd2front/actions/runs/45054451935 y **14/14 pruebas aprobadas** en https://github.com/msanzana/rutahyd2front/actions/runs/45054451947. Incluye el nuevo tercer nivel, cascada, proveedor con `ciudad_id` y mix/códigos de compra. Backend CI última ejecución https://github.com/msanzana/rutahyd2/actions/runs/45054180560 **éxito**. Estas pruebas no constituyen verificación de DDL29–32 en MariaDB real; PRs siguen en borrador y el deploy V38 bloqueado.
+
+
+### Cierre productivo V38 — 2026-11-22
+
+- El titular confirmó: «ddl ejecutados».
+- **Auditoría SQL de solo lectura OK** sobre `if0_43460400_rutahyd2_es`, run https://github.com/msanzana/rutahyd2/actions/runs/45055234313: DDL29/30/31/32 presentes, 16 regiones, 56 provincias, 346 comunas, 347 referencias de localidades, campos SII en proveedores, `ciudad_id` y FKs correctas. La auditoría se ejecutó con una sonda temporal autenticada, eliminada al finalizar; ninguna escritura SQL.
+- Preflight FTPS V38 detectó tres archivos productivos divergentes (routes/api.php, EntidadesComercialesControlador.php, RecursoControlador.php). Se conservaron sus cambios mediante fusión 3 vías sin conflictos. HTML ajustado quirúrgicamente para preservar logo oficial y CSS/productos V37.
+- **Despliegue productivo EXITOSO**: https://github.com/msanzana/rutahyd2/actions/runs/45055938632 . 18 archivos PHP/JS/CSS/HTML cotejados por bytes FTPS; respaldo de versiones previas en artefacto GitHub Actions `rutahd-v38-archivos-anteriores` (retención 30 días); respaldo disponible para restauración. No se modificó `.env`, `.htaccess`, gateway ni datos SQL en ese despliegue.
+- Smoke público: `/api/v1/estado` → HTTP 200, `/api/v1/ubicaciones/paises` y `/api/v1/proveedores/mix` → HTTP 401 sin sesión (JWT protegido); JS y CSS geografía → HTTP 200; menú de tercer nivel y logo detectados. Los 26 y 14 casos Playwright frontend también aprobados con mocks en runs 45054451935 y 45054451947. **Importante**: el smoke no sustituye las pruebas autenticadas de CRUD con datos reales; hacerlo dentro de la sesión de administración antes de operar.
+- Fuente de despliegue por SHA fijado: backend `cf61e34aa195cc41fab9513f1959dd7d51e3246c`, frontend `a36bc7b81d653061ed3b2646091d31a2d5c9fbbc`. PRs de origen: backend #9 y frontend #11, aún sin fusionar con sus ramas base; considerar consolidación posterior para evitar discrepancias en futuros despliegues.
+- No se añadieron recepciones ni se tocaron movimientos de inventario. El catálogo de 347 referencias sigue sin ser lista completa de localidades censales INE.

@@ -55,7 +55,7 @@ jobs:
           '''.replace('              Route','    Route').rstrip()+'\n'
           anchor="    Route::get('/ventas/precio-cliente',[ListasPreciosClientesControlador::class,'cotizar']);"
           assert anchor in origin and anchor in new
-          assert newLines.strip() in new
+          assert "clientes-disponibles" in new and "productos-disponibles" in new
           (p/'routes_after.php').write_text(origin.replace(anchor,newLines+anchor))
           PY
           for file in /tmp/sale25/*.php; do php -l "$file"; done

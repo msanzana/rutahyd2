@@ -70,6 +70,13 @@ try {
     debeFallar(fn()=>$servicio->crearLista('BASE','Otra base',true),
         'Impedir segunda lista base');
     $especialId=$servicio->crearLista('ESPECIAL_CI','Tarifa Especial CI');
+    debeFallar(fn()=>$servicio->actualizarLista($baseId,['activo'=>false]),
+        'Lista Base no se puede desactivar');
+    debeFallar(fn()=>$servicio->actualizarLista($especialId,['es_base'=>true]),
+        'Una lista especial no puede convertirse en segunda base');
+    $editada=$servicio->actualizarLista($especialId,['nombre'=>'Tarifa Especial Actualizada CI']);
+    verificarLista($editada['nombre']==='Tarifa Especial Actualizada CI',
+        'El backend permite editar la descripción comercial de una lista especial');
     DB::table('lineas')->where('id',$lineaId)
         ->update(['minimo_margen_precio_venta'=>20]);
 

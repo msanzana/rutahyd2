@@ -1,0 +1,1 @@
+diagnostico=URL frias hash query path sintéticos, no credenciales ni datos

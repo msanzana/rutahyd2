@@ -1,0 +1,246 @@
+name: Publicar listas de precios v25 sin triggers (backend)
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/publicar-listas-precios-v25-backend.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      SOURCE_SHA: 4aee794027f79d2bb4fb11012ba920cd14a85d35
+      LIVE_BASE_SHA: 88635dae023c2507a5c80b475b4fa7b6958984bb
+      LIVE_PRODUCT_SHA: e80574c9a9c9564317da16766682aa85f8663d83
+    steps:
+      - name: Obtener fuente validada y generar paquete mínimo para la API actual
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          git clone --depth 1 --branch feature/proveedores-productos-barcodes-20261122 https://github.com/msanzana/rutahyd2.git /tmp/hdsource
+          test "$(git -C /tmp/hdsource rev-parse HEAD)" = "$SOURCE_SHA"
+          git -C /tmp/hdsource fetch -q --depth 1 origin "$LIVE_BASE_SHA" "$LIVE_PRODUCT_SHA"
+          mkdir -p /tmp/hdprice/staged /tmp/hdprice/backup /tmp/hdprice/verified
+          cd /tmp/hdprice
+          cat >existing.txt <<'FILES'
+          routes/api.php
+          app/Http/Controllers/ProductoComercialControlador.php
+          app/Http/Controllers/CatalogoComercialControlador.php
+          app/Http/Controllers/EntidadesComercialesControlador.php
+          app/Http/Controllers/RecursoControlador.php
+          app/Services/ServicioVenta.php
+          app/Services/ServicioNotaVenta.php
+          FILES
+          cat >new.txt <<'FILES'
+          app/Services/GestionListasPrecios.php
+          app/Http/Controllers/ListasPreciosControlador.php
+          app/Http/Controllers/ListasPreciosClientesControlador.php
+          FILES
+          while IFS= read -r f; do
+            mkdir -p "/tmp/hdprice/staged/$(dirname "$f")"
+            cp "/tmp/hdsource/$f" "/tmp/hdprice/staged/$f"
+          done < <(cat existing.txt new.txt)
+          # Evitar que la publicación de PRECIOS introduzca la migración DDL23
+          # de preferencias/permisos que puede seguir pendiente en el sitio.
+          python3 - <<'PY'
+          from pathlib import Path
+          base=Path('/tmp/hdprice/staged')
+          routes=Path('/tmp/hdsource/routes/api.php').read_text()
+          original=__import__('subprocess').check_output(
+            ['git','-C','/tmp/hdsource','show',
+             '88635dae023c2507a5c80b475b4fa7b6958984bb:routes/api.php'],text=True)
+          for declaration in [
+            'use App\\Http\\Controllers\\ListasPreciosControlador;',
+            'use App\\Http\\Controllers\\ListasPreciosClientesControlador;'
+          ]:
+            anchor='use App\\Http\\Controllers\\ProductoComercialControlador;'
+            assert anchor in original
+            original=original.replace(anchor,anchor+'\n'+declaration)
+          begin=routes.index('    // Listas de precios: precio base y listas especiales.')
+          end=routes.index('    // Catálogo de productos de cada proveedor.',begin)
+          addition=routes[begin:end]
+          place='    // Catálogo de productos de cada proveedor.'
+          assert place in original and '/listas-precios' not in original
+          original=original.replace(place,addition+place)
+          (base/'routes/api.php').write_text(original)
+          for name in ['EntidadesComercialesControlador.php','RecursoControlador.php']:
+            f=base/'app/Http/Controllers'/name
+            s=f.read_text()
+            s=s.replace('use App\\Services\\PermisosSubmodulos;\n','')
+            s='\n'.join(line for line in s.split('\n')
+              if 'PermisosSubmodulos::exigir(' not in line)
+            assert 'PermisosSubmodulos' not in s
+            f.write_text(s)
+          assert 'submodulo.rutahd' not in original
+          assert 'preferencias' not in original
+          assert original.count("Route::get('/listas-precios'")==1
+          PY
+          while IFS= read -r f; do
+            php -l "/tmp/hdprice/staged/$f"
+          done < <(cat existing.txt new.txt)
+          if grep -ERi '^[[:space:]]*CREATE[[:space:]]+TRIGGER' /tmp/hdprice/staged; then
+            echo "::error::No se permiten triggers en este lanzamiento"; exit 1
+          fi
+          test "$(git -C /tmp/hdsource rev-parse HEAD)" = "$SOURCE_SHA"
+      - name: Instalar cliente FTPS y Chromium
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          mkdir -p /tmp/hdprice/browser && cd /tmp/hdprice/browser
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Respaldar archivos productivos y comprobar versión de partida
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cd /tmp/hdprice
+          {
+            cat <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          EOF
+            while IFS= read -r f; do
+              mkdir -p "/tmp/hdprice/backup/$(dirname "$f")"
+              echo "get /htdocs/api-v2/$f -o /tmp/hdprice/backup/$f"
+            done < existing.txt
+            echo "get /htdocs/api-v2/.htaccess -o /tmp/hdprice/private_guard"
+            echo "get /htdocs/api/index.php -o /tmp/hdprice/gateway"
+            echo bye
+          } > /tmp/hdprice/download.lftp
+          lftp -f /tmp/hdprice/download.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/hdprice/private_guard
+          grep -Fq 'rutahd2_api_ready' /tmp/hdprice/gateway
+          while IFS= read -r f; do
+            expected="$LIVE_BASE_SHA"
+            if [ "$f" = "app/Http/Controllers/ProductoComercialControlador.php" ]; then
+              expected="$LIVE_PRODUCT_SHA"
+            fi
+            git -C /tmp/hdsource show "$expected:$f" > "/tmp/hdprice/previous.php"
+            if ! cmp -s "/tmp/hdprice/previous.php" "/tmp/hdprice/backup/$f"; then
+              echo "::error::Archivo remoto divergente, no desplegar: $f"
+              exit 1
+            fi
+          done < existing.txt
+          echo "Versiones de partida y respaldo FTPS confirmados" >> "$GITHUB_STEP_SUMMARY"
+      - name: Publicar exclusivamente los archivos de tarifarios
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cd /tmp/hdprice
+          touch /tmp/hdprice/upload_started
+          {
+            cat <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          EOF
+            while IFS= read -r f; do
+              echo "put /tmp/hdprice/staged/$f -o /htdocs/api-v2/$f"
+            done < new.txt
+            while IFS= read -r f; do
+              if [ "$f" != "routes/api.php" ]; then
+                echo "put /tmp/hdprice/staged/$f -o /htdocs/api-v2/$f"
+              fi
+            done < existing.txt
+            echo "put /tmp/hdprice/staged/routes/api.php -o /htdocs/api-v2/routes/api.php"
+            echo bye
+          } >/tmp/hdprice/upload.lftp
+          lftp -f /tmp/hdprice/upload.lftp >/dev/null
+      - name: Comprobar identidad de archivos y seguridad de las rutas
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cd /tmp/hdprice
+          {
+            cat <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          EOF
+            while IFS= read -r f; do
+              mkdir -p "/tmp/hdprice/verified/$(dirname "$f")"
+              echo "get /htdocs/api-v2/$f -o /tmp/hdprice/verified/$f"
+            done < <(cat existing.txt new.txt)
+            echo "get /htdocs/api-v2/.htaccess -o /tmp/hdprice/private_guard_after"
+            echo "get /htdocs/api/index.php -o /tmp/hdprice/gateway_after"
+            echo bye
+          } > /tmp/hdprice/verify.lftp
+          lftp -f /tmp/hdprice/verify.lftp >/dev/null
+          cmp -s /tmp/hdprice/private_guard /tmp/hdprice/private_guard_after
+          cmp -s /tmp/hdprice/gateway /tmp/hdprice/gateway_after
+          while IFS= read -r f; do
+            cmp -s "/tmp/hdprice/staged/$f" "/tmp/hdprice/verified/$f"
+            php -l "/tmp/hdprice/verified/$f"
+          done < <(cat existing.txt new.txt)
+          cd /tmp/hdprice/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const b=await chromium.launch({headless:true});
+          try{
+            const p=await b.newPage();
+            await p.goto('https://rutahyd2.free.nf/?probe=price25',{waitUntil:'domcontentloaded',timeout:55000});
+            const result=await p.evaluate(async()=>{
+              const paths=['estado','listas-precios','ventas/precio-cliente?cliente_id=1&producto_id=1'];
+              return await Promise.all(paths.map(async x=>{
+                const r=await fetch('/api/v1/'+x,{headers:{Accept:'application/json'},cache:'no-store'});
+                return [x,r.status];
+              }));
+            });
+            console.log('PRICE25_PUBLIC_API',JSON.stringify(result));
+            for(const [route,code] of result){
+              if(code!==(route==='estado'?200:401))throw Error('Autorización inesperada: '+route+' '+code);
+            }
+          }finally{await b.close();}
+          JS
+          echo "API de tarifas protegida por JWT. Archivos comparados y rollback disponible." >> "$GITHUB_STEP_SUMMARY"
+      - name: Restaurar archivos anteriores cuando falle el despliegue
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/hdprice/upload_started ] && [ -s /tmp/hdprice/backup/routes/api.php ]; then
+            {
+              cat <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          EOF
+              while IFS= read -r f; do
+                echo "put /tmp/hdprice/backup/$f -o /htdocs/api-v2/$f"
+              done </tmp/hdprice/existing.txt
+              while IFS= read -r f; do
+                echo "rm /htdocs/api-v2/$f"
+              done </tmp/hdprice/new.txt
+              echo bye
+            } >/tmp/hdprice/rollback.lftp
+            lftp -f /tmp/hdprice/rollback.lftp >/dev/null ||
+              echo "::error::Rollback incompleto, requiere revisión de FTP"
+          fi
+      - name: Eliminar respaldos y contraseñas locales del runner
+        if: always()
+        run: |
+          rm -rf /tmp/hdsource /tmp/hdprice

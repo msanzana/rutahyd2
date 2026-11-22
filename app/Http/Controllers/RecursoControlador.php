@@ -63,12 +63,21 @@ final class RecursoControlador extends Controller
         $datos=$solicitud->validate([
             'por_pagina'=>['sometimes','integer','min:1','max:100'],
             'filtros'=>['sometimes','array','max:5'],
+            'buscar'=>['sometimes','nullable','string','max:120'],
         ]);
         $q=$modelo->newQuery();
         foreach(($datos['filtros']??[]) as $campo=>$valor) {
             abort_unless(in_array($campo,$modelo->getFillable(),true),422,'Filtro no permitido');
             abort_unless(is_scalar($valor) && strlen((string)$valor)<=190,422,'Valor de filtro inválido');
             $q->where($campo,$valor);
+        }
+        if (!empty($datos['buscar']) && in_array($recurso,['clientes','proveedores'],true)) {
+            $term='%'.trim($datos['buscar']).'%';
+            $q->where(function($where)use($term,$recurso){
+                $where->where('nombre','like',$term)->orWhere('rut','like',$term)
+                    ->orWhere('correo_electronico','like',$term);
+                if ($recurso==='clientes') $where->orWhere('codigo','like',$term);
+            });
         }
         $columnas=DB::getSchemaBuilder()->getColumnListing($modelo->getTable());
         if (in_array('id',$columnas,true)) $q->orderByDesc('id');

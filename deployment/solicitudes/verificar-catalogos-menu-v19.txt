@@ -1,0 +1,8 @@
+RUTAHD2_VERIFICAR_CATALOGOS_MENU_V19
+frontend_ci=44977878666-success-41
+frontend_ftps=44978018410-success
+main_only=true
+sin_jwt_real=true
+sin_escrituras=true
+test_nuevo_rubro=true
+test_menu_1440_390=true

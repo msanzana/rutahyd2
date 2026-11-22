@@ -53,7 +53,7 @@ jobs:
           grep -Fq 'admin-remoto.js?v=20261122-prices25' /tmp/front/index.html
           grep -Fq 'data-nav="listas_precios"' /tmp/front/index.html
           grep -Fq 'validacion-ui.js?v=20261122-filters22' /tmp/front/index.html
-          grep -Fq 'productos-remotos.js?v=20261122-save29' /tmp/front/index.html
+          grep -Fq 'productos-remotos.js?v=20261122-margin30' /tmp/front/index.html
           grep -Fq 'catalogos-api.js?v=20261122-photos28' /tmp/front/index.html
           grep -Fq "event.target.closest('#infoClose')" /tmp/front/assets/js/app-produccion.js
           grep -Fq 'app-produccion.js?v=20261122-prices25' /tmp/front/index.html

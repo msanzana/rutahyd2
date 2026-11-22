@@ -60,6 +60,12 @@ jobs:
               await page.locator('#loginPassword').fill('CLAVE-FICTICIA');
               await page.locator('#loginSubmit').click();
               await page.waitForFunction(()=>document.querySelector('#loginDialog')?.open===false);
+              // Contrato de popup de conexión: abrir desde el icono y cerrar con Entendido.
+              await page.locator('#notificationButton').evaluate(el=>el.click());
+              await page.locator('#infoDialog[open]').waitFor();
+              await page.locator('#infoClose').click();
+              await page.locator('#infoDialog[open]').waitFor({state:'hidden'});
+              if(await page.locator('#loginDialog[open]').count())throw Error('Cerrar la información cerró la sesión');
               await page.locator('#userMenuTrigger').click();
               await page.locator('#userMenuPopup:not([hidden])').waitFor();
               await page.locator('#menuDarkMode').check({force:true});

@@ -366,3 +366,25 @@ Esta instrucción sustituye las recomendaciones anteriores del diario que priori
 6. Refinar correos corporativos y completar pruebas de entrega real desde Laravel si sigue pendiente.
 
 **Políticas permanentes del proyecto**: solo modo PRODUCCIÓN, todo cambio estructural SQL mediante **DDL**, **NO Firecrawl**, nunca guardar credenciales ni tokens en GitHub, chat o JavaScript.
+
+## Solicitud de catálogo y abastecimiento — 22-11-2026
+
+**Especificación del titular**: se adjuntó captura de formulario de Producto estrecho y descuadrado. Solicita popup ancho y responsivo, sin ID de proveedor; estructura Proveedores → Listado de proveedores y Proveedores productos; nuevas entidades de vinculación y códigos de barras de compra/venta, costos, unidades, última recepción y catálogo de simbologías; completar unidades/envasados comunes; retirar gramajes visibles; Administración restringida a Tipos de unidad, Tipos de envasado, Condición tributaria, Tipos de códigos de barras, Usuarios, Perfiles y permisos.
+
+**Corrección independiente publicada y segura**:
+- Frontend main cambió solo el editor de Productos existente para ampliar a 1100 px máximo, reorganizar encabezados/campos/checkbox y evitar scroll horizontal en móvil; desaparece el campo manual ID proveedor, conservando el contrato Laravel anterior hasta introducir las nuevas tablas. La clasificación de gramajes antigua sigue temporalmente porque la API productiva la requiere.
+- CI de frontend main **aprobada**: https://github.com/msanzana/rutahyd2front/actions/runs/44973099694 (incluye pruebas modal 1440, 820, 572, 390).
+- Publicación de solo frontend v16 **éxito**: https://github.com/msanzana/rutahyd2/actions/runs/44973237940 . Backend y MariaDB no modificados.
+- Prueba independiente Chrome de recursos reales del popup activada: https://github.com/msanzana/rutahyd2/actions . No declararla aprobada hasta consultar run.
+
+**Implementación completa preparada en ramas, NO publicada por requerir DDL**:
+- Backend rama `feature/proveedores-productos-barcodes-20261122`, hereda el CRUD anterior de Clientes/Proveedores/Bodegas. SQL DDL aditivo `database/espanol/20_proveedores_productos_codigos_barras_ddl.sql` crea CUATRO tablas nuevas: `tipos_codigos_barras`, `productos_proveedores`, `productos_codigos_barra_venta`, `productos_codigos_barra_compra`.
+- Archivo 21 `21_catalogos_referencia_semillas.sql` es **DML de referencia separado**, porque DDL no puede poblar tablas: registra unidades, envasados, EAN13/DUN14/ITF14/CODE39/CODE128/otros y dos permisos. Archivo 22 verifica después la estructura y semillas en solo lectura.
+- Se mantiene la tabla existente `proveedores` y su CRUD Laravel; no se crea duplicado. Los códigos SKU propios y proveedor se resuelven con JOIN desde `productos.sku` y `productos_proveedores.codigo_proveedor_producto`. Costo proveedor, ultima_recepcion_id y fecha_ultima_recepcion están en la relación. El ID de recepción es NULL sin FK todavía, pues falta tabla de recepción validada.
+- Backend: se ajustan ProductoComercialController, ClasificacionProductoController, CatalogoComercialController, PermisosCatalogos, RecursoController; se incluyen controladores y rutas específicos para Proveedores productos y códigos de compra/venta (JWT/permisos, bajas lógicas y listados, sin escritura genérica a inventario/ventas). Se retira `gramajeId` de nueve clasificaciones requeridas; **NO se borra** `gramajes` ni `productos.gramaje_id` históricos.
+- Frontend rama `feature/productos-proveedores-codigos-barras-20261122`: Administración con seis subítems exactos, Productos con jerarquías y código de venta múltiple dentro de popup 1120 px, Proveedores con dos subítems, búsqueda en Listado y relación con CRUD y códigos compra. No se emplean demos ni localStorage operativo.
+- **CI backend MySQL efímero aprobada**: https://github.com/msanzana/rutahyd2/actions/runs/44973187644 . Probó DDL20 dos veces, DML21 dos veces, 50 tablas, JWT, permisos, productos, proveedores, códigos de venta/compra, historiales y transacciones.
+- **CI frontend rama aprobada: 25 pruebas** https://github.com/msanzana/rutahyd2front/actions/runs/44973003447 , desktop/tablet/móvil y menú oficial. No se introdujeron datos reales.
+- Diseño normalizado, reglas y orden de despliegue documentados en `docs/ESPECIFICACION_PRODUCTOS_PROVEEDORES_CB_20261122.md` de la rama backend.
+- **Bloqueo para publicar el módulo completo**: la base productiva existente sigue con 46 tablas hasta que el usuario respalde estructura/datos y aplique DDL20 y semillas21 por phpMyAdmin, validando los recuentos del SQL22. No desplegar nuevos endpoints frontend que consulten tablas inexistentes. No reimportar SQL12–19 ni tocar contraseña/SMTP.
+- **Políticas**: todas las modificaciones de estructura mediante DDL explícito, semillas DML separadas y declaradas, NO Firecrawl, producción permanente, JWT seguro.

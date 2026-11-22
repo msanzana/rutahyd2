@@ -68,6 +68,30 @@ jobs:
                   table=re.search(r"Table '[^']*\.([a-zA-Z_][a-zA-Z0-9_]{0,95})' doesn't exist",headline,re.I)
                   coll=re.search(r'Illegal mix of collations',headline,re.I)
                   klass=re.search(r'(QueryException|PDOException|TypeError|RuntimeException|ErrorException|ParseError)',chunk)
+                  # Para eventos PHP recientes, extraer SOLO la clase del aviso y
+                  # un origen técnico normalizado; nunca imprimir el mensaje original.
+                  recent=bool(dt and dt.group(1)>='2026-11-22 15:00:00')
+                  category='no_clasificado'
+                  for key,pattern in [
+                      ('undefined_property',r'Undefined property'),
+                      ('undefined_variable',r'Undefined variable'),
+                      ('undefined_array_key',r'Undefined array key'),
+                      ('null_property',r'Attempt to read property'),
+                      ('array_offset',r'Trying to access array offset'),
+                      ('missing_file',r'(failed to open stream|No such file or directory)'),
+                      ('permission_denied',r'Permission denied'),
+                      ('php_deprecated',r'Deprecated'),
+                      ('call_member',r'Call to .* on null'),
+                      ('argument_type',r'(must be of type|TypeError)'),
+                      ('class_missing',r'Class .* not found'),
+                      ('headers_sent',r'headers already sent'),
+                    ]:
+                    if re.search(pattern,headline,re.I):
+                      category=key;break
+                  origin='desconocido'
+                  if recent:
+                    m=re.search(r'/(app/(?:Http|Services|Models|Support)/[A-Za-z0-9_/.:-]{1,120}\\.php|routes/api\\.php|vendor/laravel/framework/src/[A-Za-z0-9_/.:-]{1,120}\\.php)',chunk,re.I)
+                    if m: origin=m.group(1)
                   print('V43_EVENTO',
                     'fecha='+(date.group(1) if date else 'sin_fecha'),
                     'sqlstate='+(sqlstate.group(1) if sqlstate else 'ninguno'),
@@ -76,7 +100,8 @@ jobs:
                     'columna='+(missing.group(1) if missing else 'ninguna'),
                     'tabla='+(table.group(1) if table else 'ninguna'),
                     'collation='+str(bool(coll)),
-                    'relacionado_mix='+str(hit))
+                    'relacionado_mix='+str(hit),
+                    'categoria='+category,'origen='+origin)
           PY
           echo 'Diagnóstico V43 exclusivamente FTPS GET; no SQL, POST productivos ni cambios en el hosting.' >> "$GITHUB_STEP_SUMMARY"
       - name: Eliminar logs y contraseña temporal en todos los casos

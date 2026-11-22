@@ -88,3 +88,16 @@ no_ddl=true
 no_mariadb_changes=true
 no_real_credentials=true
 rollback=prepared
+
+release=20261122-prices25-complete
+backend_deploy=44987328292-success
+sales_catalog_backend_deploy=44987782821-success
+frontend_ci=44987984534-success-53
+frontend_head=466716b93482d481e1c4fe21227f7921e2927e91
+scope=frontend_only
+modules=prices_crud,product_cost_margin,customers_single_price_list,sales_tariff
+new_files=listas-precios.js,ventas-precios.js
+ddl=no
+triggers=no
+jwt_preserve=true
+rollback=yes

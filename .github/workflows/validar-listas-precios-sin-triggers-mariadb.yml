@@ -1,0 +1,82 @@
+name: Validar listas de precios sin triggers en MariaDB temporal
+on:
+  push:
+    branches: [feature/proveedores-productos-barcodes-20261122]
+    paths:
+      - 'database/espanol/24_listas_precios_sin_triggers.sql'
+      - 'app/Services/GestionListasPrecios.php'
+      - 'app/Http/Controllers/EntidadesComercialesControlador.php'
+      - 'app/Http/Controllers/ProductoComercialControlador.php'
+      - '.github/workflows/validar-listas-precios-sin-triggers-mariadb.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  comprobar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: solo_ci_temporal
+          MARIADB_DATABASE: rutahd_listas_ci
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -psolo_ci_temporal --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Comprobar sintaxis y ausencia de triggers
+        run: |
+          set -euo pipefail
+          php -l app/Services/GestionListasPrecios.php
+          php -l app/Http/Controllers/EntidadesComercialesControlador.php
+          php -l app/Http/Controllers/ProductoComercialControlador.php
+          ! grep -Eiq '^[[:space:]]*(CREATE|DROP)[[:space:]]+TRIGGER' database/espanol/24_listas_precios_sin_triggers.sql
+      - name: Preparar esquema y precios existentes en MariaDB efímera
+        env:
+          MYSQL_PWD: solo_ci_temporal
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq mariadb-client
+          cat >/tmp/precios_base_ci.sql <<'SQL'
+          CREATE TABLE clientes (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            codigo VARCHAR(50), nombre VARCHAR(190) NOT NULL,
+            activo TINYINT(1) NOT NULL DEFAULT 1
+          ) ENGINE=InnoDB;
+          CREATE TABLE lineas (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            nombre VARCHAR(150) NOT NULL
+          ) ENGINE=InnoDB;
+          CREATE TABLE productos (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            sku VARCHAR(80) NULL UNIQUE, nombre VARCHAR(190) NOT NULL,
+            activo TINYINT(1) NOT NULL DEFAULT 1
+          ) ENGINE=InnoDB;
+          CREATE TABLE presentaciones_productos (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            producto_id BIGINT UNSIGNED NOT NULL,
+            nombre VARCHAR(150) NOT NULL,
+            precio_neto DECIMAL(15,4) NOT NULL DEFAULT 0.0000,
+            CONSTRAINT fk_ci_producto FOREIGN KEY (producto_id)
+              REFERENCES productos(id)
+          ) ENGINE=InnoDB;
+          INSERT INTO clientes(id,codigo,nombre) VALUES (1,'CLI-1','Cliente existente');
+          INSERT INTO lineas(id,nombre) VALUES (1,'Abarrotes');
+          INSERT INTO productos(id,sku,nombre) VALUES (1,'SKU-ANTES','Producto existente');
+          INSERT INTO presentaciones_productos(producto_id,nombre,precio_neto)
+            VALUES (1,'Unidad',2345.6789);
+          SQL
+          mariadb -h127.0.0.1 -uroot rutahd_listas_ci < /tmp/precios_base_ci.sql
+          mariadb -h127.0.0.1 -uroot rutahd_listas_ci < database/espanol/24_listas_precios_sin_triggers.sql
+          test "$(mariadb -N -h127.0.0.1 -uroot rutahd_listas_ci -e "SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='rutahd_listas_ci'")" = "0"
+          test "$(mariadb -N -h127.0.0.1 -uroot rutahd_listas_ci -e "SELECT COUNT(*) FROM listas_precios WHERE es_base=1")" = "1"
+          test "$(mariadb -N -h127.0.0.1 -uroot rutahd_listas_ci -e "SELECT COUNT(*) FROM clientes_listas_precios WHERE cliente_id=1")" = "1"
+          test "$(mariadb -N -h127.0.0.1 -uroot rutahd_listas_ci -e "SELECT precio_venta FROM listas_precios_detalle WHERE producto_id=1")" = "2345.6789"
+          # La base impide una segunda lista base incluso si llegan dos solicitudes.
+          if mariadb -h127.0.0.1 -uroot rutahd_listas_ci -e "INSERT INTO listas_precios(codigo,nombre,es_base) VALUES ('SEGUNDA','Prohibida',1)" >/dev/null 2>&1; then
+            echo "::error::El índice único permitió dos listas base";exit 1
+          fi
+          echo "DDL24 correcto en MariaDB: 0 triggers; precio existente y cliente base preservados" >> "$GITHUB_STEP_SUMMARY"

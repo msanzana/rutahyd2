@@ -72,6 +72,10 @@ try {
     ],$admin),'Crear cliente');
     $clienteId=(int)$cliente['id'];
     assertEntity($clienteId>0 && $cliente['comuna']==='Temuco','Cliente guardado');
+    $base=DB::table('listas_precios')->where('es_base',1)->value('id');
+    assertEntity($base!==null && DB::table('clientes_listas_precios')
+        ->where('cliente_id',$clienteId)->where('lista_precio_id',$base)->exists(),
+        'Laravel debe asignar la LISTA BASE al cliente, sin trigger');
     entityExpect(422,entityRequest('POST','/api/v1/recursos/clientes',[
         'nombre'=>'Cliente con campo inválido','total_bruto'=>999
     ],$admin),'No exponer ventas');

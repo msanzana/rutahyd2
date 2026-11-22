@@ -16,7 +16,7 @@ jobs:
       FTP_HOST: ftpupload.net
       FTP_USER: if0_43460400
       FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
-      FRONT_SHA: fad40b1de92aff13421fea9238b05b40a56f6b74
+      FRONT_SHA: ce6258ef547288bb615033ebd342c8ad88082253
       LIVE_PREVIOUS_SHA: a08a6e4a0fa0d3f269184600177638c885b7b511
     steps:
       - name: Obtener única fuente frontend aprobada

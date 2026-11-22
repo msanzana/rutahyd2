@@ -1,0 +1,93 @@
+name: Verificar UI v20 en sitio real con API interceptada
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/verificar-ui-v20-publico.txt]
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preparar Chromium aislado
+        run: |
+          mkdir -p /tmp/qa-v20 && cd /tmp/qa-v20
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Comprobar avatar, tema, busqueda avanzada e iconos en produccion
+        working-directory: /tmp/qa-v20
+        run: |
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          const respond=(route,data,code=200)=>route.fulfill({status:code,contentType:'application/json',body:JSON.stringify(data)});
+          try{
+            for(const width of [1440,390]){
+              const page=await browser.newPage({viewport:{width,height:880},locale:'es-CL'});
+              let wrote=false;
+              await page.route('**/api/v1/**',route=>{
+                const request=route.request(),path=new URL(request.url()).pathname;
+                if(path==='/api/v1/estado')return respond(route,{servicio:'Ruta H&D2 API',estado:'disponible'});
+                if(path==='/api/v1/sesion'&&request.method()==='POST')return respond(route,{
+                  token:'header.test.signature',token_type:'Bearer',
+                  usuario:{id:554,nombre:'Inspector UI',rol:'administrador',
+                    permisos:['clientes.gestionar','productos.gestionar','compras.gestionar']}
+                });
+                if(request.method()!=='GET'){wrote=true;return respond(route,{},403);}
+                if(path==='/api/v1/recursos/clientes')return respond(route,{data:[{
+                    id:1,codigo:'C-1',nombre:'Cliente de validación visual',rut:'11111111-1',activo:true
+                }],last_page:1,total:1});
+                if(path==='/api/v1/productos')return respond(route,{data:[],last_page:1,total:0});
+                if(path.startsWith('/api/v1/catalogos/'))return respond(route,{items:[]});
+                return respond(route,{},404);
+              });
+              await page.goto('https://rutahyd2.free.nf/?ui=v20',{waitUntil:'domcontentloaded',timeout:55000});
+              await page.waitForTimeout(9000);
+              const needed=[
+                'link[href*="listados-tema-v20.css?v=20261122-ui20"]',
+                'script[src*="listados-ui.js?v=20261122-ui20"]',
+                'script[src*="menu-usuario.js?v=20261122-ui20"]'
+              ];
+              for(const css of needed){if(await page.locator(css).count()!==1)throw Error('Recurso v20 ausente '+css);}
+              if(await page.locator('#apiStatus,#heroLogin').count())throw Error('Indicadores de sesión antiguos continúan visibles');
+              await page.locator('#loginSubmit:not([disabled])').waitFor({timeout:25000});
+              await page.locator('#loginEmail').fill('qa@example.invalid');
+              await page.locator('#loginPassword').fill('CLAVE-FICTICIA');
+              await page.locator('#loginSubmit').click();
+              await page.waitForFunction(()=>document.querySelector('#loginDialog')?.open===false);
+              await page.locator('#userMenuTrigger').click();
+              await page.locator('#userMenuPopup:not([hidden])').waitFor();
+              await page.locator('#menuDarkMode').check({force:true});
+              if(await page.locator('html[data-theme="oscuro"]').count()!==1)throw Error('Tema oscuro no aplicado');
+              await page.locator('#userMenuTrigger').click();
+              if(width<900)await page.locator('#menuToggle').click();
+              await page.locator('.nav-link[data-nav="clientes"]').click();
+              await page.locator('.official-module .normalized-table tbody tr').first().waitFor();
+              await page.locator('.official-module .list-icon-action[aria-label="Editar"]').first().waitFor();
+              await page.locator('.official-module .advanced-filter-trigger').click();
+              await page.locator('dialog.advanced-search-dialog[open]').waitFor();
+              await page.screenshot({path:'/tmp/qa-v20/busqueda-avanzada-'+width+'.png'});
+              const dialog=await page.locator('dialog.advanced-search-dialog[open]').evaluate(el=>{
+                const r=el.getBoundingClientRect();
+                return {left:r.left,right:r.right,overflow:el.scrollWidth>el.clientWidth+2};
+              });
+              if(dialog.left<0||dialog.right>width+1||dialog.overflow)throw Error('Dialog fuera del viewport '+JSON.stringify(dialog));
+              if(wrote)throw Error('Detectada solicitud de escritura no permitida');
+              console.log('PUBLICO_V20',JSON.stringify({width,dialog,avatar:true,modoOscuro:true,iconos:true}));
+              await page.close();
+            }
+          }finally{await browser.close();}
+          JS
+      - name: Capturas de evidencia
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-v20-capturas
+          path: /tmp/qa-v20/busqueda-avanzada-*.png
+          if-no-files-found: ignore
+          retention-days: 7

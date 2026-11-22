@@ -63,7 +63,15 @@ jobs:
               $controller=$app->make(\App\Http\Controllers\ProductosProveedoresControlador::class);
               $response=$controller->mix($req);
               $json=json_decode((string)$response->getContent(),true,512,JSON_THROW_ON_ERROR);
-              $out['ok']=$response->getStatusCode()===200 && isset($json['data']);
+              $aliases=$app->make('router')->getMiddleware();
+              $out['alias_submodulo']=($aliases['submodulo.rutahd']??null)===
+                \\App\\Http\\Middleware\\AutorizarSubmodulo::class;
+              $out['clase_submodulo']=class_exists(\\App\\Http\\Middleware\\AutorizarSubmodulo::class);
+              $out['servicio_submodulo']=class_exists(\\App\\Services\\PermisosSubmodulos::class);
+              $out['ddl23_roles_submodulos']=\\Illuminate\\Support\\Facades\\DB::getSchemaBuilder()->hasTable('roles_submodulos');
+              $out['ddl23_preferencias']=\\Illuminate\\Support\\Facades\\DB::getSchemaBuilder()->hasTable('preferencias_usuarios');
+              $out['ok']=$response->getStatusCode()===200 && isset($json['data']) 
+                && $out['alias_submodulo'] && $out['clase_submodulo'] && $out['servicio_submodulo'];
               $out['http']=$response->getStatusCode();
               $out['items']=count($json['data']??[]);
               $out['total_tipo']=gettype($json['total']??null);

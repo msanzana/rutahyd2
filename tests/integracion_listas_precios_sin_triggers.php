@@ -92,9 +92,11 @@ try {
     debeFallar(fn()=>$servicio->guardarPrecioLista(
         $productoId,$especialId,1000,1500,25
     ),'Evitar precio y margen contradictorios');
-    debeFallar(fn()=>$servicio->guardarPrecioLista(
-        $productoId,$especialId,0,1000,null
-    ),'Evitar división por cero');
+    $sinCosto=$servicio->guardarPrecioLista($productoId,$especialId,0,1000,null);
+    verificarLista($sinCosto['margen_porcentaje']===null &&
+        (float)$sinCosto['precio_venta']===1000.0,
+        'Sin costo se conserva el precio, sin fabricar ni dividir margen');
+    $servicio->guardarPrecioLista($productoId,$especialId,1000,1500,null);
 
     $servicio->asignarListaCliente($clienteId,$especialId);
     verificarLista(DB::table('clientes_listas_precios')

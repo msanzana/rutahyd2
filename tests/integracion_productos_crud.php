@@ -84,6 +84,12 @@ try {
     assertTrue($id>0 && $created['presentacion']['tasaIva']==='0.00','Producto exento debe tener IVA cero');
     assertTrue((int)DB::table('presentaciones_productos')->where('producto_id',$id)->count()===1,
         'Guardar presentación en su tabla');
+    $baseId=DB::table('listas_precios')->where('es_base',1)->value('id');
+    $precioBase=DB::table('listas_precios_detalle')
+        ->where('lista_precio_id',$baseId)->where('producto_id',$id)->first();
+    assertTrue($precioBase!==null && (float)$precioBase->precio_venta===1234.5
+        && $precioBase->sku==='SKU-CRUD-FULLSTACK-CI',
+        'Laravel crea el precio base con precio anterior, sin trigger');
 
     $ean13=$idDe('tipos_codigos_barras','EAN-13 (GTIN-13)');
     $saleCode=expectCode(201,callApi('POST','/api/v1/productos/'.$id.'/codigos-venta',[

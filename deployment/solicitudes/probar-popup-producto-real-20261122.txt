@@ -1,0 +1,6 @@
+test=editor_producto_1440_572_390
+version=20261122-prod16
+frontend_deploy=44973237940
+sin_credenciales=si
+sin_sql=si
+sin_firecrawl=si

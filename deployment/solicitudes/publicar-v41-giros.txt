@@ -18,3 +18,5 @@ https://github.com/msanzana/rutahyd2/actions/runs/45066189802, éxito.
 Autorizar publicación focalizada de UN controlador PHP con respaldo
 y restauración ante cualquier fallo, checksum FTP y smoke 200/401.
 No tocar .env, index.html, rutas, front, tablas, usuarios ni información productiva.
+
+Reintento controlado: primer despliegue revirtió por smoke urllib con HTML anti-bot (status 200). Se cambió a Playwright Chromium, igual que V39 y V40. No se alteró SQL ni archivos fuera del controlador.

@@ -1,0 +1,1 @@
+Auditoría FTP solo lectura del error HTTP 500 POST /api/v1/listas-precios. Sin SQL, sin modificaciones de datos, sin credenciales en salida. Fecha 22-11-2026.

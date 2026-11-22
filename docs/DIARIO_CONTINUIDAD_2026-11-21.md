@@ -600,3 +600,10 @@ El titular pidió reemplazar los triggers propuestos por **funciones de backend 
 - DDL26 manual correctivo en `database/espanol/26_reparar_guardado_productos_costo_margen_ddl.sql`: agrega condicionalmente costo_neto a productos y minimo_margen_precio_venta a lineas, seguido de SELECT sobre INFORMATION_SCHEMA. Solo el titular puede ejecutarlo en phpMyAdmin. NO ejecutado aquí.
 - Desarrollo frontend posterior: validación preventiva de longitud EAN/UPC/DUN antes de POST, feedback específico para HTTP 500, formulario compactado legible (incluida tabla de margen), cache-busting de recursos. CI/release deben registrarse tras concluir; no afirmar publicación antes.
 - **Restricción permanente:** Firecrawl desinstalado y prohibido; cambios de BBDD solo mediante DDL ejecutado manualmente en phpMyAdmin. No repetir pruebas ya documentadas ni efectuar escrituras productivas de prueba.
+
+
+### Cierre de frontend v29 — 22-11-2026
+- Frontend main SHA `48dd81c505d7677dd56b9aa962f68b865cfd61dd`. Corrección de códigos EAN-13 de longitud incorrecta antes de enviar POST, mensaje específico de error 500 y ficha Producto más compacta con márgenes y controles legibles; encabezados, filtros, listas y galería v28 preservados.
+- CI frontend https://github.com/msanzana/rutahyd2front/actions/runs/44993758179 **62 pruebas aprobadas**. Incluye nueva prueba de EAN-13 de 12 dígitos bloqueado en navegador y guardado con longitud válida, API de simulación, sin operaciones reales.
+- Publicación final del sitio principal por FTPS https://github.com/msanzana/rutahyd2/actions/runs/44993889982 **éxito** con respaldo, recursos primero y HTML al final, verificación por comparación exacta de bytes y guardia Laravel intacta; sin SQL, migraciones ni escritura de productos.
+- **Bloqueo pendiente real:** el HTTP 500 de productos se debe a `productos.costo_neto` ausente en MariaDB productiva (logs SQLSTATE 42S22). El DDL26 para phpMyAdmin sigue **pendiente de ejecución por el titular**; esta publicación frontend no lo corrige por sí sola. El DDL25 de fotos consta solo como declarado ejecutado por el titular.

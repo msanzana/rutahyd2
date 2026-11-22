@@ -1,0 +1,229 @@
+name: V47 - publicar corrección códigos de compra con respaldo FTPS
+on:
+  push:
+    branches: [hotfix/v47-codigos-compra-422-20261122]
+    paths: [deployment/solicitudes/publicar-codigos-compra-v47.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FRONT_BASE: d4c1b4ab0912310ce910bdb71fef9a4c6746cde1
+      FRONT_PIN: d03877ecd9fedf1dc832450e32b6ff9461150190
+      BACK_BASE: ed226694cf628b3fcd4c300ca92ac2f66357cfcc
+      BACK_PIN: 6072567b84cbbf213ce519eff719f49ed4a2e58e
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar versiones fijadas y cliente FTPS
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          git fetch -q --depth=1 origin "$BACK_BASE" "$BACK_PIN"
+          git clone -q --depth 1 --branch hotfix/v47-codigos-compra-422-20261122 https://github.com/msanzana/rutahyd2front.git /tmp/v47front
+          git -C /tmp/v47front fetch -q --depth=1 origin "$FRONT_BASE" "$FRONT_PIN"
+          git -C /tmp/v47front checkout -q --detach "$FRONT_PIN"
+          test "$(git -C /tmp/v47front rev-parse HEAD)" = "$FRONT_PIN"
+          mkdir -p /tmp/v47/{before,after,check}
+      - name: Respaldar archivos publicados y protecciones mediante FTPS GET
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import pathlib,os
+          p=pathlib.Path('/tmp/v47')
+          files={
+           'assets/js/proveedores-productos.js':'/htdocs/assets/js/proveedores-productos.js',
+           'assets/css/interfaz-mix-validacion-v45.css':'/htdocs/assets/css/interfaz-mix-validacion-v45.css',
+           'app/Http/Controllers/CodigosBarrasProductoControlador.php':'/htdocs/api-v2/app/Http/Controllers/CodigosBarrasProductoControlador.php',
+           'index.html':'/htdocs/index.html',
+           'guard-private':'/htdocs/api-v2/.htaccess',
+           'guard-api':'/htdocs/api/.htaccess',
+           'gateway':'/htdocs/api/index.php'
+          }
+          (p/'manifest').write_text('\n'.join(k+'\t'+v for k,v in files.items())+'\n')
+          with (p/'read.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name,remote in files.items():
+              dest=p/'before'/name;dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+remote+' -o '+str(dest),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v47/read.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/v47/before/guard-private
+          grep -Fq 'HTTP_AUTHORIZATION' /tmp/v47/before/guard-api
+          grep -Fq 'rutahd2_api_ready' /tmp/v47/before/gateway
+          grep -Fq 'proveedores-productos.js?v=20261122-v45prod' /tmp/v47/before/index.html
+          grep -Fq 'interfaz-mix-validacion-v45.css?v=20261122-v46prod' /tmp/v47/before/index.html
+      - name: Aplicar parches estrictos sobre archivos vigentes y validar sintaxis
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,os,shutil,subprocess
+          p=pathlib.Path('/tmp/v47')
+          files=['assets/js/proveedores-productos.js',
+           'assets/css/interfaz-mix-validacion-v45.css',
+           'app/Http/Controllers/CodigosBarrasProductoControlador.php',
+           'index.html']
+          for name in files:
+            dst=p/'after'/name;dst.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copy2(p/'before'/name,dst)
+          diffs=[
+           ('/tmp/v47front',os.environ['FRONT_BASE'],os.environ['FRONT_PIN'],
+             ['assets/js/proveedores-productos.js','assets/css/interfaz-mix-validacion-v45.css'],2),
+           (os.environ['GITHUB_WORKSPACE'],os.environ['BACK_BASE'],os.environ['BACK_PIN'],
+             ['app/Http/Controllers/CodigosBarrasProductoControlador.php'],1)
+          ]
+          for repo,base,head,paths,count in diffs:
+            patch=subprocess.run(['git','-C',repo,'diff','--no-ext-diff','--binary',
+              base,head,'--',*paths],capture_output=True,check=True).stdout
+            assert patch.count(b'diff --git')==count,'El diff contiene rutas inesperadas'
+            result=subprocess.run(['patch','--batch','--fuzz=0','-p1','-d',str(p/'after')],
+              input=patch,capture_output=True)
+            if result.returncode:
+              print(result.stdout.decode(errors='replace')[:1000])
+              raise RuntimeError('Archivos productivos difieren: despliegue cancelado')
+          html=(p/'after/index.html').read_text()
+          pairs={
+           'proveedores-productos.js?v=20261122-v45prod':'proveedores-productos.js?v=20261122-v47prod',
+           'interfaz-mix-validacion-v45.css?v=20261122-v46prod':'interfaz-mix-validacion-v45.css?v=20261122-v47prod'
+          }
+          for old,new in pairs.items():
+            assert html.count(old)==1,old
+            html=html.replace(old,new)
+          assert 'buscador-productos-v39.js?v=20261122-v46prod' in html
+          assert 'carga-global-v42.js' in html and 'ubicacionesSubnav' in html
+          (p/'after/index.html').write_text(html)
+          js=(p/'after/assets/js/proveedores-productos.js').read_text()
+          php=(p/'after/app/Http/Controllers/CodigosBarrasProductoControlador.php').read_text()
+          assert 'purchaseBarcodeValidation' in js and 'form.noValidate=true' in js
+          assert "array_keys($request->all())===['activo']" in php
+          print('V47_PREFLIGHT_OK frontend V46 y middleware V43 preservados')
+          PY
+          node --check /tmp/v47/after/assets/js/proveedores-productos.js
+          php -l /tmp/v47/after/app/Http/Controllers/CodigosBarrasProductoControlador.php
+      - name: Guardar respaldo de los originales para rollback
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v47-respaldo-antes-codigos-compra
+          path: /tmp/v47/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Subir cuatro archivos, CSS primero e index al final
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/v47/upload-started
+          python3 - <<'PY'
+          import pathlib,os
+          p=pathlib.Path('/tmp/v47')
+          remote=dict(line.split('\t',1) for line in (p/'manifest').read_text().splitlines())
+          files=['assets/css/interfaz-mix-validacion-v45.css',
+                 'assets/js/proveedores-productos.js',
+                 'app/Http/Controllers/CodigosBarrasProductoControlador.php','index.html']
+          (p/'uploaded').write_text('\n'.join(files)+'\n')
+          with (p/'put.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:print('put '+str(p/'after'/name)+' -o '+remote[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v47/put.lftp >/dev/null
+      - name: Verificar bytes remotos y seguridad del backend
+        run: |
+          set -euo pipefail
+          set +x
+          python3 - <<'PY'
+          import pathlib,os
+          p=pathlib.Path('/tmp/v47')
+          remote=dict(line.split('\t',1) for line in (p/'manifest').read_text().splitlines())
+          files=(p/'uploaded').read_text().splitlines()+['guard-private','guard-api','gateway']
+          with (p/'verify.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              dest=p/'check'/name;dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+remote[name]+' -o '+str(dest),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v47/verify.lftp >/dev/null
+          python3 - <<'PY'
+          import pathlib
+          p=pathlib.Path('/tmp/v47')
+          for name in (p/'uploaded').read_text().splitlines():
+            assert (p/'check'/name).read_bytes()==(p/'after'/name).read_bytes(),name
+          for name in ['guard-private','guard-api','gateway']:
+            assert (p/'check'/name).read_bytes()==(p/'before'/name).read_bytes(),name
+          print('V47_BYTES_OK cuatro archivos exactos; protecciones y gateway intactos')
+          PY
+      - name: Comprobar recursos públicos con Chromium sin sesión ni POST
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v47/browser
+          cd /tmp/v47/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try {
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/?v47=codigos-compra',{
+              waitUntil:'domcontentloaded',timeout:55000});
+            await page.waitForTimeout(3500);
+            const evidence=await page.evaluate(()=>({
+              logo:!!document.querySelector('.brand-logo'),
+              menu:!!document.querySelector('#ubicacionesSubnav'),
+              js:!!document.querySelector('script[src*="proveedores-productos.js?v=20261122-v47prod"]'),
+              css:!!document.querySelector('link[href*="interfaz-mix-validacion-v45.css?v=20261122-v47prod"]'),
+              checkboxV46:!!document.querySelector('script[src*="buscador-productos-v39.js?v=20261122-v46prod"]'),
+              mix:typeof window.RutaHDProveedoresProductos?.mount==='function'
+            }));
+            console.log('V47_SMOKE_PUBLICO',JSON.stringify(evidence));
+            if(!Object.values(evidence).every(Boolean))
+              throw new Error('El navegador público no confirmó los assets V47');
+          }finally{await browser.close();}
+          JS
+          echo 'V47: frontend y PHP publicados; no se hicieron POST reales ni cambios de base de datos.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Restaurar los originales si falla después de subirlos
+        if: failure()
+        run: |
+          set +x
+          if [[ -f /tmp/v47/upload-started && -s /tmp/v47/before/index.html ]];then
+            python3 - <<'PY'
+            import pathlib,os
+            p=pathlib.Path('/tmp/v47')
+            remote=dict(line.split('\t',1) for line in (p/'manifest').read_text().splitlines())
+            with (p/'rollback.lftp').open('w') as f:
+              for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+                'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+                'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+              print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+              for name in (p/'uploaded').read_text().splitlines():
+                print('put '+str(p/'before'/name)+' -o '+remote[name],file=f)
+              print('bye',file=f)
+            PY
+            lftp -f /tmp/v47/rollback.lftp >/dev/null ||
+              echo '::error::Rollback incompleto: restaurar artefacto de respaldo V47'
+          fi
+      - name: Borrar archivos temporales con claves FTPS
+        if: always()
+        run: rm -f /tmp/v47/*.lftp

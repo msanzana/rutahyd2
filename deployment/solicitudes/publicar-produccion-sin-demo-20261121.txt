@@ -54,3 +54,16 @@ frontend_only=true
 mysql=no_modificar
 laravel=no_modificar
 rollback=si
+
+release=20261122-ui-v20-listados-busqueda-perfil-tema
+frontend_sha=259a251ecb3cb3455d6ff7f7630413b14412f9b4
+frontend_ci=44980054689-success-45-tests
+scope=frontend_only
+nueva_css=listados-tema-v20.css
+nuevos_js=listados-ui.js,menu-usuario.js
+tema=por_usuario_en_navegador_sin_jwt
+permisos_submodulos=arbol_visual_compatibilidad_actual
+ddl23=pendiente_importacion_manual_no_aplicar
+backend=no_modificar
+bdd=no_modificar
+rollback=si

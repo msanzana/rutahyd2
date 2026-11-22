@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 
 /**
@@ -15,6 +16,8 @@ final class FotosProductoControlador extends Controller
 {
     private function producto(int $productoId): object
     {
+        abort_unless(Schema::hasTable('productos_fotos'),503,
+            'Falta importar el DDL25 de fotografías de productos');
         $producto=DB::table('productos')->where('id',$productoId)
             ->first(['id','sku','nombre','activo']);
         abort_unless($producto,404,'Producto inexistente');

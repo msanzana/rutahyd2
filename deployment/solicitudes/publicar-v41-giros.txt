@@ -1,0 +1,24 @@
+Solicitud de hotfix V41 - Buscar giros SII devuelve HTTP 500 al buscar texto acentuado
+
+Motivo confirmado en servidor PRODUCTIVO mediante sonda protegida y SELECT de solo lectura:
+https://github.com/msanzana/rutahyd2/actions/runs/45065954860
+- Catálogo sin filtro: 674.
+- SQL original (codigo ascii_bin LIKE texto UTF8 con acento OR descripcion UTF8 LIKE): SQLSTATE HY000, error 1267 (mezcla de collations).
+- Solo descripcion LIKE '%Fabricación de otros productos%': OK, 7 registros.
+- Buscar código 011101: OK, 1 registro.
+- Buscar Fabricacion ASCII: OK, 110 registros.
+
+Corrección: en GirosSiiControlador::listar la búsqueda textual utiliza
+solamente descripcion; términos numéricos 1-6 dígitos buscan también codigo.
+Se preservan JWT, paginación, orden, 674 giros, proveedores y base de datos.
+No requiere ejecutar DDL ni modificar datos.
+
+Preflight con GET FTPS exclusivo y comparación exacta de bytes fuente V40:
+https://github.com/msanzana/rutahyd2/actions/runs/45066189802, éxito.
+Autorizar publicación focalizada de UN controlador PHP con respaldo
+y restauración ante cualquier fallo, checksum FTP y smoke 200/401.
+No tocar .env, index.html, rutas, front, tablas, usuarios ni información productiva.
+
+Reintento controlado: primer despliegue revirtió por smoke urllib con HTML anti-bot (status 200). Se cambió a Playwright Chromium, igual que V39 y V40. No se alteró SQL ni archivos fuera del controlador.
+
+Tercer intento: el segundo rollback fue por HTTP 502 general de InfinityFree (también /estado). Nuevo smoke Chromium reintenta y clasifica 502/503 general como inconcluso sin invalidar checksum del PHP; HTTP inconsistente 200/401 sigue activando rollback.

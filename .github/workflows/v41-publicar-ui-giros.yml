@@ -1,0 +1,185 @@
+name: V41 - publicar estado visual corregido del buscador de giros
+on:
+  push:
+    branches: [hotfix/v41-giros-sii-busqueda-20261122]
+    paths: [deployment/solicitudes/publicar-v41-ui-giros.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FRONT_BEFORE: d93ac2b8ab187c44f2cc1faaa67bc6092dbe1834
+      FRONT_AFTER: eccf8eb0834acc546ad7e25de2a8ce232eba9cc2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar FTPS y versión exacta del JavaScript
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          git clone -q --depth 1 --branch hotfix/v41-giros-sii-busqueda-20261122 https://github.com/msanzana/rutahyd2front.git /tmp/giros-front
+          git -C /tmp/giros-front fetch -q --depth 1 origin "$FRONT_BEFORE" "$FRONT_AFTER"
+          mkdir -p /tmp/giros-v41-ui
+          git -C /tmp/giros-front show "$FRONT_BEFORE:assets/js/giros-sii-v39.js" > /tmp/giros-v41-ui/js-before.js
+          git -C /tmp/giros-front show "$FRONT_AFTER:assets/js/giros-sii-v39.js" > /tmp/giros-v41-ui/js-after.js
+          node --check /tmp/giros-v41-ui/js-after.js
+      - name: Descargar JS y HTML productivos sin modificar
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/giros-v41-ui/read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/assets/js/giros-sii-v39.js -o /tmp/giros-v41-ui/js-live.js
+          get /htdocs/index.html -o /tmp/giros-v41-ui/index-before.html
+          get /htdocs/api-v2/.htaccess -o /tmp/giros-v41-ui/private-before
+          get /htdocs/api/.htaccess -o /tmp/giros-v41-ui/gateway-before
+          bye
+          EOF
+          lftp -f /tmp/giros-v41-ui/read.lftp >/dev/null
+          cmp /tmp/giros-v41-ui/js-live.js /tmp/giros-v41-ui/js-before.js
+          grep -Fq 'Require all denied' /tmp/giros-v41-ui/private-before
+          grep -Fq 'HTTP_AUTHORIZATION' /tmp/giros-v41-ui/gateway-before
+      - name: Cambiar solo referencia de caché del script del buscador
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          root=Path('/tmp/giros-v41-ui')
+          original=(root/'index-before.html').read_text('utf-8')
+          for marker in ['hd-branding/logo-hd-site.png',
+            'mix-proveedores-v40.css','ubicacionesSubnav',
+            'acciones-buscadores-v39.css']:
+            assert marker in original, marker
+          pattern=r'(assets/js/giros-sii-v39\.js)(?:\?v=[^"]+)?(?=")'
+          changed,count=re.subn(pattern,
+            lambda m:m.group(1)+'?v=20261122-v41prod',original)
+          assert count==1,'el script SII no es único'
+          assert original!=changed
+          assert 'Administración MySQL' not in changed
+          (root/'index-after.html').write_text(changed,'utf-8')
+          print('V41_UI_ONLY: JS corregido y versionado sin tocar otros módulos')
+          PY
+      - name: Guardar backup FTPS para restauración
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v41-respaldo-ui-buscador-giros
+          path: |
+            /tmp/giros-v41-ui/js-live.js
+            /tmp/giros-v41-ui/index-before.html
+            /tmp/giros-v41-ui/private-before
+            /tmp/giros-v41-ui/gateway-before
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar JS primero y HTML por último
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/giros-v41-ui/upload-started
+          cat >/tmp/giros-v41-ui/put.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/giros-v41-ui/js-after.js -o /htdocs/assets/js/giros-sii-v39.js
+          put /tmp/giros-v41-ui/index-after.html -o /htdocs/index.html
+          bye
+          EOF
+          lftp -f /tmp/giros-v41-ui/put.lftp >/dev/null
+      - name: Verificar bytes y seguridad Apache intacta
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/giros-v41-ui/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/assets/js/giros-sii-v39.js -o /tmp/giros-v41-ui/js-verified.js
+          get /htdocs/index.html -o /tmp/giros-v41-ui/index-verified.html
+          get /htdocs/api-v2/.htaccess -o /tmp/giros-v41-ui/private-after
+          get /htdocs/api/.htaccess -o /tmp/giros-v41-ui/gateway-after
+          bye
+          EOF
+          lftp -f /tmp/giros-v41-ui/verify.lftp >/dev/null
+          cmp /tmp/giros-v41-ui/js-after.js /tmp/giros-v41-ui/js-verified.js
+          cmp /tmp/giros-v41-ui/index-after.html /tmp/giros-v41-ui/index-verified.html
+          cmp /tmp/giros-v41-ui/private-before /tmp/giros-v41-ui/private-after
+          cmp /tmp/giros-v41-ui/gateway-before /tmp/giros-v41-ui/gateway-after
+      - name: Verificar JS, HTML, logo y API desde Chromium
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/giros-v41-ui/browser
+          cd /tmp/giros-v41-ui/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/?v41u=20261122',{
+              waitUntil:'domcontentloaded',timeout:55000});
+            await page.waitForTimeout(8500);
+            const r=await page.evaluate(async()=>{
+              const urls=['/api/v1/estado',
+                '/assets/js/giros-sii-v39.js?v=20261122-v41prod'];
+              const codes=await Promise.all(urls.map(async url=>
+                ({url,http:(await fetch(url,{cache:'no-store'})).status})));
+              return {codes,logo:!!document.querySelector('.brand-logo'),
+                geo:!!document.querySelector('#ubicacionesSubnav'),
+                cache:!!document.querySelector('script[src*="giros-sii-v39.js?v=20261122-v41prod"]'),
+                giro:typeof window.RutaHDGirosSii?.open==='function'};
+            });
+            console.log('V41_UI_SMOKE',JSON.stringify(r));
+            if(!r.logo||!r.geo||!r.cache||!r.giro||r.codes.some(x=>x.http!==200))
+              throw Error('Smoke V41-UI inválido');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar dos archivos originales ante fallo posterior al upload
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/giros-v41-ui/upload-started ] && [ -s /tmp/giros-v41-ui/index-before.html ]; then
+            cat >/tmp/giros-v41-ui/rollback.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 3
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/giros-v41-ui/js-live.js -o /htdocs/assets/js/giros-sii-v39.js
+          put /tmp/giros-v41-ui/index-before.html -o /htdocs/index.html
+          bye
+          EOF
+            lftp -f /tmp/giros-v41-ui/rollback.lftp >/dev/null ||
+              echo '::error::Rollback incompleto; recuperar el respaldo del run'
+          fi
+      - name: Borrar comandos con credenciales
+        if: always()
+        run: rm -f /tmp/giros-v41-ui/*.lftp

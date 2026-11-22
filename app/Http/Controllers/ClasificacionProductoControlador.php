@@ -21,7 +21,6 @@ final class ClasificacionProductoControlador extends Controller
         'marcaId' => ['marcas', 'marca_id'],
         'modeloId' => ['modelos', 'modelo_id'],
         'tipoUnidadId' => ['tipos_unidad', 'tipo_unidad_id'],
-        'gramajeId' => ['gramajes', 'gramaje_id'],
         'tipoEnvasadoId' => ['tipos_envasado', 'tipo_envasado_id'],
         'condicionTributariaId' => ['condiciones_tributarias', 'condicion_tributaria_id'],
     ];

@@ -324,6 +324,15 @@ final class ProductoComercialControlador extends Controller
         $presentaciones=DB::table('presentaciones_productos')
             ->where('producto_id',$id)->orderBy('id')->get();
         $data=$this->resultado($producto,$presentaciones->first(),true);
+        // La ficha individual debe incluir exactamente los mismos nombres
+        // que el listado. Sin ello el frontend marca registros reales
+        // como "Sin clasificar" cuando solo conoce el identificador.
+        $data['clasificacionNombres']=[];
+        foreach(self::CLASIFICACIONES as $campo=>$config){
+            $valor=$data['clasificacion'][$campo]??null;
+            $data['clasificacionNombres'][$campo]=$valor===null
+                ? null : DB::table($config[0])->where('id',$valor)->value('nombre');
+        }
         $data['totalPresentaciones']=$presentaciones->count();
         $data['codigosVenta']=$this->codigosVenta($id);
         $minimo=DB::table('lineas')->where('id',$producto->linea_id)

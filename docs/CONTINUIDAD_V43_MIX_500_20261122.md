@@ -38,3 +38,9 @@ Preservar UX violeta y preloader V42, menú y versiones anteriores, paginación 
 - El smoke mediante urllib devolvió HTTP200 **no JSON** en API estado y mix, típico de intermediario; **no** certifica ruta autenticada. Comprobar de manera segura en navegador con sesión operativa y hacer lectura runtime de aliases/DDL23 antes de dar por cerrado el HTTP500.
 - Fuente frontend V38–V42: PR de consolidación https://github.com/msanzana/rutahyd2front/pull/16 borrador. Backend main diverge ampliamente y no se debe fusionar a ciegas.
 - Recepciones y costo promedio: PR diseño https://github.com/msanzana/rutahyd2/pull/14, DDL36 **borrador no ejecutable todavía** hasta backend y pruebas.
+
+
+## Resultado final de auditoría runtime — 2026-11-22
+- Tras el hotfix, https://github.com/msanzana/rutahyd2/actions/runs/45072876955 comprobó directamente en Laravel que `submodulo.rutahd` está registrado en el **HTTP Kernel**, `AutorizarSubmodulo` y `PermisosSubmodulos` son resolubles y `ProductosProveedoresControlador::mix` devuelve HTTP 200 con JSON/paginación. La prueba usa un endpoint temporal protegido, eliminado al finalizar, y no emplea JWT ni escribe datos.
+- **Bloqueo independiente confirmado**: `roles_submodulos` y `preferencias_usuarios` (DDL23) están AUSENTES en la base exacta según `Schema::hasTable()` en Laravel productivo. No ejecutar automáticamente. Pendiente: el titular debe respaldar e importar manualmente únicamente `database/espanol/23_preferencias_usuarios_permisos_submodulos_ddl.sql` mediante phpMyAdmin y confirmar el resultado.
+- El frontend no debe declararse reparado funcionalmente para sesión real hasta que DDL23 esté presente y se valide inicio de sesión + GET del directorio con token autorizado. No repetir los DDL ya verificados V38/V39.

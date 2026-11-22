@@ -645,3 +645,8 @@ El titular pidió reemplazar los triggers propuestos por **funciones de backend 
 - La confirmación del titular acredita la ejecución declarada, no prueba por sí misma que `POST /api/v1/listas-precios` se haya guardado correctamente en la base productiva.
 - Relectura posterior únicamente de logs Laravel por FTPS en https://github.com/msanzana/rutahyd2/actions/runs/44998454734; esta auditoría no crea listas ni altera datos. Errores históricos anteriores al DDL27 no cuentan como fallo nuevo; es necesaria una operación real autorizada para certificar el alta completa.
 - Frontend v32 (switches, errores legibles) y backend de clasificación ya fueron publicados con verificaciones; no repetir sus 71 pruebas en esta confirmación.
+
+
+#### Resultado de la auditoría posterior al DDL27
+- La auditoría FTPS solo lectura https://github.com/msanzana/rutahyd2/actions/runs/44998454734 terminó **exitosamente**. El registro Laravel tiene 14 eventos de error, de los cuales 8 se relacionan con listas de precios y el costo de Productos, todos históricos (último: 2026-11-22 04:03:24, hora Chile). **No hay errores nuevos de Listas de precios posteriores en el log disponible.**
+- Esto **no prueba** aún una creación autenticada exitosa tras DDL27: no se enviaron operaciones POST reales, ni se creó una lista de prueba. Mantener el alta funcional real pendiente de observación en el uso normal. No ejecutar pruebas de escritura ni SQL automático.

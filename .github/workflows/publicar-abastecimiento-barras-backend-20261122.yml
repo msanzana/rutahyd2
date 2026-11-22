@@ -1,0 +1,228 @@
+name: Publicar Laravel proveedores-productos y codigos barras con rollback
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/publicar-abastecimiento-barras-backend-20261122.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 27
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACKEND_SHA: 88635dae023c2507a5c80b475b4fa7b6958984bb
+      BASE_SHA: b3af158d4c5248b13d03be3e9d1c83fd3744fd10
+    steps:
+      - name: Descargar codigo exacto y validar solo lo necesario
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          git clone -q --depth 1 --branch feature/proveedores-productos-barcodes-20261122 https://github.com/msanzana/rutahyd2.git /tmp/backend
+          test "$(git -C /tmp/backend rev-parse HEAD)" = "$BACKEND_SHA"
+          git -C /tmp/backend fetch -q --depth 1 origin "$BASE_SHA"
+          cat >/tmp/changed-files <<EOF
+          app/Http/Controllers/CatalogoComercialControlador.php
+          app/Http/Controllers/ClasificacionProductoControlador.php
+          app/Http/Controllers/ProductoComercialControlador.php
+          app/Http/Controllers/RecursoControlador.php
+          app/Services/PermisosCatalogos.php
+          routes/api.php
+          EOF
+          cat >/tmp/new-files <<EOF
+          app/Http/Controllers/ProductosProveedoresControlador.php
+          app/Http/Controllers/CodigosBarrasProductoControlador.php
+          EOF
+          mkdir -p /tmp/backup
+          while IFS= read -r f; do
+            php -l "/tmp/backend/$f"
+            mkdir -p "/tmp/backup/$(dirname "$f")"
+            git -C /tmp/backend show "$BASE_SHA:$f" > "/tmp/backup/$f"
+          done </tmp/changed-files
+          while IFS= read -r f; do php -l "/tmp/backend/$f"; done </tmp/new-files
+          grep -Fq 'productos_proveedores' /tmp/backend/routes/api.php
+          grep -Fq 'tipos_codigos_barras' /tmp/backend/app/Http/Controllers/CatalogoComercialControlador.php
+          ! grep -Eq 'DROP TABLE|TRUNCATE' /tmp/backend/app/Http/Controllers/ProductosProveedoresControlador.php
+      - name: Instalar FTPS y Chromium
+        run: |
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+          mkdir -p /tmp/rutahd-barcode-smoke && cd /tmp/rutahd-barcode-smoke
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Respaldar archivos reales y exigir coincidencia con version anterior
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          mkdir -p /tmp/remote_before
+          while IFS= read -r f; do mkdir -p "/tmp/remote_before/$(dirname "$f")"; done </tmp/changed-files
+          cat >/tmp/ftps-read.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/routes/api.php -o /tmp/remote_before/routes/api.php
+          get /htdocs/api-v2/app/Http/Controllers/CatalogoComercialControlador.php -o /tmp/remote_before/app/Http/Controllers/CatalogoComercialControlador.php
+          get /htdocs/api-v2/app/Http/Controllers/ClasificacionProductoControlador.php -o /tmp/remote_before/app/Http/Controllers/ClasificacionProductoControlador.php
+          get /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php -o /tmp/remote_before/app/Http/Controllers/ProductoComercialControlador.php
+          get /htdocs/api-v2/app/Http/Controllers/RecursoControlador.php -o /tmp/remote_before/app/Http/Controllers/RecursoControlador.php
+          get /htdocs/api-v2/app/Services/PermisosCatalogos.php -o /tmp/remote_before/app/Services/PermisosCatalogos.php
+          get /htdocs/api-v2/.htaccess -o /tmp/private_guard_before
+          get /htdocs/api/.htaccess -o /tmp/gateway_guard_before
+          get /htdocs/api/index.php -o /tmp/gateway_before
+          get /htdocs/api-v2/storage/app/private/rutahd2_api_ready -o /tmp/gateway_ready
+          bye
+          EOF
+          lftp -f /tmp/ftps-read.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/private_guard_before
+          grep -Fq 'HTTP_AUTHORIZATION' /tmp/gateway_guard_before
+          grep -Fq 'rutahd2_api_ready' /tmp/gateway_before
+          test -s /tmp/gateway_ready
+          while IFS= read -r f; do
+             cmp -s "/tmp/backup/$f" "/tmp/remote_before/$f" ||
+               { echo "::error::Produccion difiere de fuente anterior en $f. NO publicar."; exit 1; }
+          done </tmp/changed-files
+          echo 'Preflight: fuente anterior exacta, JWT activo, gateway y proteccion privada correctos.'
+      - name: Subir controladores nuevos, archivos existentes y rutas al final
+        run: |
+          set -euo pipefail
+          set +x
+          touch /tmp/started_upload
+          cat >/tmp/ftps-write.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/backend/app/Http/Controllers/ProductosProveedoresControlador.php -o /htdocs/api-v2/app/Http/Controllers/ProductosProveedoresControlador.php
+          put /tmp/backend/app/Http/Controllers/CodigosBarrasProductoControlador.php -o /htdocs/api-v2/app/Http/Controllers/CodigosBarrasProductoControlador.php
+          put /tmp/backend/app/Http/Controllers/CatalogoComercialControlador.php -o /htdocs/api-v2/app/Http/Controllers/CatalogoComercialControlador.php
+          put /tmp/backend/app/Http/Controllers/ClasificacionProductoControlador.php -o /htdocs/api-v2/app/Http/Controllers/ClasificacionProductoControlador.php
+          put /tmp/backend/app/Http/Controllers/ProductoComercialControlador.php -o /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php
+          put /tmp/backend/app/Http/Controllers/RecursoControlador.php -o /htdocs/api-v2/app/Http/Controllers/RecursoControlador.php
+          put /tmp/backend/app/Services/PermisosCatalogos.php -o /htdocs/api-v2/app/Services/PermisosCatalogos.php
+          put /tmp/backend/routes/api.php -o /htdocs/api-v2/routes/api.php
+          bye
+          EOF
+          lftp -f /tmp/ftps-write.lftp >/dev/null
+      - name: Comparar bytes desplegados con fuente y proteger archivos previos
+        run: |
+          set -euo pipefail
+          set +x
+          mkdir -p /tmp/remote_after
+          while IFS= read -r f; do mkdir -p "/tmp/remote_after/$(dirname "$f")"; done </tmp/changed-files
+          while IFS= read -r f; do mkdir -p "/tmp/remote_after/$(dirname "$f")"; done </tmp/new-files
+          cat >/tmp/ftps-verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/routes/api.php -o /tmp/remote_after/routes/api.php
+          get /htdocs/api-v2/app/Http/Controllers/CatalogoComercialControlador.php -o /tmp/remote_after/app/Http/Controllers/CatalogoComercialControlador.php
+          get /htdocs/api-v2/app/Http/Controllers/ClasificacionProductoControlador.php -o /tmp/remote_after/app/Http/Controllers/ClasificacionProductoControlador.php
+          get /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php -o /tmp/remote_after/app/Http/Controllers/ProductoComercialControlador.php
+          get /htdocs/api-v2/app/Http/Controllers/RecursoControlador.php -o /tmp/remote_after/app/Http/Controllers/RecursoControlador.php
+          get /htdocs/api-v2/app/Services/PermisosCatalogos.php -o /tmp/remote_after/app/Services/PermisosCatalogos.php
+          get /htdocs/api-v2/app/Http/Controllers/ProductosProveedoresControlador.php -o /tmp/remote_after/app/Http/Controllers/ProductosProveedoresControlador.php
+          get /htdocs/api-v2/app/Http/Controllers/CodigosBarrasProductoControlador.php -o /tmp/remote_after/app/Http/Controllers/CodigosBarrasProductoControlador.php
+          get /htdocs/api-v2/.htaccess -o /tmp/private_guard_after
+          get /htdocs/api/.htaccess -o /tmp/gateway_guard_after
+          get /htdocs/api/index.php -o /tmp/gateway_after
+          bye
+          EOF
+          lftp -f /tmp/ftps-verify.lftp >/dev/null
+          while IFS= read -r f; do
+            cmp -s "/tmp/backend/$f" "/tmp/remote_after/$f"
+            php -l "/tmp/remote_after/$f"
+          done </tmp/changed-files
+          while IFS= read -r f; do
+            cmp -s "/tmp/backend/$f" "/tmp/remote_after/$f"
+            php -l "/tmp/remote_after/$f"
+          done </tmp/new-files
+          cmp -s /tmp/private_guard_before /tmp/private_guard_after
+          cmp -s /tmp/gateway_guard_before /tmp/gateway_guard_after
+          cmp -s /tmp/gateway_before /tmp/gateway_after
+      - name: Smoke seguridad JWT sin iniciar sesion ni escribir DB
+        working-directory: /tmp/rutahd-barcode-smoke
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:45000});
+            await page.waitForTimeout(9000);
+            const result=await page.evaluate(async()=>{
+              async function req(path,method='GET',fake=false){
+                const response=await fetch('/api/v1/'+path,{
+                  method,cache:'no-store',
+                  headers:{Accept:'application/json',
+                    ...(fake?{Authorization:'Bearer aaaa.bbbb.cccc'}:{})}
+                });
+                return response.status;
+              }
+              return {
+                health:await req('estado'),
+                providers:await req('proveedores-productos'),
+                createLink:await req('proveedores-productos','POST'),
+                purchaseCodes:await req('proveedores-productos/1/codigos-compra'),
+                saleCodes:await req('productos/1/codigos-venta'),
+                types:await req('catalogos/tipos_codigos_barras'),
+                fakeToken:await req('proveedores-productos','GET',true),
+                salesProtected:await req('recursos/ventas','POST')
+              };
+            });
+            console.log('BARCODES_BACKEND_PRODUCTION_SECURITY',JSON.stringify(result));
+            if(result.health!==200||result.providers!==401||result.createLink!==401||
+              result.purchaseCodes!==401||result.saleCodes!==401||result.types!==401||
+              result.fakeToken!==401||result.salesProtected!==405)throw Error('JWT / listado de rutas no cumple las protecciones esperadas');
+          }finally{await browser.close();}
+          JS
+          echo 'Backend comercial desplegado con rutas JWT protegidas, 401 anonimo y 405 ventas.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Ninguna escritura de prueba en MariaDB; SQL20 y SQL21 ya verificados.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Rollback ante error, restaurar seis archivos antiguos y rutas
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/started_upload ] && [ -s /tmp/remote_before/routes/api.php ]; then
+            cat >/tmp/ftps-rollback.lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 45
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/remote_before/routes/api.php -o /htdocs/api-v2/routes/api.php
+          put /tmp/remote_before/app/Http/Controllers/CatalogoComercialControlador.php -o /htdocs/api-v2/app/Http/Controllers/CatalogoComercialControlador.php
+          put /tmp/remote_before/app/Http/Controllers/ClasificacionProductoControlador.php -o /htdocs/api-v2/app/Http/Controllers/ClasificacionProductoControlador.php
+          put /tmp/remote_before/app/Http/Controllers/ProductoComercialControlador.php -o /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php
+          put /tmp/remote_before/app/Http/Controllers/RecursoControlador.php -o /htdocs/api-v2/app/Http/Controllers/RecursoControlador.php
+          put /tmp/remote_before/app/Services/PermisosCatalogos.php -o /htdocs/api-v2/app/Services/PermisosCatalogos.php
+          rm /htdocs/api-v2/app/Http/Controllers/ProductosProveedoresControlador.php
+          rm /htdocs/api-v2/app/Http/Controllers/CodigosBarrasProductoControlador.php
+          bye
+          EOF
+            lftp -f /tmp/ftps-rollback.lftp >/dev/null || echo "::error::Rollback FTP requiere revisión manual"
+          fi
+      - name: Limpiar respaldos de archivos y datos privados del runner
+        if: always()
+        run: |
+          set +x
+          rm -rf /tmp/remote_before /tmp/remote_after /tmp/backup /tmp/backend
+          rm -f /tmp/ftps-*.lftp /tmp/private_guard_* /tmp/gateway_guard_* /tmp/gateway_before /tmp/gateway_after /tmp/gateway_ready /tmp/new-files /tmp/changed-files

@@ -56,7 +56,6 @@ try {
         'marcaId'=>$idDe('marcas','H&D'),
         'modeloId'=>$idDe('modelos','Tradicional'),
         'tipoUnidadId'=>$idDe('tipos_unidad','Unidad'),
-        'gramajeId'=>$idDe('gramajes','500.000'),
         'tipoEnvasadoId'=>$idDe('tipos_envasado','Lata'),
         'condicionTributariaId'=>$idDe('condiciones_tributarias','Exento'),
     ];
@@ -85,6 +84,20 @@ try {
     assertTrue($id>0 && $created['presentacion']['tasaIva']==='0.00','Producto exento debe tener IVA cero');
     assertTrue((int)DB::table('presentaciones_productos')->where('producto_id',$id)->count()===1,
         'Guardar presentación en su tabla');
+
+    $ean13=$idDe('tipos_codigos_barras','EAN-13 (GTIN-13)');
+    $saleCode=expectCode(201,callApi('POST','/api/v1/productos/'.$id.'/codigos-venta',[
+        'tipo_codigo_barra_id'=>$ean13,'codigo_barras'=>'7801234567890',
+        'unidades_por_codigo'=>'1'
+    ],$token),'Añadir código de barras de venta');
+    assertTrue((int)$saleCode['producto_id']===$id,'Código pertenece al producto');
+    expectCode(409,callApi('POST','/api/v1/productos/'.$id.'/codigos-venta',[
+        'tipo_codigo_barra_id'=>$ean13,'codigo_barras'=>'7801234567890',
+        'unidades_por_codigo'=>1
+    ],$token),'Código duplicado');
+    $saleList=expectCode(200,callApi('GET','/api/v1/productos/'.$id.'/codigos-venta',
+        [],$token),'Listar códigos venta');
+    assertTrue(count($saleList['items'])===1,'Códigos de venta en tabla propia');
 
     expectCode(409,callApi('POST','/api/v1/productos',$payload,$token),'Duplicado SKU');
     $single=expectCode(200,callApi('GET','/api/v1/productos/'.$id,[],$token),'Leer producto');

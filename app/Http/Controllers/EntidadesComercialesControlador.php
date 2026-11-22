@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Database\QueryException;
 use App\Services\PermisosSubmodulos;
+use App\Services\GestionListasPrecios;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -17,6 +18,8 @@ use Illuminate\Validation\Rule;
  */
 final class EntidadesComercialesControlador extends Controller
 {
+    public function __construct(private GestionListasPrecios $listasPrecios) {}
+
     private const PERMISOS = [
         'clientes' => 'clientes.gestionar',
         'proveedores' => 'compras.gestionar',
@@ -116,6 +119,9 @@ final class EntidadesComercialesControlador extends Controller
                 if ($nuevo) {
                     $datos['activo'] = $datos['activo'] ?? true;
                     $id = (int)DB::table($recurso)->insertGetId($datos);
+                    if ($recurso === 'clientes') {
+                        $this->listasPrecios->asignarListaBaseCliente($id);
+                    }
                 } else {
                     $actual = DB::table($recurso)->where('id', $id)->lockForUpdate()->first();
                     abort_unless($actual, 404, 'Registro inexistente');

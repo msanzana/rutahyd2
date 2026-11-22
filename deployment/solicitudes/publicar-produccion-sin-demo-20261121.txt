@@ -175,3 +175,15 @@ database=NO-EJECUTAR-SQL;DDL27-pendiente-phpmyadmin
 backend=YA-PUBLICADO-clasificacion-v32-no-modificar
 firecrawl=PROHIBIDO
 rollback=habilitado
+
+release=20261122-v33-checks-redondeados-paginador-violeta-circular
+frontend_sha=785b80bdb7bfd0d82947875b8d441742893bd108
+frontend_ci=https://github.com/msanzana/rutahyd2front/actions/runs/44999024905
+scope=solo-frontend-html-js-css
+pagination=numeros-circulares-violetas-pagina-actual-con-aria-current,paginas-Laravel-reales-y-locales
+checkboxes=permisos-seleccion-multiple-con-esquinas-redondeadas,switches-de-estado-conservados
+maximo_elementos=25_por_pagina
+backend=NO-MODIFICAR
+mariadb=NO-EJECUTAR-SQL
+firecrawl=PROHIBIDO
+rollback=habilitado

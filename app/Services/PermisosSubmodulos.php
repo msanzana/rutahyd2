@@ -14,14 +14,14 @@ use Illuminate\Support\Facades\DB;
 final class PermisosSubmodulos
 {
     public const SUBMODULOS = [
-        'productos.listado' => 'Listado de productos',
-        'proveedores.listado' => 'Listado de proveedores',
-        'proveedores.productos' => 'Proveedores productos',
+        'productos_listado' => 'Listado de productos',
+        'proveedores_listado' => 'Listado de proveedores',
+        'proveedores_productos' => 'Proveedores productos',
     ];
     public const BASE = [
-        'productos.listado'=>'productos.gestionar',
-        'proveedores.listado'=>'compras.gestionar',
-        'proveedores.productos'=>'compras.gestionar',
+        'productos_listado'=>'productos.gestionar',
+        'proveedores_listado'=>'compras.gestionar',
+        'proveedores_productos'=>'compras.gestionar',
     ];
 
     public static function datosRol(int $rolId, bool $esAdmin, array $permisosBase): array

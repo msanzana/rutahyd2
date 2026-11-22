@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Usuario;
 use App\Services\PermisosCatalogos;
+use App\Services\PermisosSubmodulos;
 use Firebase\JWT\JWT;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -67,6 +68,9 @@ final class SesionControlador extends Controller
                 'nombre'=>$usuario->nombre,
                 'rol'=>$usuario->rol?->codigo,
                 'permisos'=>PermisosCatalogos::concedidos($usuario),
+                'submodulos'=>PermisosSubmodulos::permitidos($usuario),
+                'tema_interfaz'=>DB::table('preferencias_usuarios')
+                    ->where('usuario_id',$usuario->id)->value('tema_interfaz')??'claro',
             ],
         ])->header('Cache-Control','no-store');
     }
@@ -88,6 +92,9 @@ final class SesionControlador extends Controller
             'correo_electronico'=>$u->correo_electronico,
             'rol'=>$u->rol?->codigo,
             'permisos'=>PermisosCatalogos::concedidos($u),
+            'submodulos'=>PermisosSubmodulos::permitidos($u),
+            'tema_interfaz'=>DB::table('preferencias_usuarios')
+                ->where('usuario_id',$u->id)->value('tema_interfaz')??'claro',
         ])->header('Cache-Control','no-store');
     }
 }

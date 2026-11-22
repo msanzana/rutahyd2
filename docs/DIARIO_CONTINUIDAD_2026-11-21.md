@@ -487,3 +487,10 @@ Esta instrucción sustituye las recomendaciones anteriores del diario que priori
 - Perfil y login entregarán derechos de submódulo y preferencia guardada por usuario; endpoints `GET/PUT /perfil/preferencias` seguros solo tras DDL validado. Frontend mantiene preferencia local por usuario hasta entonces.
 - CI DDL23 con MariaDB aislada `https://github.com/msanzana/rutahyd2/actions/runs/44979963068` **éxito**; CI Laravel completo con DDL23 en MySQL temporal `https://github.com/msanzana/rutahyd2/actions/runs/44980154387` **éxito**. Documento de instalación segura `docs/AMPLIACION_PERMISOS_Y_TEMA_V23.md` en esa rama.
 - **Próximo paso requiere respaldo e importación manual de DDL23 por titular** antes del despliegue backend. No modificar perfiles de producción, no guardar contraseñas, no introducir datos de prueba. No afirmar sincronización entre dispositivos todavía.
+
+
+### Cierre de pruebas públicas UI v20 — 22-11-2026
+
+- Workflow `https://github.com/msanzana/rutahyd2/actions/runs/44980390561` **aprobado** en navegador Chromium real contra `https://rutahyd2.free.nf/`. Recursos v20 descargados, login con JWT ficticio interceptado (sin credenciales reales), menú avatar, interruptor oscuro, botones de acción convertidos en iconos y popup de búsqueda avanzada comprobados.
+- Resoluciones 1440 px y 390 px: diálogos dentro del viewport y sin overflow horizontal. Capturas de evidencia guardadas como artefactos `ui-v20-capturas`. Backend y base productivos intactos.
+- Estado final de la solicitud visual: frontend v20 publicado con pruebas exitosas. Autorización real de tres listados y preferencia sincronizada entre dispositivos **siguen pendientes de importar DDL23 y publicar backend preparado**. No afirmar que esos dos puntos ya están activos en el servidor.

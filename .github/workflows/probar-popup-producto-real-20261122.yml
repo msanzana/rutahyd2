@@ -43,8 +43,20 @@ jobs:
                 if(path==='/api/v1/productos')return fake(route,{data:[],total:0,last_page:1});
                 return fake(route,{},404);
               });
-              await page.goto(host+'#inicio',{waitUntil:'domcontentloaded',timeout:45000});
-              await page.waitForSelector('#loginSubmit:not([disabled])',{timeout:10000});
+              // Una navegación solo por # no recarga la SPA; volver a cargar para
+              // consumir la API simulada antes de crear el login JWT ficticio.
+              await page.reload({waitUntil:'domcontentloaded',timeout:45000});
+              await page.waitForFunction(()=>{
+                const s=document.querySelector('#loginServerStatus');
+                return !!s && /disponible|conectado|lista|activa/i.test(s.textContent||'');
+              },{timeout:18000}).catch(async()=>{
+                const state=await page.evaluate(()=>({
+                  url:location.href, status:document.querySelector('#loginServerStatus')?.textContent,
+                  disabled:document.querySelector('#loginSubmit')?.disabled
+                }));
+                console.log('QA_LOGIN_STATE',JSON.stringify(state));
+              });
+              await page.waitForSelector('#loginSubmit:not([disabled])',{timeout:20000});
               await page.locator('#loginEmail').fill('qa@example.invalid');
               await page.locator('#loginPassword').fill('NO-ES-CONTRASENA-REAL');
               await page.locator('#loginSubmit').click();

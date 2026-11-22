@@ -19,6 +19,8 @@ use App\Http\Controllers\CodigosBarrasProductoControlador;
 use App\Http\Controllers\PerfilesCatalogosControlador;
 use App\Http\Controllers\UsuariosControlador;
 use App\Http\Controllers\UbicacionesControlador;
+use App\Http\Controllers\GirosSiiControlador;
+use App\Http\Controllers\BuscadorProductosControlador;
 use App\Http\Controllers\RecuperacionContrasenaControlador;
 
 // El frontend pregunta /api/v1/estado; la ruta antigua /api/estado sigue disponible.
@@ -41,6 +43,11 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
         ->where('tipo','paises|regiones|provincias|comunas|ciudades')->whereNumber('id');
     Route::delete('/ubicaciones/{tipo}/{id}',[UbicacionesControlador::class,'desactivar'])
         ->where('tipo','paises|regiones|provincias|comunas|ciudades')->whereNumber('id');
+    // V39: contratos transversales de lectura JWT, sin escrituras ni acceso público.
+    Route::get('/giros-sii',[GirosSiiControlador::class,'listar'])
+        ->middleware('throttle:90,1');
+    Route::get('/productos/buscador',[BuscadorProductosControlador::class,'listar'])
+        ->middleware('throttle:120,1');
     // Vista Mix de productos por proveedor: contar vínculos únicos desde SQL, sin recepciones.
     Route::get('/proveedores/mix',[ProductosProveedoresControlador::class,'mix'])
         ->middleware('permiso.rutahd:compras.gestionar')

@@ -17,7 +17,8 @@ final class ServicioVenta
     public function __construct(
         private RepositorioVentaInterface $ventas,
         private RepositorioDetalleVentaInterface $detalles,
-        private RepositorioProductoInterface $productos
+        private RepositorioProductoInterface $productos,
+        private GestionListasPrecios $listasPrecios
     ) {}
     public function crear(array $datos,int $usuarioId): Venta
     {
@@ -33,7 +34,18 @@ final class ServicioVenta
                 if(!$producto || !$producto->activo) {
                     throw ValidationException::withMessages(['detalles'=>"Producto inexistente o inactivo en linea ".($i+1)]);
                 }
-                $cantidad=(float)$linea['cantidad'];$precio=(float)$linea['precio_unitario'];
+                // El precio lo decide la lista exclusiva del cliente, no un
+                // número enviado libremente por el navegador.
+                $tarifa=$this->listasPrecios->precioEfectivoCliente(
+                    (int)$datos['cliente_id'],(int)$linea['producto_id']);
+                $precio=(float)$tarifa->precio_venta;
+                if(abs((float)$linea['precio_unitario']-$precio)>0.01){
+                    throw ValidationException::withMessages([
+                        'detalles'=> 'El precio de la línea '.($i+1).
+                            ' no coincide con la lista asignada al cliente'
+                    ]);
+                }
+                $cantidad=(float)$linea['cantidad'];
                 if($cantidad>1000000 || $precio>1000000000) {
                     throw ValidationException::withMessages(['detalles'=>'Cantidad o precio excede limites de seguridad']);
                 }
@@ -48,7 +60,7 @@ final class ServicioVenta
                 $descuentoTotal+=$descuento;
                 $lineas[]=[
                     'numero_linea'=>$i+1,'producto_id'=>$producto->id,
-                    'cantidad'=>$linea['cantidad'],'precio_unitario'=>$linea['precio_unitario'],
+                    'cantidad'=>$linea['cantidad'],'precio_unitario'=>$precio,
                     'porcentaje_descuento'=>$pct,'monto_descuento'=>$descuento,
                     'exento_impuestos'=>$esExento,'monto_linea'=>$subtotal,
                     'datos_adicionales_json'=>$linea['datos_adicionales_json']??null

@@ -76,3 +76,15 @@ cache_bust=app-produccion.js?v=20261122-info21
 backend_no_modificar=true
 database_no_modificar=true
 rollback=si
+
+release=20261122-filtros-productos-validation-v22
+frontend_sha=fe9cd86b46592bfd94fd7c8f9109b371fbddf850
+frontend_ci=44982165926-success-50
+backend_filtered_controller=44982058267-success
+scope=frontend_assets_only
+ui=branded_validation_errors,product_advanced_search,dependent_dropdowns
+filters=all_classifications,state,prices,taxation,barcode,type,packaging,provider
+no_ddl=true
+no_mariadb_changes=true
+no_real_credentials=true
+rollback=prepared

@@ -91,7 +91,14 @@ final class CodigosBarrasProductoControlador extends Controller
     private function createOrUpdate(Request $request,string $modo,int $contextId,?int $id)
     {
         [$table,$key]=$this->context($modo,$contextId);
-        $data=$this->validateBarcode($request);
+        // El control de estado envía solo {activo}; no debe exigir nuevamente
+        // código, tipo y unidades al activar/desactivar un código ya registrado.
+        // La creación y la edición normal conservan todas las reglas existentes.
+        if($id!==null && array_keys($request->all())===['activo']){
+            $data=Validator::make($request->all(),[
+                'activo'=>['required','boolean'],
+            ])->validate();
+        }else $data=$this->validateBarcode($request);
         try{
             return DB::transaction(function()use($table,$key,$data,$id,$contextId){
                 if($id!==null){

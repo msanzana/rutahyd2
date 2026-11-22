@@ -90,15 +90,80 @@ final class ProductoComercialControlador extends Controller
             'page'=>['sometimes','integer','min:1','max:10000'],
             'por_pagina'=>['sometimes','integer','min:1','max:100'],
             'buscar'=>['sometimes','nullable','string','max:120'],
-            'incluye_inactivos'=>['sometimes','boolean']
-        ]);
+            'incluye_inactivos'=>['sometimes','boolean'],
+            'sku'=>['sometimes','nullable','string','max:80'],
+            'nombre'=>['sometimes','nullable','string','max:190'],
+            'descripcion'=>['sometimes','nullable','string','max:200'],
+            'codigo_barras'=>['sometimes','nullable','string','max:100'],
+            'activo'=>['sometimes','nullable','boolean'],
+            'precio_min'=>['sometimes','nullable','numeric','min:0','max:99999999999'],
+            'precio_max'=>['sometimes','nullable','numeric','min:0','max:99999999999'],
+            'iva'=>['sometimes','nullable','numeric','min:0','max:100'],
+            'proveedor_id'=>['sometimes','nullable','integer','min:1'],
+            'presentacion'=>['sometimes','nullable','string','max:150'],
+            'unidades_min'=>['sometimes','nullable','numeric','min:0'],
+            'unidades_max'=>['sometimes','nullable','numeric','min:0'],
+        ] + array_fill_keys(array_column(self::CLASIFICACIONES, 1), ['sometimes','nullable','integer','min:1']));
+        if (isset($datos['precio_min'],$datos['precio_max'])) {
+            abort_if((float)$datos['precio_min']>(float)$datos['precio_max'],422,
+                'El precio mínimo no puede superar al máximo');
+        }
+        if (isset($datos['unidades_min'],$datos['unidades_max'])) {
+            abort_if((float)$datos['unidades_min']>(float)$datos['unidades_max'],422,
+                'Las unidades mínimas no pueden superar a las máximas');
+        }
         $q=DB::table('productos');
-        if (!(bool)($datos['incluye_inactivos']??false)) $q->where('activo',1);
+        if (array_key_exists('activo',$datos) && $datos['activo']!==null) {
+            $q->where('activo',(bool)$datos['activo']?1:0);
+        }elseif(!(bool)($datos['incluye_inactivos']??false)){
+            $q->where('activo',1);
+        }
         if (!empty($datos['buscar'])) {
             $busqueda=trim($datos['buscar']);
             $q->where(function($sub)use($busqueda){
                 $sub->where('nombre','like','%'.$busqueda.'%')
                     ->orWhere('sku','like','%'.$busqueda.'%');
+            });
+        }
+        foreach(self::CLASIFICACIONES as $config){
+            $columna=$config[1];
+            if(isset($datos[$columna]))$q->where($columna,(int)$datos[$columna]);
+        }
+        foreach(['sku','nombre','descripcion'] as $campo){
+            if(isset($datos[$campo])&&trim((string)$datos[$campo])!==''){
+                $q->where($campo,'like','%'.trim((string)$datos[$campo]).'%');
+            }
+        }
+        if(isset($datos['proveedor_id']))$q->where('proveedor_id',(int)$datos['proveedor_id']);
+        if(isset($datos['codigo_barras'])&&trim((string)$datos['codigo_barras'])!==''){
+            $busqueda=trim((string)$datos['codigo_barras']);
+            $q->where(function($sub)use($busqueda){
+                $sub->whereExists(function($codes)use($busqueda){
+                    $codes->selectRaw('1')->from('productos_codigos_barra_venta as cb')
+                        ->whereColumn('cb.producto_id','productos.id')
+                        ->where('cb.codigo_barras','like','%'.$busqueda.'%');
+                })->orWhereExists(function($legacy)use($busqueda){
+                    $legacy->selectRaw('1')->from('presentaciones_productos as ppb')
+                        ->whereColumn('ppb.producto_id','productos.id')
+                        ->where('ppb.codigo_barras','like','%'.$busqueda.'%');
+                });
+            });
+        }
+        $presentacionFiltros=['presentacion','precio_min','precio_max','iva','unidades_min','unidades_max'];
+        if(array_intersect($presentacionFiltros,array_keys($datos))){
+            $q->whereExists(function($sub)use($datos){
+                $sub->selectRaw('1')->from('presentaciones_productos as pp')
+                    ->whereColumn('pp.producto_id','productos.id');
+                if(isset($datos['presentacion'])&&trim((string)$datos['presentacion'])!==''){
+                    $sub->where('pp.nombre','like','%'.trim((string)$datos['presentacion']).'%');
+                }
+                foreach(['precio_min'=>'>=','precio_max'=>'<='] as $campo=>$op){
+                    if(isset($datos[$campo]))$sub->where('pp.precio_neto',$op,$datos[$campo]);
+                }
+                if(isset($datos['iva']))$sub->where('pp.tasa_iva',$datos['iva']);
+                foreach(['unidades_min'=>'>=','unidades_max'=>'<='] as $campo=>$op){
+                    if(isset($datos[$campo]))$sub->where('pp.unidades_por_envase',$op,$datos[$campo]);
+                }
             });
         }
         $paginado=$q->orderByDesc('id')->paginate((int)($datos['por_pagina']??25));
@@ -110,7 +175,9 @@ final class ProductoComercialControlador extends Controller
             $presentacion=$presentaciones->get($p->id)?->first();
             return $this->resultado($p,$presentacion);
         });
-        return response()->json($paginado);
+        $respuesta=$paginado->toArray();
+        $respuesta['filtros_aplicados']=true;
+        return response()->json($respuesta);
     }
 
     private function codigosVenta(int $productoId): array

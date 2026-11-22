@@ -1,0 +1,81 @@
+name: Verificar fotografía realista del login en producción v26
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/verificar-login-foto-v26.txt]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 17
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preparar Chromium
+        run: |
+          mkdir -p /tmp/loginphoto26
+          cd /tmp/loginphoto26
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Inspeccionar acceso público sin enviar credenciales ni datos
+        working-directory: /tmp/loginphoto26
+        run: |
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            for(const width of [1440,390]){
+              const page=await browser.newPage({viewport:{width,height:900}});
+              await page.route('**/api/v1/**',route=>{
+                const req=route.request();
+                if(req.method()!=='GET')throw new Error('Prohibida escritura real durante verificación');
+                const status=new URL(req.url()).pathname.endsWith('/estado')?200:401;
+                return route.fulfill({
+                  status,contentType:'application/json',
+                  body:JSON.stringify(status===200?{servicio:'Ruta H&D2 API',estado:'disponible'}:{error:'no autorizado'})
+                });
+              });
+              await page.goto('https://rutahyd2.free.nf/?revisar=login-foto-v26',
+                {waitUntil:'domcontentloaded',timeout:55000});
+              await page.locator('#loginDialog[open]').waitFor({timeout:45000});
+              const asset=await page.locator('link[href*="login-foto-v26.css?v=20261122-login26"]').count();
+              if(asset!==1)throw Error('CSS v26 no se encuentra en HTML productivo');
+              const evaluation=await page.evaluate(async()=>{
+                const el=document.querySelector('#loginForm');
+                const pseudo=getComputedStyle(el,'::before');
+                const uri=pseudo.backgroundImage.match(/data:image\/webp;base64,([A-Za-z0-9+/=]+)/);
+                if(!uri)return {error:'Falta imagen realista en fondo'};
+                const img=new Image();img.src='data:image/webp;base64,'+uri[1];
+                try{await img.decode();}catch(e){return {error:'Imagen no se decodifica: '+e};}
+                const rect=el.getBoundingClientRect();
+                return {width:img.naturalWidth,height:img.naturalHeight,
+                  panel:pseudo.display,
+                  left:rect.left,right:rect.right,
+                  overflow:el.scrollWidth>el.clientWidth+2,
+                  logo:!!document.querySelector('#loginDialog .login-identity img'),
+                  email:!!document.querySelector('#loginEmail'),
+                  password:!!document.querySelector('#loginPassword')};
+              });
+              if(evaluation.error||evaluation.width!==280||evaluation.height!==373||
+                evaluation.panel==='none'||evaluation.left<0||
+                evaluation.right>width+1||evaluation.overflow||
+                !evaluation.logo||!evaluation.email||!evaluation.password){
+                throw Error('Revisión falló '+width+': '+JSON.stringify(evaluation));
+              }
+              console.log('LOGIN_PHOTO_V26_LIVE',JSON.stringify({viewport:width,...evaluation}));
+              await page.screenshot({path:'/tmp/loginphoto26/login-'+width+'.png'});
+              await page.close();
+            }
+          }finally{await browser.close();}
+          JS
+      - name: Guardar evidencia visual
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capturas-login-fotografico-v26
+          path: /tmp/loginphoto26/login-*.png
+          if-no-files-found: ignore
+          retention-days: 7

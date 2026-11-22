@@ -1,0 +1,12 @@
+Hotfix visual V41 - selector giros SII
+
+Backend V41 ya publicado correctamente en producción:
+https://github.com/msanzana/rutahyd2/actions/runs/45066641522
+SQL de búsqueda con tildes (MariaDB código CHAR ascii_bin) corregido.
+Smoke Chromium en sitio: /api/v1/estado 200 y /api/v1/giros-sii sin JWT 401.
+
+Frontend: giros-sii-v39.js versión exacta eccf8eb0834acc546ad7e25de2a8ce232eba9cc2.
+Cambios limitados a borrar el estado de error al iniciar nueva búsqueda,
+vaciar la tabla y paginación en el fallo para no dejar resultados obsoletos.
+Actualizar script cache en HTML productivo conservando V40, logo, ubicación,
+permisos, modales y paleta. Backup+checksum+rollback FTPS. NO SQL.

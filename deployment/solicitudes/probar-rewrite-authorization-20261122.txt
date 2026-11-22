@@ -1,0 +1,4 @@
+audit=Comprobar Apache RewriteRule E=HTTP_AUTHORIZATION en directorio efimero con token ficticio
+sin_credenciales=true
+sin_sql=true
+firecrawl=false

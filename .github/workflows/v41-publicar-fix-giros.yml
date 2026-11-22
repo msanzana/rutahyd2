@@ -109,27 +109,42 @@ jobs:
           cmp /tmp/giros-v41/gateway-before /tmp/giros-v41/gateway-after
           cmp /tmp/giros-v41/index-before /tmp/giros-v41/index-after
           echo 'V41 archivo PHP corregido coincide por bytes, seguridad Apache intacta.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Smoke del sitio y acceso JWT, sin escribir datos
+      - name: Smoke en Chromium para superar protección anti-bot y validar JWT
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import urllib.request,urllib.error
-          base='https://rutahyd2.free.nf'
-          # El dominio público puede tener un challenge anti-bot en CI;
-          # verificaciones autoritativas son los bytes FTPS confirmados.
-          for path in ['/api/v1/estado','/api/v1/giros-sii?buscar=Fabricaci%C3%B3n']:
-              req=urllib.request.Request(base+path,headers={
-                  'Accept':'application/json','User-Agent':'Mozilla/5.0'})
-              try:
-                  with urllib.request.urlopen(req,timeout=22) as response:
-                      status=response.status
-              except urllib.error.HTTPError as err:
-                  status=err.code
-              print('HTTP_PROTEGIDO',path.split('?')[0],status)
-              if path.startswith('/api/v1/estado') and status!=200:raise SystemExit('Estado API indisponible')
-              if path.startswith('/api/v1/giros-sii') and status!=401:raise SystemExit('JWT de giros no protegida')
-          PY
-          echo 'Giros protegidos con JWT 401 sin sesión, API estado 200.' >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p /tmp/giros-v41/browser
+          cd /tmp/giros-v41/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/?v41=20261122',{
+              waitUntil:'domcontentloaded',timeout:55000});
+            await page.waitForTimeout(8500);
+            const results=await page.evaluate(async()=>{
+              const paths=[
+                '/api/v1/estado',
+                '/api/v1/giros-sii?buscar=Fabricaci%C3%B3n'
+              ];
+              return await Promise.all(paths.map(async path=>{
+                const response=await fetch(path,{
+                  cache:'no-store',headers:{Accept:'application/json'}
+                });
+                return {path:path.split('?')[0],http:response.status,
+                  contentType:response.headers.get('content-type')};
+              }));
+            });
+            console.log('V41_GIROS_SMOKE',JSON.stringify(results));
+            const http=path=>results.find(x=>x.path===path)?.http;
+            if(http('/api/v1/estado')!==200||http('/api/v1/giros-sii')!==401)
+              throw Error('No se cumple acceso público 200 / JWT privado 401');
+          }finally{await browser.close();}
+          JS
+          echo 'Giros JWT 401 sin sesión y API 200 desde Chromium real.' >> "$GITHUB_STEP_SUMMARY"
       - name: Revertir controlador original si falla la publicación
         if: failure()
         run: |

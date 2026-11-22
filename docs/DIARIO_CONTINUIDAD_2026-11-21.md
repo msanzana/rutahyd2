@@ -532,3 +532,28 @@ El titular pidió reemplazar los triggers propuestos por **funciones de backend 
 - Pruebas de la rama en MySQL temporal `https://github.com/msanzana/rutahyd2/actions/runs/44985645158`: éxito (incluye pruebas de base, precios, margen, SKU y rol). Prueba adicional MariaDB 11 `https://github.com/msanzana/rutahyd2/actions/runs/44985604128`: éxito (0 triggers, lista base única, precio histórico conservado).
 - Documento `docs/LISTAS_PRECIOS_LOGICA_SIN_TRIGGERS.md` en la rama explica instalación y puntos de integración. DDL24 debe aplicarse solo tras respaldo y verificación del esquema; el backend de precios NO se debe publicar antes.
 - **Pendientes de la funcionalidad mayor:** panel CRUD de listas, refactor UI de Precios, selector lista especial en Clientes y conexión de `precioEfectivoCliente` con registro real de `ServicioVenta`. El requerimiento de esta conversación fue quitar triggers y trasladar lógica al backend; esa sustitución está lista y probada en rama.
+
+
+## Tarifarios comerciales completos v25 sin triggers (22-11-2026)
+
+**Declaración del titular:** importó los DDL requeridos en MariaDB y omitió intencionalmente todos los triggers; pidió reemplazarlos íntegramente por lógica Laravel/frontend y completar los mantenedores.
+
+**Backend**: rama `feature/proveedores-productos-barcodes-20261122`. Servicios `GestionListasPrecios`, `ServicioVenta` y `ServicioNotaVenta`:
+- Nuevo cliente -> asignar una sola LISTA BASE, con PK(cliente_id) que impide dos listas especiales simultáneas.
+- Producto nuevo -> agregar fila de LISTA BASE, conservar precio histórico de presentación, controlar costos y SKU entre listas, todo en transacción Laravel, sin triggers ni procedimientos SQL.
+- Precio neto = costo × (1 + margen / 100), margen = (precio − costo)/costo × 100 si costo > 0; si costo=0, conservar precio y dejar margen nulo. Laravel valida mínimo de `lineas.minimo_margen_precio_venta` al guardar, y rechaza aumentos de mínimos que invaliden los detalles activos.
+- Una lista especial asignada al cliente reemplaza por completo la base; no hay fallback silencioso a BASE si el precio especial falta.
+- Nuevo CRUD protegido `ListasPreciosControlador`; nueva API `ListasPreciosClientesControlador`: consulta/selección única para Clientes, cotización y catálogos activos seguros para vendedores (sin exponer costos). Las ventas y notas de venta usan precios efectivos, con validación backend de cada línea.
+- CI MySQL temporal `https://github.com/msanzana/rutahyd2/actions/runs/44986961000` **éxito**, prueba de tarifas especiales en venta y rechazo de precio general; CI nuevos selectores `https://github.com/msanzana/rutahyd2/actions/runs/44987656432` **éxito**.
+- Publicación backend `https://github.com/msanzana/rutahyd2/actions/runs/44987328292` **éxito** con preflight byte a byte de versión de partida, backup, sincronización de 10 archivos y rollback. Publicación complementaria de catálogos de ventas `https://github.com/msanzana/rutahyd2/actions/runs/44987782821` **éxito**. No se ejecutó DDL ni se modificaron datos de clientes/productos en estos despliegues; endpoints nuevos exigen JWT.
+
+**Frontend**: repo `msanzana/rutahyd2front/main`, versión v25:
+- Submenú oficial `Productos > Listas de precios`, CRUD con Lista Base protegida y especiales editables.
+- Mantenedor Productos: `Presentación, precio e IVA` sustituido por sección `Precios`; campo Nombre de presentación retirado de UI (retención interna para compatibilidad), unidades por envase y costo neto fuera; tabla por lista con activo, costo, margen y precio, con cálculo inmediato; base obligatoria; selector para agregar especiales; mínimo de Línea solo lectura.
+- Mantenedor Líneas: nuevo margen mínimo editable y validado.
+- Mantenedor Clientes: nuevas altas usan BASE, al editar se asigna una sola lista especial; listado muestra nombre de tarifa.
+- Ventas: panel para escoger cliente, buscar productos con precio vigente en su lista y consultar tarifa con API, registrar operación contra Laravel; el cliente no puede imponer otro precio. Vendedores no necesitan permisos de edición de Productos/Clientes para seleccionar, y solo los perfiles con ventas.gestionar registran ventas.
+- CI Playwright `https://github.com/msanzana/rutahyd2front/actions/runs/44987984534`: **53 pruebas aprobadas**, incluyendo precios/márgenes en producto, CRUD listas, asignación cliente y ventas.
+- Workflow FTPS de frontend `https://github.com/msanzana/rutahyd2/actions/runs/44988125009`: iniciado, estado por cerrar cuando termine la verificación.
+
+**Limitaciones honestas:** no se realizó una venta real de prueba en MariaDB productiva (no crear datos sin consentimiento); se usó MySQL temporal, sesión JWT ficticia y navegador con API interceptada. No se confirmó manualmente el esquema productivo mediante phpMyAdmin, solo la declaración de que el titular importó DDL. La ilustración realista de ventas en ruta para login se generó como recurso visual separado, aún no integrada como archivo publicado.

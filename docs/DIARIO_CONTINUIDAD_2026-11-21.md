@@ -441,3 +441,25 @@ Esta instrucción sustituye las recomendaciones anteriores del diario que priori
 - **Smoke navegador independiente sobre https://rutahyd2.free.nf/ exitoso**, https://github.com/msanzana/rutahyd2/actions/runs/44977204463 ; comprobó CSS v18 enlazado, tablas `TD` con `display:table-cell` y acciones a la derecha, un botón de cerrar sesión, modal Clientes con degradado violeta, cierre accesible y sin overflow, en ancho de pantalla 1440, 820 y 390px. Se guardaron capturas de 3 tamaños como artefactos del workflow.
 - La prueba pública usó API interceptada y JWT ficticio en Chromium; **no** realizó autenticación productiva ni escrituras en MariaDB. Backend, estructura SQL, contraseñas y SMTP no se modificaron.
 - Pendiente de aceptación manual por el titular con su cuenta real: ergonomía de los campos y comportamiento de guardado de todos los CRUD con permisos efectivos. Si se ven recursos antiguos por caché del navegador, recargar forzadamente.
+
+
+## Corrección de regresiones en catálogos, listas y menús v19 — 21/22-11-2026
+
+**Motivo del titular:** listados que parecían vacíos, botones «Nuevo» que no abrían (Rubros, Departamentos, Marcas, etc.) y submenús fuera del diseño oficial.
+
+### Errores confirmados en frontend
+- `admin-remoto.js` tenía `const key=selected,parentKey=CONFIG[key][1]`, lo que accedía a `key` antes de su inicialización y generaba `ReferenceError` al pulsar «Nuevo»; corregido a inicialización secuencial.
+- La consulta de catálogos se hacía con `Promise.all` sobre todos los catálogos permitidos, de forma que el fallo de un solo endpoint bloqueaba el resto y dejaba una pantalla sin listado. La nueva implementación consulta solo el submódulo solicitado (y su padre cuando procede), diferencia respuestas vacías de fallos y ofrece reintento; descarta respuestas antiguas al navegar rápidamente.
+- Productos cargaba todos los catálogos antes de ejecutar la consulta del listado. El listado ahora se consulta independientemente de las clasificaciones y conserva los productos aunque falle un catálogo. Al abrir Nuevo/Editar se validan las clasificaciones; si alguna falla, se muestra diálogo con error concreto y reintento, sin inventar registros ni guardar información incompleta.
+- `accesos.js` incluía el catálogo retirado `gramajes` pero omitía `tipos_codigos_barras`. Actualizado según menú oficial y permisos.
+- `app-produccion.js` determinaba incorrectamente el origen de navegación al volver por hash en submódulos; ahora asigna cada catálogo a Administración o Productos según su clasificación. Los menús ya no quedan congelados por sondeos transitorios de disponibilidad cuando existe sesión JWT.
+- `crud-v18.css` añadió reglas v19 para submenús planos de Administración, Proveedores y Productos, manteniendo anchos, sangrías, estados activos y scroll responsivo en desktop/móvil; no cambia el orden HTML oficial.
+- En CRUD dependientes, cuando no existen valores padre activos se muestra instrucción explícita de registrar primero el catálogo padre (Rubro→Departamento→Familia→Línea, Marca→Modelo).
+
+### Verificación y publicación
+- **Frontend fuente `main`:** SHA `8cfaea41122990cb5a821c76707f1a794caefd19`.
+- **CI frontend:** 41 pruebas Playwright aprobadas https://github.com/msanzana/rutahyd2front/actions/runs/44977878666. Se añadieron pruebas que abren y guardan «Nuevo Rubro» con API simulada, abren «Nuevo Departamento», navegación rápida Rubros→Marcas, listas de producto pese a error de códigos, catálogos realmente vacíos y geometría de submenús a 1440 y 390 px.
+- **Publicación FTPS:** https://github.com/msanzana/rutahyd2/actions/runs/44978018410 **éxito**, con respaldo temporal, publicación HTML al final, comparación de bytes y validación de guardia Laravel intacta; sin rollback necesario.
+- **Smoke público independiente:** https://github.com/msanzana/rutahyd2/actions/runs/44978179560 **éxito**. Chromium comprobó en `https://rutahyd2.free.nf/` las referencias CSS/JS v19, inicio con JWT ficticio interceptado, navegación a Productos→Rubros, lectura simulada, apertura de «Nuevo Rubro» y ausencia de overflow en 1440/390 px. Capturas disponibles en artefactos del workflow.
+- **Sin cambios en Laravel, MariaDB, DDL, credenciales ni registros reales**. Las pruebas HTTP emplearon respuestas interceptadas; **no** validan los conteos actuales de filas reales ni una operación de escritura con sesión del titular.
+- Próxima aceptación funcional: comprobar con la cuenta del titular catálogos que deberían tener filas y registrar altas genuinas. Si el backend devuelve `items:[]`, la aplicación muestra un estado vacío real; nunca autogenerar registros ficticios en producción.

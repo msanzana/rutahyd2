@@ -67,3 +67,12 @@ ddl23=pendiente_importacion_manual_no_aplicar
 backend=no_modificar
 bdd=no_modificar
 rollback=si
+
+release=20261122-info21-modal-close
+frontend_sha=e1717f1553fd295313cce444825fbfddaed90d4a
+frontend_ci=44980983284-success-46-tests
+fix=infoClose_cierra_infoDialog
+cache_bust=app-produccion.js?v=20261122-info21
+backend_no_modificar=true
+database_no_modificar=true
+rollback=si

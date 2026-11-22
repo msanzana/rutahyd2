@@ -30,9 +30,12 @@ function abExpect(int $expected,array $result,string $name):array{
 }
 try{
     checkAb(DB::getDatabaseName()==='rutahyd2_es_local','prohibido fuera MySQL CI');
+    $tablas=array_values((array)array_map(
+        fn($record)=>array_values((array)$record)[0],
+        DB::select('SHOW TABLES')));
     foreach(['tipos_codigos_barras','productos_proveedores',
         'productos_codigos_barra_venta','productos_codigos_barra_compra'] as $table){
-        checkAb(DB::getSchemaBuilder()->hasTable($table),'Falta DDL20 '.$table);
+        checkAb(in_array($table,$tablas,true),'Falta DDL20 '.$table);
     }
     abExpect(401,abRequest('GET','/api/v1/proveedores-productos'),'JWT requerido');
     $admin=abExpect(200,abRequest('POST','/api/v1/sesion',[
@@ -118,6 +121,21 @@ try{
         'unidades_por_codigo'=>'12.000'
     ],$admin),'Añadir código compra');
     $purchaseId=(int)$purchase['id'];
+    abExpect(422,abRequest('POST',
+        '/api/v1/proveedores-productos/'.$linkId.'/codigos-compra',[
+        'tipo_codigo_barra_id'=>$ean13,'codigo_barras'=>'INVALIDO',
+        'unidades_por_codigo'=>'12'
+    ],$admin),'Código compra EAN13 inválido, devolver HTTP 422');
+    $toggle=abExpect(200,abRequest('PUT',
+        '/api/v1/proveedores-productos/'.$linkId.'/codigos-compra/'.$purchaseId,[
+        'activo'=>false
+    ],$admin),'Desactivar con solo campo activo (checkbox)');
+    checkAb((int)$toggle['activo']===0,'Código de compra inactivo');
+    $toggle=abExpect(200,abRequest('PUT',
+        '/api/v1/proveedores-productos/'.$linkId.'/codigos-compra/'.$purchaseId,[
+        'activo'=>true
+    ],$admin),'Reactivar con solo campo activo');
+    checkAb((int)$toggle['activo']===1,'Código de compra reactivado');
     $row=abExpect(200,abRequest('GET',
         '/api/v1/proveedores-productos/'.$linkId.'/codigos-compra',[],$admin),'Listar códigos compra');
     checkAb(count($row['items'])===1&&$row['items'][0]['codigo_producto']==='SKU-ABASTECIMIENTO-CI'&&

@@ -46,15 +46,15 @@ jobs:
           assert 'assets/css/menu-oficial.css' in s
           assert s.count('assets/img/prueba-rutahd2.webp')==3
           # El servidor publica el PNG oficial desde /hd-branding. No reponer WebP ausente.
-          s=s.replace('assets/img/prueba-rutahd2.webp','hd-branding/logo-hd-site.png?v=20261121-prod12')
-          assert s.count('hd-branding/logo-hd-site.png?v=20261121-prod12')==3
-          s=s.replace('href="assets/css/app.css"','href="assets/css/app.css?v=20261121-prod12"')
-          s=s.replace('correcciones-ui.css?v=20261121-1','correcciones-ui.css?v=20261121-prod12')
-          s=s.replace('menu-oficial.css?v=20261121-2','menu-oficial.css?v=20261121-prod12')
-          s=s.replace('produccion.css?v=20261121-1','produccion.css?v=20261121-prod12')
-          s=re.sub(r'src="assets/js/([a-z-]+)\.js"',r'src="assets/js/\1.js?v=20261121-prod12"',s)
-          assert s.count('src="assets/js/login-produccion.js?v=20261121-prod12"')==1
-          assert s.count('src="assets/js/app-produccion.js?v=20261121-prod12"')==1
+          s=s.replace('assets/img/prueba-rutahd2.webp','hd-branding/logo-hd-site.png?v=20261121-prod13')
+          assert s.count('hd-branding/logo-hd-site.png?v=20261121-prod13')==3
+          s=s.replace('href="assets/css/app.css"','href="assets/css/app.css?v=20261121-prod13"')
+          s=s.replace('correcciones-ui.css?v=20261121-1','correcciones-ui.css?v=20261121-prod13')
+          s=s.replace('menu-oficial.css?v=20261121-2','menu-oficial.css?v=20261121-prod13')
+          s=s.replace('produccion.css?v=20261121-1','produccion.css?v=20261121-prod13')
+          s=re.sub(r'src="assets/js/([a-z-]+)\.js"',r'src="assets/js/\1.js?v=20261121-prod13"',s)
+          assert s.count('src="assets/js/login-produccion.js?v=20261121-prod13"')==1
+          assert s.count('src="assets/js/app-produccion.js?v=20261121-prod13"')==1
           Path('/tmp/release_index.html').write_text(s,'utf-8')
           Path('/tmp/redirect_violeta.html').write_text(
             '<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Ruta H&D2 · Producción</title>'
@@ -137,6 +137,7 @@ jobs:
           get /htdocs/violeta-demo/index.html -o /tmp/violet_after.html
           get /htdocs/assets/js/login-produccion.js -o /tmp/login_after.js
           get /htdocs/assets/js/app-produccion.js -o /tmp/app_after.js
+          get /htdocs/assets/js/recuperacion.js -o /tmp/recuperacion_after.js
           get /htdocs/assets/js/accesos.js -o /tmp/accesos_after.js
           get /htdocs/assets/css/produccion.css -o /tmp/css_after.css
           get /htdocs/api-v2/.htaccess -o /tmp/guard_after
@@ -147,11 +148,12 @@ jobs:
           cmp -s /tmp/redirect_violeta.html /tmp/violet_after.html
           cmp -s /tmp/front/assets/js/login-produccion.js /tmp/login_after.js
           cmp -s /tmp/front/assets/js/app-produccion.js /tmp/app_after.js
+          cmp -s /tmp/front/assets/js/recuperacion.js /tmp/recuperacion_after.js
           cmp -s /tmp/front/assets/js/accesos.js /tmp/accesos_after.js
           cmp -s /tmp/front/assets/css/produccion.css /tmp/css_after.css
           cmp -s /tmp/guard_before /tmp/guard_after
           echo "Frontend productivo SHA: $FRONTEND_SHA" >> "$GITHUB_STEP_SUMMARY"
-          echo 'Login JWT exclusivo, ocho menús y logotipo PNG oficial publicados por FTPS; backend y MariaDB intactos.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Login JWT exclusivo, recuperación segura y diseño corporativo desplegados; backend y MariaDB intactos.' >> "$GITHUB_STEP_SUMMARY"
       - name: Restaurar archivos originales ante cualquier fallo
         if: failure()
         run: |

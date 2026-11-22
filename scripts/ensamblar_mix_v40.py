@@ -33,20 +33,21 @@ def assemble():
             # integrar solamente la ruta nueva, sin reescribir el archivo completo.
             existing=before.read_text('utf-8')
             source=new.read_text('utf-8')
-            anchor="""    Route::post('/proveedores-productos',[ProductosProveedoresControlador::class,'crear'])
-        ->middleware('permiso.rutahd:compras.gestionar')->middleware('submodulo.rutahd:proveedores_productos,gestionar');"""
+            anchor="    Route::post('/proveedores-productos',[ProductosProveedoresControlador::class,'crear'])"
             addition="""    Route::post('/proveedores-productos/lote',[ProductosProveedoresControlador::class,'crearLote'])
         ->middleware('permiso.rutahd:compras.gestionar')
         ->middleware('submodulo.rutahd:proveedores_productos,gestionar')
         ->middleware('throttle:20,1');"""
             if existing.count(anchor)!=1 or source.count(addition)!=1 or '/proveedores-productos/lote' in existing:
-                print('RUTA_DIAGNOSTICO',existing.count(anchor),source.count(addition),
-                    '/proveedores-productos/lote' in existing)
-                for line in existing.splitlines():
-                    if "Route::post('/proveedores-productos" in line:
-                        print('RUTA_PUBLICADA',repr(line[:220]))
-                raise SystemExit('V40 STOP: las rutas de producción no coinciden con el contrato esperado')
-            result=existing.replace(anchor,anchor+'\n'+addition).encode('utf-8')
+                raise SystemExit('V40 STOP: la ruta no es única o el lote ya existe')
+            start=existing.index(anchor)
+            finish=existing.find(';',start)
+            if finish<0:raise SystemExit('V40 STOP: ruta sin cierre')
+            statement=existing[start:finish+1]
+            if ('permiso.rutahd:compras.gestionar' not in statement
+                or 'submodulo.rutahd:proveedores_productos,gestionar' not in statement):
+                raise SystemExit('V40 STOP: permisos de ruta productiva inesperados')
+            result=(existing[:finish+1]+'\n'+addition+existing[finish+1:]).encode('utf-8')
             print('PHP_RUTA_PARCHE_MINIMO',path)
         else:
             merge=subprocess.run(['git','merge-file','-p',str(before),str(base),str(new)],

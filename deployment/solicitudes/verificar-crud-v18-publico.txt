@@ -1,0 +1,10 @@
+RUTAHD2_VERIFICAR_CRUD_V18_PUBLICO
+frontend_sha=4ae53efc8e793b40d020e6ed2962788219ee21ed
+frontend_ci=44976959711-success-33-tests
+ftps_release=44977040072-success
+viewport=1440,820,390
+scope=clientes,modal,acciones,logout,css
+sin_credenciales=true
+sin_escritura=true
+backend=no_modificar
+bdd=no_modificar

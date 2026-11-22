@@ -1,0 +1,4 @@
+Ruta H&D V2 — solicitud de diagnóstico sin escrituras.
+Objetivo: clasificar errores Laravel recientes del POST /api/v1/productos sin exponer payloads, contraseñas, SQL ni datos comerciales.
+Fecha: 2026-11-22.
+Prohibido Firecrawl y prohibido modificar MariaDB. FTPS: lectura de logs solamente.

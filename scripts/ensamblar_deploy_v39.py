@@ -27,7 +27,7 @@ FRONT_COPY_ONLY=[
  'perfiles.js','productos-remotos.js','recuperacion.js','usuarios.js'
 ]
 FRONT_SURGICAL=['modulos-oficiales.js','proveedores-productos.js','ventas-precios.js']
-FRONT_OTHER=['catalogos-api.js','listados-ui.js','login-ui.js']
+FRONT_OTHER=['catalogos-api.js','listados-ui.js']  # login-ui.js es solo demo; producción usa login-produccion.js
 FRONT_EXISTING=['assets/js/'+n for n in FRONT_COPY_ONLY+FRONT_SURGICAL+FRONT_OTHER]
 FRONT_NEW=[
  'assets/js/rut-chileno-v39.js','assets/js/giros-sii-v39.js',
@@ -124,5 +124,5 @@ def run():
   fail('el HTML conserva textos técnicos obsoletos')
  out=file('after_front/index.html');out.parent.mkdir(parents=True,exist_ok=True)
  out.write_text(live,encoding='utf-8')
- print('V39_READY: backend=5 frontend=21 (16 existentes+4 nuevos+index), sin SQL')
+ print('V39_READY: backend=5 frontend=20 (15 existentes+4 nuevos+index), sin SQL')
 if __name__=='__main__':run()

@@ -1,0 +1,25 @@
+Ruta H&D V40 · Publicación controlada del mix múltiple de proveedores
+Fecha: 2026-11-22
+
+Solicitud funcional del titular: «agregar productos a un proveedor ... buscar ...
+seleccion multiple ... resultados en lista listos para ser guardados».
+
+Código:
+Backend: ProductosProveedoresControlador::crearLote y ruta POST protegida
+/proveedores-productos/lote, máximo 50, transacción completa y rollback al error.
+Frontend: botón Buscar y agregar productos, RutaHDBuscadorProductos.openMultiple,
+productos pendientes en el mix, código y costo opcionales editables por fila,
+acciones solo iconos, guardar grupo, mantener selección ante error.
+No cambios de DDL, no crea inventario, recepciones o códigos de barra.
+
+Evidencias:
+Backend CI: https://github.com/msanzana/rutahyd2/actions/runs/45064343925 éxito.
+Frontend 32 pruebas Playwright: https://github.com/msanzana/rutahyd2front/actions/runs/45064488974 éxito.
+Preflight FTPS V39 vs nueva V40, solo lectura:
+https://github.com/msanzana/rutahyd2/actions/runs/45064982883 éxito.
+
+Autorización operativa: cambio del módulo expresamente solicitado por titular.
+Despliegue solo de 6 archivos (2 PHP + 2 JS + CSS nuevo + index.html),
+con backup de archivos previos, verificación de bytes, smoke público JWT,
+rollback ante fallo. Conservar logo, V39, accesos, .env, gateway,
+.htaccess y todos los datos. NO ejecutar SQL.

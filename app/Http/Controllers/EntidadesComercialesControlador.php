@@ -70,6 +70,7 @@ final class EntidadesComercialesControlador extends Controller
                 'comuna' => array_merge($opcional, ['string', 'max:100']),
                 'sector' => array_merge($opcional, ['string', 'max:120']),
                 'observaciones' => array_merge($opcional, ['string', 'max:10000']),
+                'lista_precio_id' => ['sometimes','integer','min:1','exists:listas_precios,id'],
             ]);
         }
         if ($recurso === 'proveedores') return $comunes;
@@ -114,8 +115,12 @@ final class EntidadesComercialesControlador extends Controller
         $this->exigirPermiso($request, $recurso);
         $nuevo = $id === null;
         $datos = $this->validar($request, $recurso, $nuevo, $id);
+        $listaId=$recurso==='clientes' ? ($datos['lista_precio_id']??null) : null;
+        unset($datos['lista_precio_id']);
+        abort_if($nuevo && $listaId!==null,422,
+            'Los clientes nuevos reciben la LISTA BASE; cambia la lista al editar');
         try {
-            return DB::transaction(function () use ($recurso, $id, $datos, $nuevo): array {
+            return DB::transaction(function () use ($recurso, $id, $datos, $nuevo, $listaId): array {
                 if ($nuevo) {
                     $datos['activo'] = $datos['activo'] ?? true;
                     $id = (int)DB::table($recurso)->insertGetId($datos);
@@ -125,7 +130,9 @@ final class EntidadesComercialesControlador extends Controller
                 } else {
                     $actual = DB::table($recurso)->where('id', $id)->lockForUpdate()->first();
                     abort_unless($actual, 404, 'Registro inexistente');
-                    DB::table($recurso)->where('id', $id)->update($datos);
+                    if($datos)DB::table($recurso)->where('id', $id)->update($datos);
+                    if($recurso==='clientes' && $listaId!==null)
+                        $this->listasPrecios->asignarListaCliente($id,(int)$listaId);
                 }
                 $registro = DB::table($recurso)->where('id', $id)->first();
                 return (array)$registro;

@@ -1,0 +1,70 @@
+name: V47 - probar códigos de compra y toggle en MySQL temporal
+on:
+  push:
+    branches: [hotfix/v47-codigos-compra-422-20261122]
+    paths:
+      - .github/workflows/v47-codigos-compra-ci.yml
+      - app/Http/Controllers/CodigosBarrasProductoControlador.php
+      - tests/integracion_proveedores_codigos.php
+permissions:
+  contents: read
+jobs:
+  codigo-compra:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: temporal_ci_solamente
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ptemporal_ci_solamente --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, intl, xml, dom, curl, pdo_mysql, openssl, fileinfo
+      - name: "Sintaxis y política SQL: sin information_schema"
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/CodigosBarrasProductoControlador.php
+          php -l tests/integracion_proveedores_codigos.php
+          if grep -Eiq 'information_schema|Schema::hasTable|getSchemaBuilder' tests/integracion_proveedores_codigos.php; then
+            echo '::error::Regla sin información de metadatos incumplida'; exit 1
+          fi
+      - name: Cargar exclusivamente MySQL 8 efímero para pruebas
+        run: |
+          set -euo pipefail
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente < database/espanol/01_esquema_completo_34_tablas_es.sql
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente < database/espanol/05_semillas_es.sql
+          for f in 12_tokens_acceso_opcional.sql 13_catalogos_comerciales_aditivos.sql 14_productos_clasificacion_campos.sql 16_permisos_modulos_producto.sql 18_recuperacion_contrasenas.sql 20_proveedores_productos_codigos_barras_ddl.sql 21_catalogos_referencia_semillas.sql 23_preferencias_usuarios_permisos_submodulos_ddl.sql 24_listas_precios_sin_triggers.sql 25_productos_fotos_ddl_sin_triggers.sql; do
+            mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < "database/espanol/$f"
+          done
+          mysql -N -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local -e "SHOW TABLES LIKE 'productos_codigos_barra_compra'" | grep -Fxq 'productos_codigos_barra_compra'
+          mysql -N -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local -e 'SELECT COUNT(*) FROM tipos_codigos_barras' | grep -Fxq '11'
+      - name: Integración real Laravel/JWT con datos aislados
+        env:
+          APP_NAME: RutaHD2_CI
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          RUTAHD_JWT_SECRET: 'CI_ONLY_JWT_TEST_SIGNING_KEY_DO_NOT_USE_IN_PRODUCTION_2026'
+          APP_URL: 'http://127.0.0.1'
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_DATABASE: rutahyd2_es_local
+          DB_USERNAME: root
+          DB_PASSWORD: temporal_ci_solamente
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+        run: |
+          set -euo pipefail
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/integracion_proveedores_codigos.php
+          echo 'V47: crear código compra (201), EAN inválido (422), toggle parcial (200), editar, duplicados (409) y permisos: solo MySQL CI.' >> "$GITHUB_STEP_SUMMARY"

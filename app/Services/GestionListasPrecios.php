@@ -195,6 +195,34 @@ final class GestionListasPrecios
     }
 
     /**
+     * Costos de producto: el costo maestro es único y se refleja en todas las listas.
+     * Al cambiarlo, se conserva el precio de cada lista y se recalcula su margen.
+     * Las filas activas con margen inferior al de la línea bloquean el guardado.
+     */
+    public function sincronizarCostoProducto(int $productoId): void
+    {
+        $producto=DB::table('productos')->where('id',$productoId)->first(['costo_neto','linea_id']);
+        abort_unless($producto,404,'Producto inexistente');
+        $costo=round((float)$producto->costo_neto,4);
+        $minimo=(float)(DB::table('lineas')->where('id',$producto->linea_id)
+            ->value('minimo_margen_precio_venta')??0);
+        $detalles=DB::table('listas_precios_detalle')
+            ->where('producto_id',$productoId)->lockForUpdate()->get();
+        foreach($detalles as $detalle){
+            $precio=round((float)$detalle->precio_venta,4);
+            $margen=$costo>0 && $precio >= $costo
+                ?round((($precio-$costo)/$costo)*100,4):null;
+            if((bool)$detalle->activo && $costo>0){
+                abort_if($margen===null||$margen<$minimo,422,
+                    'El precio de una lista activa no alcanza el margen mínimo de la línea ('.$minimo.'%)');
+            }
+            DB::table('listas_precios_detalle')->where('id',$detalle->id)->update([
+                'costo'=>$costo,'margen_porcentaje'=>$margen,'actualizado_en'=>now()
+            ]);
+        }
+    }
+
+    /**
      * Calcula precio desde margen, O margen desde precio (porcentaje sobre costo).
      * No acepta valores contradictorios; exige mínimo de la línea del producto.
      */
@@ -204,10 +232,12 @@ final class GestionListasPrecios
         float $costo,
         ?float $precioVenta,
         ?float $margenPorcentaje,
-        bool $activo = true
+        bool $activo = true,
+        bool $sincronizarCosto = true
     ): array {
         return DB::transaction(function () use (
-            $productoId, $listaId, $costo, $precioVenta, $margenPorcentaje, $activo
+            $productoId, $listaId, $costo, $precioVenta, $margenPorcentaje, $activo,
+            $sincronizarCosto
         ): array {
             $p = DB::table('productos')->where('id', $productoId)
                 ->lockForUpdate()->first(['id','sku','linea_id']);
@@ -226,10 +256,10 @@ final class GestionListasPrecios
             $minimo = (float)(DB::table('lineas')
                 ->where('id',$p->linea_id)->value('minimo_margen_precio_venta') ?? 0);
             if ($costo == 0.0) {
-                abort_if(($precioVenta !== null && $precioVenta > 0) ||
-                    ($margenPorcentaje !== null && $margenPorcentaje > 0),
-                    422, 'Ingresa un costo mayor que cero antes de calcular el margen');
-                $precioVenta = 0.0;
+                abort_if($margenPorcentaje !== null && $margenPorcentaje > 0,422,
+                    'No es posible calcular un margen porcentual sin costo');
+                // Precio histórico puede existir sin costo informado: margen indeterminado.
+                $precioVenta = round($precioVenta??0.0,4);
                 $margenPorcentaje = null;
             } elseif ($margenPorcentaje !== null && $precioVenta === null) {
                 $precioVenta = round($costo * (1 + $margenPorcentaje / 100), 4);
@@ -249,6 +279,9 @@ final class GestionListasPrecios
                     'El margen está por debajo del mínimo de la línea: '.$minimo.'%');
             }
             abort_if($precioVenta > 99999999999, 422, 'El precio supera el límite permitido');
+            DB::table('productos')->where('id',$productoId)->update([
+                'costo_neto'=>$costo
+            ]);
             DB::table('listas_precios_detalle')->updateOrInsert(
                 ['lista_precio_id'=>$listaId, 'producto_id'=>$productoId],
                 ['sku'=>$p->sku, 'costo'=>$costo,
@@ -256,6 +289,7 @@ final class GestionListasPrecios
                  'precio_venta'=>$precioVenta, 'activo'=>$activo ? 1 : 0,
                  'actualizado_en'=>now()]
             );
+            if($sincronizarCosto)$this->sincronizarCostoProducto($productoId);
             return ['producto_id'=>$productoId,'lista_precio_id'=>$listaId,
                 'costo'=>$costo,'margen_porcentaje'=>$margenPorcentaje,
                 'precio_venta'=>$precioVenta,'activo'=>$activo];

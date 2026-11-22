@@ -45,3 +45,12 @@ frontend_only=true
 backend=no_modificar
 mariadb=no_modificar
 rollback=habilitado
+
+release=20261122-fix19-catalogos-menu-carga
+frontend_source_sha=8cfaea41122990cb5a821c76707f1a794caefd19
+frontend_ci=44977878666-success-41-tests
+correccion=alta_catalogos-variable,lecturas_independientes,menu_plano,permisos_tipos_codigos
+frontend_only=true
+mysql=no_modificar
+laravel=no_modificar
+rollback=si

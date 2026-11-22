@@ -16,7 +16,8 @@ final class ServicioNotaVenta
         private RepositorioDetalleNotaVentaInterface $detalles,
         private RepositorioPresentacionProductoInterface $presentaciones,
         private RepositorioHistorialEstadoNotaVentaInterface $historial,
-        private RepositorioPagoVentaInterface $pagos
+        private RepositorioPagoVentaInterface $pagos,
+        private GestionListasPrecios $listasPrecios
     ) {}
     public function crear(array $datos,int $usuarioId): int
     {
@@ -28,12 +29,15 @@ final class ServicioNotaVenta
                 $presentacion=$this->presentaciones->buscar((int)$detalle['presentacion_id']);
                 if(!$presentacion || !$presentacion->activo)throw ValidationException::withMessages(['detalles'=>'Presentación inexistente o inactiva']);
                 $cantidad=(float)$detalle['cantidad_solicitada'];
-                $monto=round($cantidad*(float)$presentacion->precio_neto,2);
+                $tarifa=$this->listasPrecios->precioEfectivoCliente(
+                    (int)$datos['cliente_id'],(int)$presentacion->producto_id);
+                $precio=(float)$tarifa->precio_venta;
+                $monto=round($cantidad*$precio,2);
                 $neto+=$monto;
                 $impuesto+=round($monto*(float)$presentacion->tasa_iva/100,2);
                 $lineas[]=['presentacion_id'=>$presentacion->id,
                   'cantidad_solicitada'=>$detalle['cantidad_solicitada'],
-                  'cantidad_entregada'=>0,'precio_unitario_neto'=>$presentacion->precio_neto,
+                  'cantidad_entregada'=>0,'precio_unitario_neto'=>$precio,
                   'porcentaje_descuento'=>0,'subtotal_neto'=>$monto];
             }
             $nota=$this->notas->crear([

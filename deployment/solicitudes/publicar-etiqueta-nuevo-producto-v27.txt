@@ -1,0 +1,13 @@
+RUTA H&D V2 | Cambio visual mínimo solicitado 2026-11-22
+punto=Productos > Listado
+texto_anterior=Nuevo producto real
+texto_nuevo=Nuevo Producto
+frontend_sha=ce6258ef547288bb615033ebd342c8ad88082253
+frontend_ci=44990598591-success-56
+fuente_actual_prod=a08a6e4a0fa0d3f269184600177638c885b7b511
+scope=solo_productos-remotos.js_y_index.html_para_actualizar_cache
+ddl=no
+triggers=no
+api_backend=no
+jwt_preserve=yes
+rollback=yes

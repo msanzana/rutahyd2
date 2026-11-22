@@ -9,3 +9,12 @@ api_mock=true
 jwt_ficticio=true
 sin_credenciales=true
 sin_escrituras_productivas=true
+
+QA_INFO_POPUP_20261122
+release=20261122-info21-modal-close
+deploy_run=44981109548
+javascript=app-produccion.js?v=20261122-info21
+check=notificationButton,infoDialog,infoClose
+mobile=390
+desktop=1440
+api=interceptada_sin_escrituras

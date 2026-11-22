@@ -19,7 +19,7 @@ jobs:
       BACK_BASE: cf61e34aa195cc41fab9513f1959dd7d51e3246c
       FRONT_BASE: a36bc7b81d653061ed3b2646091d31a2d5c9fbbc
       FRONT_COPY: 978068533a66153ec2eacdacf1c8293ef8f62177
-      BACK_SOURCE: 758c8cbc0d16bb962801cd801ef67c87e53e905c
+      BACK_SOURCE: 5c1fcfe011b84b17546b04514f14357af77fd310
       FRONT_SOURCE: 6a78b5fc5b11ddc3bd8ac4a35be587f2c144ab6d
     steps:
       - name: Clonar versiones validadas sin depender de cambios futuros
@@ -82,9 +82,9 @@ jobs:
           grep -Fq 'productos/buscador' /tmp/v39/after_back/routes/api.php
           grep -Fq 'rut-chileno-v39.js' /tmp/v39/after_front/index.html
           grep -Fq 'hd-branding/logo-hd-site.png' /tmp/v39/after_front/index.html
-          test "$(find /tmp/v39/after_front -type f | wc -l)" -eq 21
+          test "$(find /tmp/v39/after_front -type f | wc -l)" -eq 20
           test "$(find /tmp/v39/after_back -type f | wc -l)" -eq 5
-          echo 'V39 preflight OK: 5 backend, 21 frontend, sin escrituras de producción.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'V39 preflight OK: 5 backend, 20 frontend, sin escrituras de producción.' >> "$GITHUB_STEP_SUMMARY"
       - name: Limpiar comando con contraseña
         if: always()
         run: rm -f /tmp/v39/read.lftp

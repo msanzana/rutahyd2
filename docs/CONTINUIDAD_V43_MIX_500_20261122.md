@@ -26,3 +26,15 @@ Cerrado solamente si se confirma la causa por log o consulta SELECT, se verifica
 ## Reglas permanentes
 
 Preservar UX violeta y preloader V42, menú y versiones anteriores, paginación 25 arriba/abajo, botones de acciones con iconos, mensajes sin términos técnicos en la interfaz, sin Firecrawl, esquema exclusivamente DDL manual en phpMyAdmin y respaldo antes de cualquier publicación.
+
+
+## Actualización verificada V43 — 2026-11-22
+
+- Diagnóstico privado de logs por FTPS: run https://github.com/msanzana/rutahyd2/actions/runs/45070866653 y ampliaciones https://github.com/msanzana/rutahyd2/actions/runs/45071915514 , https://github.com/msanzana/rutahyd2/actions/runs/45072087898. Los logs Laravel registraron errores previos SQL42S22 de Productos y Listas y otros de tipo PHP `headers already sent`; no se expuso información comercial.
+- Auditoría SQL exacta con SELECT protegido: https://github.com/msanzana/rutahyd2/actions/runs/45071564651 — todas las columnas y las siete tablas del mix presentes, consulta completa y JSON válidos.
+- Invocación directa del controlador real mediante bootstrap Laravel, sin JWT ni escritura: https://github.com/msanzana/rutahyd2/actions/runs/45071745043 — respuesta HTTP200 paginada.
+- Cotejo FTPS de arranque productivo: https://github.com/msanzana/rutahyd2/actions/runs/45072310414 — ruta del mix y protecciones presentes, pero faltaban `AutorizarSubmodulo.php` y el import/alias `submodulo.rutahd` en `bootstrap/app.php`; la fuente feature V42 sí los incluía. También faltaba servicio `PermisosSubmodulos.php`, según preflight posterior.
+- **HOTFIX PUBLICADO** https://github.com/msanzana/rutahyd2/actions/runs/45072508632 — solo tres archivos productivos (bootstrap, clase middleware, clase de servicio), cotejo FTP byte a byte correcto, respaldo en artefacto GitHub Actions, gateway y guards Apache idénticos, rollback no necesario. No DDL, DML, sesiones ni inventario modificados.
+- El smoke mediante urllib devolvió HTTP200 **no JSON** en API estado y mix, típico de intermediario; **no** certifica ruta autenticada. Comprobar de manera segura en navegador con sesión operativa y hacer lectura runtime de aliases/DDL23 antes de dar por cerrado el HTTP500.
+- Fuente frontend V38–V42: PR de consolidación https://github.com/msanzana/rutahyd2front/pull/16 borrador. Backend main diverge ampliamente y no se debe fusionar a ciegas.
+- Recepciones y costo promedio: PR diseño https://github.com/msanzana/rutahyd2/pull/14, DDL36 **borrador no ejecutable todavía** hasta backend y pruebas.

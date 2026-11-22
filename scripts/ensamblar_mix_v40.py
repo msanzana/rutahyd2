@@ -28,14 +28,31 @@ def assemble():
         new=ROOT/'ours.tmp'
         base.write_bytes(git(BACK,BASE_BACK,path))
         new.write_bytes(source.read_bytes())
-        merge=subprocess.run(['git','merge-file','-p',str(before),str(base),str(new)],
-            capture_output=True)
-        if merge.returncode or b'<<<<<<<' in merge.stdout:
-            raise SystemExit('V40 STOP: conflicto PHP con hotfix productivo '+path)
+        if path=='routes/api.php':
+            # Las rutas productivas contienen hotfixes adicionales a la rama:
+            # integrar solamente la ruta nueva, sin reescribir el archivo completo.
+            existing=before.read_text('utf-8')
+            source=new.read_text('utf-8')
+            anchor="""    Route::post('/proveedores-productos',[ProductosProveedoresControlador::class,'crear'])
+        ->middleware('permiso.rutahd:compras.gestionar')->middleware('submodulo.rutahd:proveedores_productos,gestionar');"""
+            addition="""    Route::post('/proveedores-productos/lote',[ProductosProveedoresControlador::class,'crearLote'])
+        ->middleware('permiso.rutahd:compras.gestionar')
+        ->middleware('submodulo.rutahd:proveedores_productos,gestionar')
+        ->middleware('throttle:20,1');"""
+            if existing.count(anchor)!=1 or source.count(addition)!=1 or '/proveedores-productos/lote' in existing:
+                raise SystemExit('V40 STOP: las rutas de producción no coinciden con el contrato esperado')
+            result=existing.replace(anchor,anchor+'\n'+addition).encode('utf-8')
+            print('PHP_RUTA_PARCHE_MINIMO',path)
+        else:
+            merge=subprocess.run(['git','merge-file','-p',str(before),str(base),str(new)],
+                capture_output=True)
+            if merge.returncode or b'<<<<<<<' in merge.stdout:
+                raise SystemExit('V40 STOP: conflicto PHP con hotfix productivo '+path)
+            result=merge.stdout
+            print('PHP_MERGE_LIMPIO',path)
         target=ROOT/'after_back'/path
         target.parent.mkdir(parents=True,exist_ok=True)
-        target.write_bytes(merge.stdout)
-        print('PHP_MERGE_LIMPIO',path)
+        target.write_bytes(result)
     for path in FRONT_FILES:
         deployed=(ROOT/'before_front'/path).read_bytes()
         baseline=git(FRONT,BASE_FRONT,path)

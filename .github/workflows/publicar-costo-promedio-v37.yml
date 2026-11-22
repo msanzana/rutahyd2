@@ -110,18 +110,18 @@ jobs:
           try {
             $base=__DIR__.'/api-v2';
             require $base.'/vendor/autoload.php';
-            \\Dotenv\\Dotenv::createImmutable($base)->safeLoad();
+            \Dotenv\Dotenv::createImmutable($base)->safeLoad();
             if(($_ENV['DB_HOST']??'')!=='sql307.infinityfree.com' ||
                ($_ENV['DB_DATABASE']??'')!=='if0_43460400_rutahyd2_es'){
-              throw new \\RuntimeException('wrong_database');
+              throw new \RuntimeException('wrong_database');
             }
-            $pdo=new \\PDO(
+            $pdo=new \PDO(
               'mysql:host='.$_ENV['DB_HOST'].';port=3306;dbname='.$_ENV['DB_DATABASE'].';charset=utf8mb4',
               (string)($_ENV['DB_USERNAME']??''),(string)($_ENV['DB_PASSWORD']??''),
-              [\\PDO::ATTR_ERRMODE=>\\PDO::ERRMODE_EXCEPTION,\\PDO::ATTR_TIMEOUT=>8]
+              [\PDO::ATTR_ERRMODE=>\PDO::ERRMODE_EXCEPTION,\PDO::ATTR_TIMEOUT=>8]
             );
             $pdo->exec('SET SESSION TRANSACTION READ ONLY');
-            $columns=$pdo->query("SHOW COLUMNS FROM productos LIKE 'costo_promedio_ponderado'")->fetch(\\PDO::FETCH_ASSOC);
+            $columns=$pdo->query("SHOW COLUMNS FROM productos LIKE 'costo_promedio_ponderado'")->fetch(\PDO::FETCH_ASSOC);
             $ready=$columns &&
               strtolower((string)$columns['Type'])==='decimal(15,4)' &&
               strtoupper((string)$columns['Null'])==='NO' &&
@@ -135,7 +135,7 @@ jobs:
               'nullable'=>$columns['Null']??null,
               'default'=>$columns['Default']??null
             ],JSON_UNESCAPED_UNICODE);
-          }catch(\\Throwable $e){
+          }catch(\Throwable $e){
             http_response_code(503);
             echo json_encode(['ready'=>false,'stage'=>'schema_read_only','error_class'=>get_class($e)]);
           }

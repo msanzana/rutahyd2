@@ -24,3 +24,8 @@ Origen: instrucción expresa del titular del proyecto.
 - Para módulos con API paginada, solicitar páginas reales de máximo 25 sin fingir paginación global de resultados parciales.
 - Para catálogos y relaciones ya cargados íntegramente, paginación local de 25 conservando filtros y acceso a los registros siguientes.
 - No ocultar ni eliminar registros a causa de la paginación; ventas y listados conservan sus totales y permisos. Fotografías: 25 miniaturas por página sin impedir que la imagen grande recorra las N fotos.
+
+## Regla de interruptores (switches) corporativos — 2026-11-22
+- Todos los controles visibles de tipo activado/desactivado que antes utilizaban una casilla se presentan como **switches compactos violetas** en el frontend Ruta H&D V2, manteniendo legibilidad y adaptación móvil.
+- Mantener comportamiento nativo del control de formulario, estado checked, navegación por teclado, foco visible y tratamiento de disabled; no alterar semánticas de campos de selección múltiple donde implique romper permisos o relaciones.
+- Conservar el switch temático oscuro existente, sin duplicarlo.

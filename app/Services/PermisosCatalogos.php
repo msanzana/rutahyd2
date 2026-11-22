@@ -20,7 +20,7 @@ final class PermisosCatalogos
         'marcas' => 'Marcas',
         'modelos' => 'Modelos',
         'tipos_unidad' => 'Tipos de unidad',
-        'gramajes' => 'Gramajes',
+        'tipos_codigos_barras' => 'Tipos de códigos de barras',
         'tipos_envasado' => 'Tipos de envasado',
         'condiciones_tributarias' => 'Condiciones tributarias',
     ];

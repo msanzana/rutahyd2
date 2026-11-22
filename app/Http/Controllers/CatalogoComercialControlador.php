@@ -23,7 +23,7 @@ final class CatalogoComercialControlador extends Controller
         'marcas' => ['parent' => null, 'product' => 'marca_id'],
         'modelos' => ['parent' => 'marcas', 'parent_column' => 'marca_id', 'product' => 'modelo_id'],
         'tipos_unidad' => ['parent' => null, 'product' => 'tipo_unidad_id'],
-        'gramajes' => ['parent' => null, 'product' => 'gramaje_id'],
+        'tipos_codigos_barras' => ['parent' => null, 'product' => null],
         'tipos_envasado' => ['parent' => null, 'product' => 'tipo_envasado_id'],
         'condiciones_tributarias' => ['parent' => null, 'product' => 'condicion_tributaria_id'],
     ];
@@ -42,6 +42,7 @@ final class CatalogoComercialControlador extends Controller
             'nombre' => $fila->nombre,
             'activo' => (bool) $fila->activo,
             'parentId' => $esquema['parent'] ? $fila->{$esquema['parent_column']} : null,
+            'codigo' => $catalogo === 'tipos_codigos_barras' ? $fila->codigo : null,
         ];
     }
 
@@ -74,7 +75,11 @@ final class CatalogoComercialControlador extends Controller
     private function dependientes(string $catalogo, int $id): bool
     {
         $columna = self::CATALOGOS[$catalogo]['product'];
-        if (DB::table('productos')->where($columna, $id)->exists()) return true;
+        if ($catalogo === 'tipos_codigos_barras') {
+            return DB::table('productos_codigos_barra_venta')->where('tipo_codigo_barra_id',$id)->exists()
+                || DB::table('productos_codigos_barra_compra')->where('tipo_codigo_barra_id',$id)->exists();
+        }
+        if ($columna !== null && DB::table('productos')->where($columna, $id)->exists()) return true;
         foreach (self::CATALOGOS as $tabla => $esquema) {
             if ($esquema['parent'] === $catalogo &&
                 DB::table($tabla)->where($esquema['parent_column'], $id)->exists()) return true;
@@ -115,13 +120,6 @@ final class CatalogoComercialControlador extends Controller
             abort_unless($codigo, 422, 'Solo se admite Afecto o Exento');
             if ($actual) abort_unless($actual->codigo === $codigo, 422, 'No se puede cambiar el tipo tributario');
         }
-        $gramos = null;
-        if ($catalogo === 'gramajes') {
-            abort_unless(preg_match('/^\\d{1,9}(?:\\.\\d{1,3})?$/D', $nombre) === 1,
-                422, 'Gramos: número positivo con hasta tres decimales');
-            $gramos = (float) $nombre;
-            $nombre = number_format($gramos, 3, '.', '');
-        }
         if ($actual && ((!$activo && (bool) $actual->activo) ||
             ($esquema['parent'] && (int) $actual->{$esquema['parent_column']} !== $padre))) {
             abort_if($this->dependientes($catalogo, $id), 409,
@@ -129,9 +127,7 @@ final class CatalogoComercialControlador extends Controller
         }
 
         $coincide = DB::table($catalogo);
-        if ($catalogo === 'gramajes') {
-            $coincide->where('gramos', $gramos);
-        } elseif ($catalogo === 'condiciones_tributarias') {
+        if ($catalogo === 'condiciones_tributarias') {
             $coincide->where('codigo', $codigo);
         } else {
             $coincide->where('nombre', $nombre);
@@ -142,7 +138,13 @@ final class CatalogoComercialControlador extends Controller
 
         $campos = ['nombre' => $nombre, 'activo' => $activo ? 1 : 0];
         if ($esquema['parent']) $campos[$esquema['parent_column']] = $padre;
-        if ($catalogo === 'gramajes') $campos['gramos'] = $gramos;
+        if ($catalogo === 'tipos_codigos_barras' && $id === null) {
+            $codigo = mb_strtoupper(preg_replace('/[^A-Za-z0-9]+/', '', $nombre));
+            abort_unless($codigo !== '' && strlen($codigo)<=40,422,'Código de tipo inválido');
+            abort_if(DB::table('tipos_codigos_barras')->where('codigo',$codigo)->exists(),409,
+                'Ya existe un tipo de código de barras con ese código');
+            $campos['codigo'] = $codigo;
+        }
         if ($catalogo === 'condiciones_tributarias') $campos['codigo'] = $codigo;
 
         if ($id === null) $id = (int) DB::table($catalogo)->insertGetId($campos);

@@ -143,6 +143,58 @@ final class GestionListasPrecios
     }
 
     /**
+     * Sustituye BEFORE UPDATE listas_precios: protege la Lista Base y
+     * evita cambiar una lista especial a base sin pasar por la validación.
+     */
+    public function actualizarLista(int $listaId, array $cambios): array
+    {
+        return DB::transaction(function () use ($listaId, $cambios): array {
+            $permitidos=['codigo','nombre','observacion','activo','es_base'];
+            abort_if(array_diff(array_keys($cambios), $permitidos)!==[],
+                422, 'Campos de lista de precios no permitidos');
+            abort_if($cambios===[],422,'No se proporcionaron cambios');
+            $actual=DB::table('listas_precios')->where('id',$listaId)
+                ->lockForUpdate()->first();
+            abort_unless($actual,404,'Lista de precios inexistente');
+            $base=(bool)$actual->es_base;
+            if(array_key_exists('es_base',$cambios)){
+                abort_unless((bool)$cambios['es_base']===$base,422,
+                    'No se puede cambiar el tipo base/especial de una lista existente');
+            }
+            if(array_key_exists('activo',$cambios) && $base){
+                abort_unless((bool)$cambios['activo'],422,
+                    'La Lista Base no puede desactivarse');
+            }
+            if(array_key_exists('codigo',$cambios)){
+                $codigo=trim((string)$cambios['codigo']);
+                abort_if($codigo===''||mb_strlen($codigo)>40,422,'Código inválido');
+                abort_if($base && strtoupper($codigo)!=='BASE',422,
+                    'La Lista Base conserva el código BASE');
+                abort_if(!$base && strtoupper($codigo)==='BASE',422,
+                    'El código BASE está reservado');
+                $cambios['codigo']=$codigo;
+            }
+            if(array_key_exists('nombre',$cambios)){
+                $nombre=trim((string)$cambios['nombre']);
+                abort_if($nombre===''||mb_strlen($nombre)>120,422,'Nombre inválido');
+                $cambios['nombre']=$nombre;
+            }
+            if(array_key_exists('observacion',$cambios)){
+                $nota=$cambios['observacion'];
+                abort_if($nota!==null &&
+                    (!is_string($nota)||mb_strlen($nota)>255),422,
+                    'Observación demasiado larga');
+            }
+            unset($cambios['es_base']);
+            if($cambios!==[]){
+                $cambios['actualizado_en']=now();
+                DB::table('listas_precios')->where('id',$listaId)->update($cambios);
+            }
+            return (array)DB::table('listas_precios')->where('id',$listaId)->first();
+        }, 3);
+    }
+
+    /**
      * Calcula precio desde margen, O margen desde precio (porcentaje sobre costo).
      * No acepta valores contradictorios; exige mínimo de la línea del producto.
      */

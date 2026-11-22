@@ -35,7 +35,7 @@ final class UsuariosControlador extends Controller
                 ->join('roles','roles.id','=','usuarios.rol_id')
                 ->orderBy('usuarios.nombre')
                 ->get(['usuarios.id','usuarios.nombre','usuarios.rut','usuarios.correo_electronico',
-                    'usuarios.activo','usuarios.rol_id','roles.codigo as rol_codigo',
+                    'usuarios.activo','usuarios.ciudad_id','usuarios.rol_id','roles.codigo as rol_codigo',
                     'roles.nombre as perfil']),
             'roles' => Rol::where('codigo','!=','administrador')->orderBy('nombre')
                 ->get(['id','codigo','nombre'])
@@ -49,6 +49,7 @@ final class UsuariosControlador extends Controller
             'nombre' => ['required','string','min:3','max:160'],
             'correo_electronico' => ['required','email','max:190','unique:usuarios,correo_electronico'],
             'rol_id' => ['required','integer','min:1'],
+            'ciudad_id'=>['sometimes','nullable','integer','exists:ciudades,id'],
         ])->validate();
         $rol = $this->rolOperativo((int)$datos['rol_id']);
         abort_unless(config('mail.default') === 'smtp', 503,
@@ -57,6 +58,7 @@ final class UsuariosControlador extends Controller
             'nombre' => trim($datos['nombre']),
             'correo_electronico' => mb_strtolower(trim($datos['correo_electronico'])),
             'rol_id' => $rol->id,
+            'ciudad_id'=>$datos['ciudad_id']??null,
             'hash_contrasena' => Hash::make(bin2hex(random_bytes(32))),
             'activo' => true,
         ]);
@@ -81,6 +83,7 @@ final class UsuariosControlador extends Controller
             'correo_electronico' => ['required','email','max:190','unique:usuarios,correo_electronico,'.$id],
             'rol_id' => ['required','integer','min:1'],
             'activo' => ['required','boolean'],
+            'ciudad_id'=>['sometimes','nullable','integer','exists:ciudades,id'],
         ])->validate();
         $rol = $this->rolOperativo((int)$datos['rol_id']);
         DB::transaction(function () use ($request,$id,$datos,$rol): void {
@@ -92,6 +95,7 @@ final class UsuariosControlador extends Controller
                 'nombre' => trim($datos['nombre']),
                 'correo_electronico' => mb_strtolower(trim($datos['correo_electronico'])),
                 'rol_id' => $rol->id,
+                'ciudad_id'=>$datos['ciudad_id']??$usuario->ciudad_id,
                 'activo' => (bool)$datos['activo'],
             ]);
             $usuario->save();

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Rol;
 use App\Services\PermisosCatalogos;
+use App\Services\PermisosSubmodulos;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -28,7 +29,6 @@ final class PerfilesCatalogosControlador extends Controller
         $roles = Rol::query()->orderBy('id')->get(['id','codigo','nombre']);
         $asignados = DB::table('roles_permisos')
             ->join('permisos','roles_permisos.permiso_id','=','permisos.id')
-            ->whereIn('permisos.codigo', PermisosCatalogos::codigos())
             ->get(['roles_permisos.rol_id', 'permisos.codigo']);
         $porRol = [];
         foreach ($asignados as $permiso) $porRol[$permiso->rol_id][] = $permiso->codigo;
@@ -45,9 +45,11 @@ final class PerfilesCatalogosControlador extends Controller
             return [
                 'id'=>$rol->id,'codigo'=>$rol->codigo,'nombre'=>$rol->nombre,
                 'editable'=>!$admin,'modulos'=>$modulos,
+                'submodulos'=>PermisosSubmodulos::datosRol((int)$rol->id,$admin,$codigos),
             ];
         });
-        return response()->json(['roles'=>$datos, 'catalogos'=>PermisosCatalogos::MODULOS]);
+        return response()->json(['roles'=>$datos, 'catalogos'=>PermisosCatalogos::MODULOS,
+            'submodulos'=>PermisosSubmodulos::SUBMODULOS]);
     }
 
     public function usuarios(Request $request)
@@ -91,7 +93,13 @@ final class PerfilesCatalogosControlador extends Controller
     public function actualizar(Request $request, int $id)
     {
         $this->esAdministrador($request);
-        $roles = ['modulos'=>['required','array','size:10']];
+        $roles = ['modulos'=>['required','array','size:10'],
+            'submodulos'=>['sometimes','array','size:3']];
+        foreach (array_keys(PermisosSubmodulos::SUBMODULOS) as $key) {
+            $roles['submodulos.'.$key]=['required_with:submodulos','array','size:2'];
+            $roles['submodulos.'.$key.'.ver']=['required_with:submodulos','boolean'];
+            $roles['submodulos.'.$key.'.gestionar']=['required_with:submodulos','boolean'];
+        }
         foreach (array_keys(PermisosCatalogos::MODULOS) as $key) {
             $roles['modulos.'.$key] = ['required','array','size:2'];
             $roles['modulos.'.$key.'.ver'] = ['required','boolean'];
@@ -110,7 +118,17 @@ final class PerfilesCatalogosControlador extends Controller
             if ($gestionar) $escogidos[] = PermisosCatalogos::codigo($key,'gestionar');
         }
 
-        DB::transaction(function () use ($id,$escogidos) {
+        $submodulos=$datos['submodulos']??null;
+        if($submodulos!==null){
+            abort_if(array_diff(array_keys($submodulos),array_keys(PermisosSubmodulos::SUBMODULOS))!==[],
+                422,'Submódulo no permitido');
+            foreach($submodulos as $clave=>$valores) {
+                abort_if((bool)$valores['gestionar']&&!(bool)$valores['ver'],
+                    422,'Gestionar requiere permiso Ver: '.$clave);
+            }
+        }
+
+        DB::transaction(function () use ($id,$escogidos,$submodulos) {
             $rol = DB::table('roles')->where('id',$id)->lockForUpdate()->first();
             abort_unless($rol,404,'Perfil no encontrado');
             abort_if($rol->codigo === 'administrador',403,'El perfil administrador es reservado');
@@ -125,6 +143,17 @@ final class PerfilesCatalogosControlador extends Controller
                     fn($codigo)=>['rol_id'=>$id,'permiso_id'=>$ids[$codigo]],
                     $escogidos
                 ));
+            }
+            if($submodulos!==null){
+                $filas=[];
+                foreach($submodulos as $clave=>$estado){
+                    $filas[]=['rol_id'=>$id,'submodulo'=>$clave,
+                        'ver'=>(int)(bool)$estado['ver'],
+                        'gestionar'=>(int)(bool)$estado['gestionar'],
+                        'actualizado_en'=>now()];
+                }
+                DB::table('roles_submodulos')->upsert($filas,
+                    ['rol_id','submodulo'],['ver','gestionar','actualizado_en']);
             }
         });
         return response()->json(['guardado'=>true,'rol_id'=>$id]);

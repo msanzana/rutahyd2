@@ -1,0 +1,140 @@
+name: Publicar filtros avanzados Productos V22 sin modificar base de datos
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/publicar-filtros-productos-v22.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  product_filters:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BEFORE_SHA: 88635dae023c2507a5c80b475b4fa7b6958984bb
+      FILTERS_SHA: e80574c9a9c9564317da16766682aa85f8663d83
+    steps:
+      - name: Validar fuente inmutable y que los cambios se limitan a GET de productos
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          git clone --depth 1 --branch feature/proveedores-productos-barcodes-20261122 https://github.com/msanzana/rutahyd2.git /tmp/backend-filters
+          test "$(git -C /tmp/backend-filters rev-parse HEAD)" = "$FILTERS_SHA"
+          git -C /tmp/backend-filters fetch -q --depth 1 origin "$BEFORE_SHA"
+          git -C /tmp/backend-filters show "$BEFORE_SHA:app/Http/Controllers/ProductoComercialControlador.php" > /tmp/product-controller-before.php
+          cp /tmp/backend-filters/app/Http/Controllers/ProductoComercialControlador.php /tmp/product-controller-after.php
+          php -l /tmp/product-controller-before.php
+          php -l /tmp/product-controller-after.php
+          grep -Fq 'filtros_aplicados' /tmp/product-controller-after.php
+          grep -Fq "'familia_id'" /tmp/product-controller-after.php
+          grep -Fq "'codigo_barras'" /tmp/product-controller-after.php
+          grep -Fq "'tipo_codigo_barra_id'" /tmp/product-controller-after.php
+          # Ninguna tabla, ruta, servicio ni middleware se toca en este hotfix.
+      - name: Instalar cliente FTPS
+        run: |
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+      - name: Respaldar controlador real y exigir equivalencia con ultima version publicada
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/product-read.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php -o /tmp/product-controller-remote-before.php
+          get /htdocs/api-v2/.htaccess -o /tmp/product-private-guard-before
+          get /htdocs/api/index.php -o /tmp/product-gateway-before.php
+          bye
+          EOF
+          lftp -f /tmp/product-read.lftp >/dev/null
+          php -l /tmp/product-controller-remote-before.php
+          cmp -s /tmp/product-controller-before.php /tmp/product-controller-remote-before.php ||
+            { echo '::error::Controlador remoto no coincide con la version anterior documentada. No modificar.';exit 1; }
+          grep -Fq 'Require all denied' /tmp/product-private-guard-before
+          grep -Fq 'rutahd2_api_ready' /tmp/product-gateway-before.php
+      - name: Subir exclusivamente el controlador actualizado
+        run: |
+          set -euo pipefail
+          set +x
+          touch /tmp/product-upload-attempted
+          cat >/tmp/product-write.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/product-controller-after.php -o /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php
+          bye
+          EOF
+          lftp -f /tmp/product-write.lftp >/dev/null
+      - name: Verificar bytes y protecciones actuales, sin autenticar ni modificar datos
+        run: |
+          set -euo pipefail
+          set +x
+          cat >/tmp/product-verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php -o /tmp/product-controller-remote-after.php
+          get /htdocs/api-v2/.htaccess -o /tmp/product-private-guard-after
+          get /htdocs/api/index.php -o /tmp/product-gateway-after.php
+          bye
+          EOF
+          lftp -f /tmp/product-verify.lftp >/dev/null
+          cmp -s /tmp/product-controller-after.php /tmp/product-controller-remote-after.php
+          cmp -s /tmp/product-private-guard-before /tmp/product-private-guard-after
+          cmp -s /tmp/product-gateway-before.php /tmp/product-gateway-after.php
+          php -l /tmp/product-controller-remote-after.php
+          python3 - <<'PY'
+          import urllib.request, urllib.error
+          base='https://rutahyd2.free.nf/api/v1/'
+          urls=['estado','productos?marca_id=1&familia_id=1&activo=0&precio_min=100',
+                'productos?codigo_barras=7801234567890&tipo_codigo_barra_id=1']
+          for relative in urls:
+              request=urllib.request.Request(base+relative,headers={'Accept':'application/json'})
+              try:
+                  response=urllib.request.urlopen(request,timeout=25)
+                  status=response.status
+              except urllib.error.HTTPError as exc:
+                  status=exc.code
+              print('PRODUCT_FILTER_SECURITY',relative,status)
+              if status!=(200 if relative=='estado' else 401):
+                  raise SystemExit('Respuesta de seguridad inesperada')
+          PY
+      - name: Restaurar controlador previo si falla la publicacion
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/product-upload-attempted ] && [ -s /tmp/product-controller-remote-before.php ]; then
+            cat >/tmp/product-rollback.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/product-controller-remote-before.php -o /htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php
+          bye
+          EOF
+            lftp -f /tmp/product-rollback.lftp >/dev/null || echo "::error::Restauracion FTPS requiere auditoria"
+          fi
+      - name: Eliminar archivos privados temporales del runner
+        if: always()
+        run: |
+          rm -rf /tmp/backend-filters
+          rm -f /tmp/product-*.lftp /tmp/product-controller-*.php /tmp/product-private-guard-* /tmp/product-gateway-*.php

@@ -170,9 +170,9 @@ $familia = crear('familias', 'Conservas', $depto, $token);
 $linea = crear('lineas', 'Vegetales', $familia, $token);
 $marca = crear('marcas', 'H&D', null, $token);
 $modelo = crear('modelos', 'Tradicional', $marca, $token);
-$unidad = crear('tipos_unidad', 'Unidad', null, $token);
+$unidad = (int)DB::table('tipos_unidad')->where('nombre','Unidad')->value('id');
 $tipo = crear('tipos_codigos_barras', 'TIPO ESPECIAL CI', null, $token);
-$envasado = crear('tipos_envasado', 'Lata', null, $token);
+$envasado = (int)DB::table('tipos_envasado')->where('nombre','Lata')->value('id');
 
 esperar(409, api('POST', '/api/v1/catalogos/rubros',
     ['nombre' => 'Alimentos', 'activo' => true, 'parentId' => null], $token),

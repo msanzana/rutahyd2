@@ -84,6 +84,17 @@ final class RecursoControlador extends Controller
         $columnas=DB::getSchemaBuilder()->getColumnListing($modelo->getTable());
         if (in_array('id',$columnas,true)) $q->orderByDesc('id');
         $filas=$q->paginate((int)($datos['por_pagina']??25));
+        if($recurso==='clientes'){
+            $ids=$filas->getCollection()->pluck('id')->map(fn($id)=>(int)$id)->all();
+            $listas=empty($ids)?collect():DB::table('clientes_listas_precios as clp')
+                ->join('listas_precios as lp','lp.id','=','clp.lista_precio_id')
+                ->whereIn('clp.cliente_id',$ids)
+                ->get(['clp.cliente_id','lp.nombre'])->keyBy('cliente_id');
+            $filas->getCollection()->each(function($cliente)use($listas){
+                $cliente->setAttribute('lista_precio_nombre',
+                    $listas->get((int)$cliente->id)?->nombre??'LISTA BASE');
+            });
+        }
         // Nunca devolver hashes de contraseñas ni cuerpos JSON sensibles.
         if ($recurso==='ventas') {
             $filas->getCollection()->makeHidden(['dte_solicitud_json','dte_respuesta_json']);

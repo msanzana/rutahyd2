@@ -30,17 +30,24 @@ jobs:
           grep -Fq 'supplier-products-module' /tmp/front/assets/js/proveedores-productos.js
           test -f /tmp/front/assets/css/crud-v18.css
           grep -Fq 'crud-v18.css?v=20261122-fix19' /tmp/front/index.html
-          grep -Fq 'listados-tema-v20.css?v=20261122-filters22' /tmp/front/index.html
+          grep -Fq 'listados-tema-v20.css?v=20261122-prices25' /tmp/front/index.html
           grep -Fq 'menu-usuario.js?v=20261122-ui20' /tmp/front/index.html
           grep -Fq 'listados-ui.js?v=20261122-filters22' /tmp/front/index.html
           test -s /tmp/front/assets/js/menu-usuario.js
           test -s /tmp/front/assets/js/listados-ui.js
           test -s /tmp/front/assets/js/validacion-ui.js
+          test -s /tmp/front/assets/js/listas-precios.js
+          test -s /tmp/front/assets/js/ventas-precios.js
+          grep -Fq 'listas-precios.js?v=20261122-prices25' /tmp/front/index.html
+          grep -Fq 'ventas-precios.js?v=20261122-prices25' /tmp/front/index.html
+          grep -Fq 'modulos-oficiales.js?v=20261122-prices25' /tmp/front/index.html
+          grep -Fq 'admin-remoto.js?v=20261122-prices25' /tmp/front/index.html
+          grep -Fq 'data-nav="listas_precios"' /tmp/front/index.html
           grep -Fq 'validacion-ui.js?v=20261122-filters22' /tmp/front/index.html
-          grep -Fq 'productos-remotos.js?v=20261122-filters22' /tmp/front/index.html
-          grep -Fq 'catalogos-api.js?v=20261122-filters22' /tmp/front/index.html
+          grep -Fq 'productos-remotos.js?v=20261122-prices25' /tmp/front/index.html
+          grep -Fq 'catalogos-api.js?v=20261122-prices25' /tmp/front/index.html
           grep -Fq "event.target.closest('#infoClose')" /tmp/front/assets/js/app-produccion.js
-          grep -Fq 'app-produccion.js?v=20261122-info21' /tmp/front/index.html
+          grep -Fq 'app-produccion.js?v=20261122-prices25' /tmp/front/index.html
           test -s /tmp/front/assets/css/listados-tema-v20.css
           ! grep -Fq 'id="apiStatus"' /tmp/front/index.html
           ! grep -Fq 'id="heroLogin"' /tmp/front/index.html
@@ -81,7 +88,7 @@ jobs:
           s=s.replace('produccion.css?v=20261121-1','produccion.css?v=20261122-prod17')
           s=re.sub(r'src="assets/js/([a-z-]+)\.js"',r'src="assets/js/\1.js?v=20261122-prod17"',s)
           assert s.count('src="assets/js/login-produccion.js?v=20261122-ui20"')==1
-          assert s.count('src="assets/js/app-produccion.js?v=20261122-info21"')==1
+          assert s.count('src="assets/js/app-produccion.js?v=20261122-prices25"')==1
           Path('/tmp/release_index.html').write_text(s,'utf-8')
           Path('/tmp/redirect_violeta.html').write_text(
             '<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Ruta H&D2 · Producción</title>'

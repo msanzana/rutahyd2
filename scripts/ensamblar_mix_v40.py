@@ -40,6 +40,11 @@ def assemble():
         ->middleware('submodulo.rutahd:proveedores_productos,gestionar')
         ->middleware('throttle:20,1');"""
             if existing.count(anchor)!=1 or source.count(addition)!=1 or '/proveedores-productos/lote' in existing:
+                print('RUTA_DIAGNOSTICO',existing.count(anchor),source.count(addition),
+                    '/proveedores-productos/lote' in existing)
+                for line in existing.splitlines():
+                    if "Route::post('/proveedores-productos" in line:
+                        print('RUTA_PUBLICADA',repr(line[:220]))
                 raise SystemExit('V40 STOP: las rutas de producción no coinciden con el contrato esperado')
             result=existing.replace(anchor,anchor+'\n'+addition).encode('utf-8')
             print('PHP_RUTA_PARCHE_MINIMO',path)

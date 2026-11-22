@@ -360,9 +360,13 @@ jobs:
                 printf 'put "/tmp/v38/front_before/%s" -o "/htdocs/%s"\n' "$f" "$f"
               done </tmp/v38/front-existing.txt
               echo 'put /tmp/v38/front_before/index.html -o /htdocs/index.html'
+              # La carga puede fallar antes de crear todos los archivos nuevos.
+              # No abortar por un "rm" de archivo inexistente durante el rollback.
+              echo 'set cmd:fail-exit no'
               echo 'rm /htdocs/api-v2/app/Http/Controllers/UbicacionesControlador.php'
               echo 'rm /htdocs/assets/js/ubicaciones.js'
               echo 'rm /htdocs/assets/css/proveedores-ubicaciones-v38.css'
+              echo 'set cmd:fail-exit yes'
               echo 'bye'
             } >/tmp/v38/rollback.lftp
             lftp -f /tmp/v38/rollback.lftp >/dev/null ||

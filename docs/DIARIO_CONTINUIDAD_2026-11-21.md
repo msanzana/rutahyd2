@@ -463,3 +463,27 @@ Esta instrucción sustituye las recomendaciones anteriores del diario que priori
 - **Smoke público independiente:** https://github.com/msanzana/rutahyd2/actions/runs/44978179560 **éxito**. Chromium comprobó en `https://rutahyd2.free.nf/` las referencias CSS/JS v19, inicio con JWT ficticio interceptado, navegación a Productos→Rubros, lectura simulada, apertura de «Nuevo Rubro» y ausencia de overflow en 1440/390 px. Capturas disponibles en artefactos del workflow.
 - **Sin cambios en Laravel, MariaDB, DDL, credenciales ni registros reales**. Las pruebas HTTP emplearon respuestas interceptadas; **no** validan los conteos actuales de filas reales ni una operación de escritura con sesión del titular.
 - Próxima aceptación funcional: comprobar con la cuenta del titular catálogos que deberían tener filas y registrar altas genuinas. Si el backend devuelve `items:[]`, la aplicación muestra un estado vacío real; nunca autogenerar registros ficticios en producción.
+
+
+## Normalización UI v20: listados, búsquedas, menú de usuario, árbol de permisos — 22-11-2026
+
+**Solicitud original del titular:** normalizar todos los listados y búsquedas generales; popup de búsqueda avanzada; acceso visible a añadir códigos de barras en Productos; acciones Editar/Desactivar como iconos con tooltip; eliminar login del dashboard y símbolos redundantes de servidor conectado; administrar accesos de subítems en árbol; menú del avatar con Mi perfil, cierre de sesión, modo oscuro por usuario.
+
+**Frontend publicado v20:**
+- Fuente `msanzana/rutahyd2front` `main` SHA `259a251ecb3cb3455d6ff7f7630413b14412f9b4`.
+- Nuevos `assets/js/listados-ui.js` y `assets/css/listados-tema-v20.css`: tabla unificada/accionamiento con iconos accesibles y tooltip, cuadro de búsqueda general y `Ctrl+K`, botón de búsqueda avanzada con diálogo de filtros por columnas, estados y borrado; el filtrado adicional se realiza **solo sobre la página cargada**, evitando afirmar búsquedas globales sin soporte de API.
+- `assets/js/productos-remotos.js`: añadir código de barras destacado en editor, acceso desde celda de acciones al editor enfocando barra. Conserva JWT, SKU, clasificaciones, códigos venta e historial.
+- `index.html` / `login-produccion.js`: no login CTA en Dashboard, sin `#apiStatus` de cabecera y sin indicador conectado en login; mostrar errores de conexión cuando corresponde; avatar con menú de perfil/sesión, sin botones de logout duplicados.
+- `assets/js/menu-usuario.js` y `accesos.js`: perfil de solo lectura (vía `/perfil`), switch oscuro guardado por ID de usuario únicamente en el navegador (preferencia visual, nunca JWT ni credenciales), cierre de sesión real, acceso a perfiles para administración. CSS implementa variantes dark para paneles, formularios, tablas y menú.
+- `perfiles.js`: árbol oficial de ocho módulos y subítems, diez permisos de catálogos editables con contrato backend existente, otros subítems con el estado de permiso base heredado. Tres listados tendrán controles independientes después de publicar esquema v23 y backend.
+- `app-produccion.js`: menú preparado para aplicar permisos independientes cuando el servidor los devuelva, retrocompatible con los generales actuales.
+- CI `https://github.com/msanzana/rutahyd2front/actions/runs/44980054689`: **45 pruebas Playwright aprobadas**, incluyendo test nuevo de filtros/iconos, avatar/tema por cuenta, árbol y botón barcode; sin credenciales reales ni escrituras productivas.
+- Publicación FTPS `https://github.com/msanzana/rutahyd2/actions/runs/44980175533`: **éxito**, copia de seguridad previa, publicación HTML al final, comparación por bytes de nuevos recursos; Laravel/MariaDB/gateway intactos.
+- Smoke de navegador en sitio real añadido por `.github/workflows/verificar-ui-v20-publico.yml`, trigger `deployment/solicitudes/verificar-ui-v20-publico.txt`. Estado de ese smoke pendiente de registrar tras terminar la ejecución.
+
+**Backend v23 preparado, NO publicado en producción:**
+- Rama `feature/proveedores-productos-barcodes-20261122` con `database/espanol/23_preferencias_usuarios_permisos_submodulos_ddl.sql`: solo dos tablas aditivas `preferencias_usuarios` y `roles_submodulos`; SQL explícito según orden del usuario. Sin importar en MariaDB productivo.
+- Servicio `PermisosSubmodulos` y middleware en Laravel: `productos_listado`, `proveedores_listado`, `proveedores_productos` con `ver`/`gestionar` adicionales; jamás elevan derechos base, solo pueden restringir. Catálogos mantienen sus 10 permisos independientes, Usuarios/Perfiles admin reservado.
+- Perfil y login entregarán derechos de submódulo y preferencia guardada por usuario; endpoints `GET/PUT /perfil/preferencias` seguros solo tras DDL validado. Frontend mantiene preferencia local por usuario hasta entonces.
+- CI DDL23 con MariaDB aislada `https://github.com/msanzana/rutahyd2/actions/runs/44979963068` **éxito**; CI Laravel completo con DDL23 en MySQL temporal `https://github.com/msanzana/rutahyd2/actions/runs/44980154387` **éxito**. Documento de instalación segura `docs/AMPLIACION_PERMISOS_Y_TEMA_V23.md` en esa rama.
+- **Próximo paso requiere respaldo e importación manual de DDL23 por titular** antes del despliegue backend. No modificar perfiles de producción, no guardar contraseñas, no introducir datos de prueba. No afirmar sincronización entre dispositivos todavía.

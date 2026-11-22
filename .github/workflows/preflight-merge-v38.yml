@@ -85,7 +85,7 @@ jobs:
                   raise SystemExit('HTML productivo cambió en ancla de V38 (solo lectura)')
                 live_html=live_html.replace(before,after)
               old_css='  <link rel="stylesheet" href="assets/css/productos-costo-promedio-v37.css?v=20261122-cost37">'
-              patch_once(old_css,old_css+'\\n'+
+              patch_once(old_css,old_css+chr(10)+
                 '  <link rel="stylesheet" href="assets/css/proveedores-ubicaciones-v38.css?v=20261122-geo38">')
               patch_once(end_marker,block+end_marker)
               for asset,old,new in [
@@ -99,7 +99,7 @@ jobs:
                 patch_once(before,after)
               anchor='  <script src="assets/js/modulos-oficiales.js?v=20261122-geo38" defer></script>'
               patch_once(anchor,
-                '  <script src="assets/js/ubicaciones.js?v=20261122-geo38" defer></script>\\n'+anchor)
+                '  <script src="assets/js/ubicaciones.js?v=20261122-geo38" defer></script>'+chr(10)+anchor)
               merged=live_html
               (root/out).write_text(merged,encoding='utf-8')
             else:

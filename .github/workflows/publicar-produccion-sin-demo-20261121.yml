@@ -30,11 +30,15 @@ jobs:
           grep -Fq 'supplier-products-module' /tmp/front/assets/js/proveedores-productos.js
           test -f /tmp/front/assets/css/crud-v18.css
           grep -Fq 'crud-v18.css?v=20261122-fix19' /tmp/front/index.html
-          grep -Fq 'listados-tema-v20.css?v=20261122-ui20' /tmp/front/index.html
+          grep -Fq 'listados-tema-v20.css?v=20261122-filters22' /tmp/front/index.html
           grep -Fq 'menu-usuario.js?v=20261122-ui20' /tmp/front/index.html
-          grep -Fq 'listados-ui.js?v=20261122-ui20' /tmp/front/index.html
+          grep -Fq 'listados-ui.js?v=20261122-filters22' /tmp/front/index.html
           test -s /tmp/front/assets/js/menu-usuario.js
           test -s /tmp/front/assets/js/listados-ui.js
+          test -s /tmp/front/assets/js/validacion-ui.js
+          grep -Fq 'validacion-ui.js?v=20261122-filters22' /tmp/front/index.html
+          grep -Fq 'productos-remotos.js?v=20261122-filters22' /tmp/front/index.html
+          grep -Fq 'catalogos-api.js?v=20261122-filters22' /tmp/front/index.html
           grep -Fq "event.target.closest('#infoClose')" /tmp/front/assets/js/app-produccion.js
           grep -Fq 'app-produccion.js?v=20261122-info21' /tmp/front/index.html
           test -s /tmp/front/assets/css/listados-tema-v20.css
@@ -172,6 +176,7 @@ jobs:
           get /htdocs/assets/css/crud-v18.css -o /tmp/crud_after.css
           get /htdocs/assets/css/listados-tema-v20.css -o /tmp/listados_css_after.css
           get /htdocs/assets/js/listados-ui.js -o /tmp/listados_js_after.js
+          get /htdocs/assets/js/validacion-ui.js -o /tmp/validacion_after.js
           get /htdocs/assets/js/menu-usuario.js -o /tmp/menu_usuario_after.js
           get /htdocs/api-v2/.htaccess -o /tmp/guard_after
           bye
@@ -192,6 +197,7 @@ jobs:
           cmp -s /tmp/front/assets/css/crud-v18.css /tmp/crud_after.css
           cmp -s /tmp/front/assets/css/listados-tema-v20.css /tmp/listados_css_after.css
           cmp -s /tmp/front/assets/js/listados-ui.js /tmp/listados_js_after.js
+          cmp -s /tmp/front/assets/js/validacion-ui.js /tmp/validacion_after.js
           cmp -s /tmp/front/assets/js/menu-usuario.js /tmp/menu_usuario_after.js
           cmp -s /tmp/guard_before /tmp/guard_after
           echo "Frontend productivo SHA: $FRONTEND_SHA" >> "$GITHUB_STEP_SUMMARY"

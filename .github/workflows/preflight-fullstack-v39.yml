@@ -1,0 +1,90 @@
+name: V39 - preflight integracion fullstack FTPS sin publicar
+on:
+  push:
+    branches: [feature/v39-proveedores-rut-giros-buscador-20261122]
+    paths: [.github/workflows/preflight-fullstack-v39.yml]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  verificar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACK_BASE: cf61e34aa195cc41fab9513f1959dd7d51e3246c
+      FRONT_BASE: a36bc7b81d653061ed3b2646091d31a2d5c9fbbc
+      FRONT_COPY: 978068533a66153ec2eacdacf1c8293ef8f62177
+      BACK_SOURCE: 758c8cbc0d16bb962801cd801ef67c87e53e905c
+      FRONT_SOURCE: 6a78b5fc5b11ddc3bd8ac4a35be587f2c144ab6d
+    steps:
+      - name: Clonar versiones validadas sin depender de cambios futuros
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          git clone --quiet --depth 1 --branch feature/v39-proveedores-rut-giros-buscador-20261122 https://github.com/msanzana/rutahyd2.git /tmp/v39back
+          git -C /tmp/v39back fetch --quiet --depth 1 origin "$BACK_BASE" "$BACK_SOURCE"
+          git -C /tmp/v39back checkout --quiet --detach "$BACK_SOURCE"
+          test "$(git -C /tmp/v39back rev-parse HEAD)" = "$BACK_SOURCE"
+          git clone --quiet --depth 1 --branch feature/v39-proveedores-rut-giros-buscador-20261122 https://github.com/msanzana/rutahyd2front.git /tmp/v39front
+          git -C /tmp/v39front fetch --quiet --depth 1 origin "$FRONT_BASE" "$FRONT_COPY" "$FRONT_SOURCE"
+          git -C /tmp/v39front checkout --quiet --detach "$FRONT_SOURCE"
+          test "$(git -C /tmp/v39front rev-parse HEAD)" = "$FRONT_SOURCE"
+          mkdir -p /tmp/v39/{before_back,after_back,before_front,after_front}
+      - name: Leer archivos publicados FTPS exclusivamente GET
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import pathlib,runpy
+          d=runpy.run_path('/tmp/v39back/scripts/ensamblar_deploy_v39.py')
+          root=pathlib.Path('/tmp/v39')
+          with (root/'read.lftp').open('w') as f:
+            for line in [
+              'set cmd:fail-exit yes','set net:timeout 45',
+              'set net:max-retries 2','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes'
+            ]:print(line,file=f)
+            import os
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+'" ftp://'+os.environ['FTP_HOST'],file=f)
+            for path in d['BACK_EXISTING']:
+              dest=root/'before_back'/path;dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get "/htdocs/api-v2/'+path+'" -o "'+str(dest)+'"',file=f)
+            for path in d['FRONT_EXISTING']+['index.html']:
+              dest=root/'before_front'/path;dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get "/htdocs/'+path+'" -o "'+str(dest)+'"',file=f)
+            for path,dest in [
+              ('/htdocs/api-v2/.htaccess','/tmp/v39/protect-private'),
+              ('/htdocs/api/.htaccess','/tmp/v39/protect-gateway'),
+              ('/htdocs/api/index.php','/tmp/v39/gateway')]:
+              print('get "'+path+'" -o "'+dest+'"',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v39/read.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/v39/protect-private
+          grep -Fq 'HTTP_AUTHORIZATION' /tmp/v39/protect-gateway
+          grep -Fq 'rutahd2_api_ready' /tmp/v39/gateway
+      - name: Reconstruir V38 de producción y fusionar solamente cambios V39
+        run: |
+          set -euo pipefail
+          python3 /tmp/v39back/scripts/ensamblar_deploy_v39.py
+          for path in routes/api.php app/Http/Controllers/EntidadesComercialesControlador.php app/Models/Proveedor.php app/Http/Controllers/BuscadorProductosControlador.php app/Http/Controllers/GirosSiiControlador.php; do
+            php -l "/tmp/v39/after_back/$path"
+          done
+          for file in /tmp/v39/after_front/assets/js/*.js; do node --check "$file"; done
+          grep -Fq 'giros-sii' /tmp/v39/after_back/routes/api.php
+          grep -Fq 'productos/buscador' /tmp/v39/after_back/routes/api.php
+          grep -Fq 'rut-chileno-v39.js' /tmp/v39/after_front/index.html
+          grep -Fq 'hd-branding/logo-hd-site.png' /tmp/v39/after_front/index.html
+          test "$(find /tmp/v39/after_front -type f | wc -l)" -eq 21
+          test "$(find /tmp/v39/after_back -type f | wc -l)" -eq 5
+          echo 'V39 preflight OK: 5 backend, 21 frontend, sin escrituras de producción.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Limpiar comando con contraseña
+        if: always()
+        run: rm -f /tmp/v39/read.lftp

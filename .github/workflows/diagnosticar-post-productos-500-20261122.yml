@@ -1,0 +1,88 @@
+name: Diagnóstico seguro POST /api/v1/productos HTTP 500 (solo lectura)
+on:
+  push:
+    branches: [main]
+    paths:
+      - deployment/solicitudes/diagnosticar-post-productos-500-20261122.txt
+permissions:
+  contents: read
+jobs:
+  diagnostico:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Instalar cliente FTPS sin acceso SQL
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+      - name: Leer registros privados mediante FTPS, sin escribir en el hosting
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          mkdir -p /tmp/hd500
+          cat >/tmp/hd500/leer.lftp <<EOF
+          set cmd:fail-exit no
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/storage/logs/laravel.log -o /tmp/hd500/laravel.log
+          get /htdocs/api-v2/storage/logs/laravel-2026-11-22.log -o /tmp/hd500/laravel-daily.log
+          get /htdocs/api-v2/error_log -o /tmp/hd500/php-errors.log
+          bye
+          EOF
+          lftp -f /tmp/hd500/leer.lftp >/dev/null 2>&1 || true
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          root=Path('/tmp/hd500')
+          logs=[p for p in root.glob('*.log') if p.stat().st_size>0]
+          print('LOGS_ACCESIBLES',len(logs))
+          if not logs:
+              print('SIN_LOGS_ACCESIBLES: no es posible atribuir el 500 sin un registro seguro')
+              raise SystemExit(0)
+          for path in logs:
+              content=path.read_text(errors='replace')
+              # No imprimir líneas originales: pueden contener SQL, SKU o datos personales.
+              raw=content.splitlines()
+              heads=[i for i,line in enumerate(raw) if re.search(r'(?i)(?:production|local)\.ERROR:',line)]
+              print('ARCHIVO',path.name,'BYTES',path.stat().st_size,'EVENTOS',len(heads))
+              scope=heads[-12:]
+              found=0
+              for ix in scope:
+                  chunk='\n'.join(raw[ix:min(ix+100,len(raw))])
+                  is_product=bool(re.search(r'(?:ProductoComercialControlador|GestionListasPrecios|productos_codigos_barra_venta|listas_precios_detalle|presentaciones_productos)',chunk,re.I))
+                  if not is_product: continue
+                  found+=1
+                  headline=raw[ix]
+                  date=re.search(r'\[(\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d)',headline)
+                  sqlstate=re.search(r'SQLSTATE\[([A-Z0-9]+)\]',headline)
+                  vendor=re.search(r'SQLSTATE\[[A-Z0-9]+\]:\s*[^:]*:\s*(\d{3,5})',headline)
+                  error_class=re.search(r'(?:Illuminate\\Database\\QueryException|PDOException|ErrorException|TypeError|RuntimeException|ParseError)',chunk)
+                  missing_col=re.search(r"Unknown column '([a-zA-Z_][a-zA-Z0-9_.]{0,100})'",headline,re.I)
+                  missing_tbl=re.search(r"Table '[^']*\.([a-zA-Z_][a-zA-Z0-9_]{0,100})' doesn't exist",headline,re.I)
+                  notnull=re.search(r"(?:Column|Field) '([a-zA-Z_][a-zA-Z0-9_]{0,100})' (?:cannot be null|doesn't have a default value)",headline,re.I)
+                  dup=re.search(r"Duplicate entry",headline,re.I)
+                  component=re.search(r'(?:app/)?(?:Http/Controllers/ProductoComercialControlador|Services/GestionListasPrecios)\.php\(?[:\d]*',chunk)
+                  print('PRODUCT_ERROR',f'timestamp={date.group(1) if date else "unknown"}',
+                    f'sqlstate={sqlstate.group(1) if sqlstate else "none"}',
+                    f'mysql_code={vendor.group(1) if vendor else "none"}',
+                    f'class={error_class.group(0).split(chr(92))[-1] if error_class else "other"}',
+                    f'missing_column={missing_col.group(1) if missing_col else "none"}',
+                    f'missing_table={missing_tbl.group(1) if missing_tbl else "none"}',
+                    f'not_null_column={notnull.group(1) if notnull else "none"}',
+                    f'duplicate={bool(dup)}',
+                    f'component={component.group(0) if component else "unknown"}')
+              print('EVENTOS_RELACIONADOS_RECIENTES',found)
+          PY
+      - name: Destruir copia temporal de los logs y acceso FTPS
+        if: always()
+        run: rm -rf /tmp/hd500

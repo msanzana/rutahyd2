@@ -70,21 +70,47 @@ jobs:
             ours=(pathlib.Path(directory)/path).read_bytes()
             (root/(out+'.base')).write_bytes(base)
             (root/(out+'.ours')).write_bytes(ours)
-            result=subprocess.run(['git','merge-file','-p',
-              str(root/live),str(root/(out+'.base')),str(root/(out+'.ours'))],
-              capture_output=True)
-            (root/out).write_bytes(result.stdout)
-            if result.returncode:
-              print('CONFLICTO_REAL',path,'estado',result.returncode)
-              if path=='index.html':
-                text=result.stdout.decode('utf-8')
-                lines=text.splitlines()
-                ix=[i for i,s in enumerate(lines) if s.startswith(('<<<<<<<','=======','>>>>>>>'))]
-                selected=sorted(set(j for i in ix for j in range(max(0,i-5),min(len(lines),i+6))))
-                for j in selected[:75]:
-                  print('HTML_CONTEXTO',j+1,lines[j][:240])
-              raise SystemExit('Detener V38: merge conflictivo, sin modificación productiva')
-            merged=result.stdout.decode('utf-8')
+            if path=='index.html':
+              # Parche quirúrgico sobre HTML publicado: conservar identidad de marca,
+              # cache-busting de versiones anteriores y correcciones de producción.
+              live_html=(root/live).read_text('utf-8')
+              target_html=ours.decode('utf-8')
+              marker='            <div class="hd-location-menu" id="ubicacionesMenu">'
+              end_marker='            <button type="button" data-nav="usuarios"'
+              assert target_html.count(marker)==1 and target_html.count(end_marker)==1
+              block=target_html[target_html.index(marker):target_html.index(end_marker)]
+              def patch_once(before,after):
+                global live_html
+                if live_html.count(before)!=1:
+                  raise SystemExit('HTML productivo cambió en ancla de V38 (solo lectura)')
+                live_html=live_html.replace(before,after)
+              old_css='  <link rel="stylesheet" href="assets/css/productos-costo-promedio-v37.css?v=20261122-cost37">'
+              patch_once(old_css,old_css+'\\n'+
+                '  <link rel="stylesheet" href="assets/css/proveedores-ubicaciones-v38.css?v=20261122-geo38">')
+              patch_once(end_marker,block+end_marker)
+              for asset,old,new in [
+                ('catalogos-api.js','v31','geo38'),
+                ('usuarios.js','nav35','geo38'),
+                ('proveedores-productos.js','nav35','geo38'),
+                ('app-produccion.js','nav35','geo38'),
+                ('modulos-oficiales.js','nav35','geo38')]:
+                before=f'assets/js/{asset}?v=20261122-{old}'
+                after=f'assets/js/{asset}?v=20261122-{new}'
+                patch_once(before,after)
+              anchor='  <script src="assets/js/modulos-oficiales.js?v=20261122-geo38" defer></script>'
+              patch_once(anchor,
+                '  <script src="assets/js/ubicaciones.js?v=20261122-geo38" defer></script>\\n'+anchor)
+              merged=live_html
+              (root/out).write_text(merged,encoding='utf-8')
+            else:
+              result=subprocess.run(['git','merge-file','-p',
+                str(root/live),str(root/(out+'.base')),str(root/(out+'.ours'))],
+                capture_output=True)
+              (root/out).write_bytes(result.stdout)
+              if result.returncode:
+                print('CONFLICTO_REAL',path,'estado',result.returncode)
+                raise SystemExit('Detener V38: merge conflictivo, sin modificación productiva')
+              merged=result.stdout.decode('utf-8')
             assert '<<<<<<< ' not in merged and '>>>>>>> ' not in merged
             old=(root/live).read_text('utf-8')
             adds=sum(l.startswith('+') and not l.startswith('+++') for l in

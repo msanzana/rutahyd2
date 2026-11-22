@@ -564,3 +564,12 @@ El titular pidió reemplazar los triggers propuestos por **funciones de backend 
 - Navegador Chromium contra el sitio real en 1440 y 390 px: https://github.com/msanzana/rutahyd2/actions/runs/44988349225 **éxito**. Verifica sección Precios sin presentación antigua, costo editable, caja responsiva sin overflow, selector cliente/producto con tarifa Mayoristas y precio efectivo. Capturas artifact `capturas-precios-v25`.
 - Este smoke usa JWT ficticio e intercepta la API, no confirma datos privados de MariaDB real. Los endpoints auténticos de precios, clientes vendedores y productos vendedores se verificaron por 401 sin JWT. No se ejecutaron ventas de prueba ni nuevos SQL.
 - La fotografía realista para login fue generada como imagen independiente, pero **no se integró todavía en los archivos de frontend publicados**. No confundir imagen creada con pantalla actualizada.
+
+
+### Login fotográfico realista v26 — 22-11-2026
+- Fotografía original de trabajo en ruta/reparto (comercio, repartidor y carga), optimizada a WebP 280×373, ~6,7 KB; embebida como Data URI en `assets/css/login-foto-v26.css` del repositorio `rutahyd2front`. Se carga al final del CSS desde `index.html` con versión `20261122-login26`, sin dependencias de servidor externo.
+- Escritorio: fotografía a todo el alto del panel izquierdo con gradiente violeta y mensaje legible, formulario blanco y logo oficial conservados. Móvil: banner superior de 112–150 px; no se ocultan los campos de acceso.
+- Frontend CI Playwright: 56/56 pruebas aprobadas, incluyendo validación de decodificación WebP y geometría en 1440, 820 y 390 px. https://github.com/msanzana/rutahyd2front/actions/runs/44989018097
+- Publicación FTPS con backup, comparación exacta del nuevo CSS y rollback: https://github.com/msanzana/rutahyd2/actions/runs/44989154999 **éxito**.
+- Smoke Chromium en dominio público: https://github.com/msanzana/rutahyd2/actions/runs/44989332484 **éxito** en 1440 y 390 px; imagen decodificada, sin scroll horizontal, logo, email y contraseña presentes. Evidencias en artifact `capturas-login-fotografico-v26`.
+- No se modificaron DDL, triggers, backend ni datos reales; no se usaron credenciales reales para las pruebas.

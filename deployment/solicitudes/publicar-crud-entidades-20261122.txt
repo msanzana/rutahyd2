@@ -1,0 +1,8 @@
+solicitud=desplegar_controlador_y_rutas_clientes_proveedores_bodegas
+fecha=2026-11-22
+prueba_backend=44969447525-success
+prueba_frontend=44969510463-success
+preflight=verificar_version_rutas_y_guardias
+control=rollback_si_falla
+no_sql=true
+no_firecrawl=true

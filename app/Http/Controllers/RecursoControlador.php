@@ -95,6 +95,24 @@ final class RecursoControlador extends Controller
                     $listas->get((int)$cliente->id)?->nombre??'LISTA BASE');
             });
         }
+        // Domicilio normalizado a partir de ciudad_id; no duplicar FK país/región/comuna.
+        if(in_array($recurso,['clientes','proveedores'],true)){
+            $ids=$filas->getCollection()->pluck('ciudad_id')->filter()->unique()->values()->all();
+            $ubicaciones=empty($ids)?collect():DB::table('ciudades as ci')
+                ->join('comunas as co','co.id','=','ci.comuna_id')
+                ->join('provincias as pr','pr.id','=','co.provincia_id')
+                ->join('regiones as re','re.id','=','pr.region_id')
+                ->join('paises as pa','pa.id','=','re.pais_id')
+                ->whereIn('ci.id',$ids)
+                ->get(['ci.id','ci.nombre as ciudad','co.nombre as comuna_nombre',
+                    'pr.nombre as provincia','re.nombre as region','pa.nombre as pais'])
+                ->keyBy('id');
+            $filas->getCollection()->each(function($row)use($ubicaciones){
+                $l=$ubicaciones->get((int)($row->ciudad_id??0));
+                foreach(['ciudad','comuna_nombre','provincia','region','pais'] as $key)
+                    $row->setAttribute($key,$l?->{$key}??null);
+            });
+        }
         // Nunca devolver hashes de contraseñas ni cuerpos JSON sensibles.
         if ($recurso==='ventas') {
             $filas->getCollection()->makeHidden(['dte_solicitud_json','dte_respuesta_json']);
@@ -107,6 +125,17 @@ final class RecursoControlador extends Controller
         $modelo=$this->obtener($solicitud,$recurso);
         $registro=$modelo->newQuery()->find($id);
         abort_unless($registro,404);
+        if(in_array($recurso,['clientes','proveedores'],true)&&$registro->ciudad_id){
+            $place=DB::table('ciudades as ci')
+                ->join('comunas as co','co.id','=','ci.comuna_id')
+                ->join('provincias as pr','pr.id','=','co.provincia_id')
+                ->join('regiones as re','re.id','=','pr.region_id')
+                ->join('paises as pa','pa.id','=','re.pais_id')
+                ->where('ci.id',$registro->ciudad_id)
+                ->first(['ci.nombre as ciudad','co.nombre as comuna_nombre',
+                    'pr.nombre as provincia','re.nombre as region','pa.nombre as pais']);
+            if($place)foreach((array)$place as $key=>$value)$registro->setAttribute($key,$value);
+        }
         if ($recurso==='ventas') $registro->makeHidden(['dte_solicitud_json','dte_respuesta_json']);
         return response()->json($registro);
     }

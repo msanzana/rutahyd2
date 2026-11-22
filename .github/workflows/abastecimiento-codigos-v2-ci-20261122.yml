@@ -46,6 +46,12 @@ jobs:
           mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/21_catalogos_referencia_semillas.sql
           mysql -N -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='rutahyd2_es_local' AND table_type='BASE TABLE'" | grep -Fxq '50'
           mysql -N -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local -e "SELECT COUNT(*) FROM tipos_codigos_barras" | grep -Fxq '11'
+          # Ejecutar exactamente el SQL22 corregido en la base efímera CI:
+          # reemplazar SOLO el identificador de esquema, nunca usar producción.
+          sed 's/if0_43460400_rutahyd2_es/rutahyd2_es_local/g' database/espanol/22_verificar_abastecimiento_solo_lectura.sql \
+            | mysql -N -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local > /tmp/sql22_resultados.txt
+          grep -Fq '4' /tmp/sql22_resultados.txt
+          grep -Fq 'tipos_codigos_barras' /tmp/sql22_resultados.txt
       - name: Instalar Laravel y compilar rutas protegidas
         env:
           APP_ENV: testing

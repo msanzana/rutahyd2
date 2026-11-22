@@ -110,6 +110,31 @@ try {
     verificarLista((int)$precio->lista_precio_id===$especialId
         && (float)$precio->precio_venta===1500.0,
         'Venta resuelve la lista especial, no precio base');
+    // La venta nunca puede registrar el precio base para un cliente especial.
+    $sellerId=DB::table('usuarios')->orderBy('id')->value('id');
+    verificarLista($sellerId!==null,'Usuario de venta CI disponible');
+    $saleData=[
+        'cliente_id'=>$clienteId,'tipo_dte'=>39,
+        'fecha_emision'=>now()->toDateString(),
+        'documento_receptor'=>'11111111-1',
+        'nombre_receptor'=>'Cliente Tarifas CI',
+        'detalles'=>[[
+            'producto_id'=>$productoId,'cantidad'=>2,
+            'precio_unitario'=>1350,'exento_impuestos'=>false
+        ]]
+    ];
+    try{
+        $app->make(\\App\\Services\\ServicioVenta::class)->crear($saleData,(int)$sellerId);
+        throw new RuntimeException('Venta no debe aceptar tarifa base para cliente especial');
+    }catch(\\Illuminate\\Validation\\ValidationException $e){
+        verificarLista(true,'Precio diferente del asignado rechazado');
+    }
+    $saleData['detalles'][0]['precio_unitario']=1500;
+    $venta=$app->make(\\App\\Services\\ServicioVenta::class)->crear($saleData,(int)$sellerId);
+    verificarLista((float)DB::table('detalles_ventas')
+        ->where('venta_id',$venta->id)->value('precio_unitario')===1500.0,
+        'Venta persiste el precio de la lista especial de este cliente');
+
     $servicio->asignarListaCliente($clienteId,$baseId);
     $precio=$servicio->precioEfectivoCliente($clienteId,$productoId);
     verificarLista((int)$precio->lista_precio_id===$baseId

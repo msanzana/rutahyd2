@@ -1,0 +1,128 @@
+name: Probar regla Apache Authorization en entorno efimero
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/probar-rewrite-authorization-20261122.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 17
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Instalar FTPS y Chromium
+        run: |
+          test -n "$FTP_PASSWORD"
+          sudo apt-get -qq update && sudo apt-get -qq install -y lftp
+          mkdir -p /tmp/rewrite-auth && cd /tmp/rewrite-auth
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Preparar directorio independiente que expira a los 15 minutos
+        run: |
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import secrets,time,pathlib,os
+          dirname='hd_rewrite_'+secrets.token_hex(12)
+          key=secrets.token_hex(32)
+          p=pathlib.Path('/tmp/hd_probe')
+          p.mkdir(exist_ok=True)
+          ht="""Options -Indexes
+          RewriteEngine On
+          RewriteCond %{HTTP:Authorization} .
+          RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+          RewriteRule ^check$ probe.php [L,QSA]
+          """
+          (p/'.htaccess').write_text(ht)
+          php="""<?php
+          ini_set('display_errors','0');
+          header('Content-Type: application/json; charset=utf-8');
+          header('Cache-Control: no-store');
+          if(time()>__EXPIRES__ || ($_SERVER['REQUEST_METHOD']??'')!=='POST'
+            || !hash_equals('__KEY__',(string)($_SERVER['HTTP_X_HD_DIAG']??''))){
+            http_response_code(404);exit;
+          }
+          $expected='Bearer hd-rewrite-test';
+          $direct=(string)($_SERVER['HTTP_AUTHORIZATION']??'');
+          $redirect=(string)($_SERVER['REDIRECT_HTTP_AUTHORIZATION']??'');
+          $redirect2=(string)($_SERVER['REDIRECT_REDIRECT_HTTP_AUTHORIZATION']??'');
+          echo json_encode(['direct'=>hash_equals($expected,$direct),
+            'redirect'=>hash_equals($expected,$redirect),
+            'redirect2'=>hash_equals($expected,$redirect2)]);
+          """
+          php=php.replace('__EXPIRES__',str(int(time.time()+900))).replace('__KEY__',key)
+          (p/'probe.php').write_text(php)
+          with open(os.environ['GITHUB_ENV'],'a') as output:
+            output.write('PROBE_DIR='+dirname+'\nPROBE_KEY='+key+'\n')
+          PY
+          php -l /tmp/hd_probe/probe.php
+      - name: Subir carpeta temporal protegida por clave
+        run: |
+          set +x
+          cat >/tmp/rewrite-upload.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          mkdir "/htdocs/$PROBE_DIR"
+          put /tmp/hd_probe/.htaccess -o "/htdocs/$PROBE_DIR/.htaccess"
+          put /tmp/hd_probe/probe.php -o "/htdocs/$PROBE_DIR/probe.php"
+          bye
+          EOF
+          lftp -f /tmp/rewrite-upload.lftp >/dev/null
+      - name: Verificar transporte en ruta reescrita sin credenciales reales
+        working-directory: /tmp/rewrite-auth
+        run: |
+          set +x
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try {
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:45000});
+            await page.waitForTimeout(12000);
+            const result=await page.evaluate(async({dir,key})=>{
+              async function probe(path){
+                const resp=await fetch('/'+dir+'/'+path,{
+                  method:'POST',cache:'no-store',credentials:'same-origin',
+                  headers:{Accept:'application/json',Authorization:'Bearer hd-rewrite-test','X-HD-Diag':key}
+                });
+                const data=(resp.headers.get('content-type')||'').includes('json')?await resp.json():{};
+                return {http:resp.status,direct:data.direct===true,
+                  redirect:data.redirect===true,redirect2:data.redirect2===true};
+              }
+              return {rewritten:await probe('check'),direct:await probe('probe.php')};
+            },{dir:process.env.PROBE_DIR,key:process.env.PROBE_KEY});
+            console.log('REWRITE_AUTH_DIAGNOSTIC',JSON.stringify(result));
+            if(result.rewritten.http!==200||result.direct.http!==200)process.exitCode=1;
+          }finally{await browser.close();}
+          JS
+      - name: Eliminar directorio temporal
+        if: always()
+        run: |
+          set +x
+          if [ -n "$PROBE_DIR" ]; then
+            cat >/tmp/rewrite-remove.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          rm "/htdocs/$PROBE_DIR/probe.php"
+          rm "/htdocs/$PROBE_DIR/.htaccess"
+          rmdir "/htdocs/$PROBE_DIR"
+          bye
+          EOF
+            lftp -f /tmp/rewrite-remove.lftp >/dev/null || echo "::warning::No se pudo confirmar eliminación; verifique la carpeta temporal."
+          fi
+          rm -f /tmp/rewrite-*.lftp
+          echo 'No se cambiaron autenticación productiva, .env, tokens ni MariaDB.' >> "$GITHUB_STEP_SUMMARY"

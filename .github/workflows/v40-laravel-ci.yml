@@ -1,0 +1,27 @@
+name: V40 - comprobacion backend mix en lote sin SQL
+on:
+  push:
+    branches: [feature/v40-mix-proveedor-seleccion-multiple-20261122]
+    paths:
+      - app/Http/Controllers/ProductosProveedoresControlador.php
+      - routes/api.php
+      - .github/workflows/v40-laravel-ci.yml
+permissions:
+  contents: read
+jobs:
+  verificar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sintaxis y invariantes de operación atómica
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/ProductosProveedoresControlador.php
+          php -l routes/api.php
+          grep -Fq "function crearLote" app/Http/Controllers/ProductosProveedoresControlador.php
+          grep -Fq "DB::transaction" app/Http/Controllers/ProductosProveedoresControlador.php
+          grep -Fq "'max:50'" app/Http/Controllers/ProductosProveedoresControlador.php
+          grep -Fq "Route::post('/proveedores-productos/lote'" routes/api.php
+          grep -Fq 'proveedores_productos,gestionar' routes/api.php
+          echo 'Validaciones Laravel V40 OK. No se ejecutó SQL de escritura.'

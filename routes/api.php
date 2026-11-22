@@ -10,6 +10,8 @@ use App\Http\Controllers\InventarioControlador;
 use App\Http\Controllers\CatalogoComercialControlador;
 use App\Http\Controllers\ClasificacionProductoControlador;
 use App\Http\Controllers\ProductoComercialControlador;
+use App\Http\Controllers\ProductosProveedoresControlador;
+use App\Http\Controllers\CodigosBarrasProductoControlador;
 use App\Http\Controllers\PerfilesCatalogosControlador;
 use App\Http\Controllers\UsuariosControlador;
 use App\Http\Controllers\RecuperacionContrasenaControlador;
@@ -35,6 +37,39 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::delete('/productos/{id}',[ProductoComercialControlador::class,'desactivar'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
     Route::get('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'ver'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
     Route::patch('/productos/{id}/clasificacion',[ClasificacionProductoControlador::class,'guardar'])->middleware('permiso.rutahd:productos.gestionar')->whereNumber('id');
+
+    // Catálogo de productos de cada proveedor. No modifica inventario, costos históricos ni recepciones.
+    Route::get('/proveedores-productos',[ProductosProveedoresControlador::class,'listar'])
+        ->middleware('permiso.rutahd:compras.gestionar');
+    Route::post('/proveedores-productos',[ProductosProveedoresControlador::class,'crear'])
+        ->middleware('permiso.rutahd:compras.gestionar');
+    Route::get('/proveedores-productos/{id}',[ProductosProveedoresControlador::class,'ver'])
+        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+    Route::put('/proveedores-productos/{id}',[ProductosProveedoresControlador::class,'actualizar'])
+        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+    Route::delete('/proveedores-productos/{id}',[ProductosProveedoresControlador::class,'desactivar'])
+        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+
+    // Cada relación proveedor-producto posee códigos de identificación de compra.
+    Route::get('/proveedores-productos/{vinculoId}/codigos-compra',[CodigosBarrasProductoControlador::class,'listarCompra'])
+        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('vinculoId');
+    Route::post('/proveedores-productos/{vinculoId}/codigos-compra',[CodigosBarrasProductoControlador::class,'crearCompra'])
+        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('vinculoId');
+    Route::put('/proveedores-productos/{vinculoId}/codigos-compra/{id}',[CodigosBarrasProductoControlador::class,'actualizarCompra'])
+        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('vinculoId')->whereNumber('id');
+    Route::delete('/proveedores-productos/{vinculoId}/codigos-compra/{id}',[CodigosBarrasProductoControlador::class,'desactivarCompra'])
+        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('vinculoId')->whereNumber('id');
+
+    // Venta: producto + tipo EAN/DUN/CODE + código y unidades. Nunca hay proveedor.
+    Route::get('/productos/{productoId}/codigos-venta',[CodigosBarrasProductoControlador::class,'listarVenta'])
+        ->middleware('permiso.rutahd:productos.gestionar')->whereNumber('productoId');
+    Route::post('/productos/{productoId}/codigos-venta',[CodigosBarrasProductoControlador::class,'crearVenta'])
+        ->middleware('permiso.rutahd:productos.gestionar')->whereNumber('productoId');
+    Route::put('/productos/{productoId}/codigos-venta/{id}',[CodigosBarrasProductoControlador::class,'actualizarVenta'])
+        ->middleware('permiso.rutahd:productos.gestionar')->whereNumber('productoId')->whereNumber('id');
+    Route::delete('/productos/{productoId}/codigos-venta/{id}',[CodigosBarrasProductoControlador::class,'desactivarVenta'])
+        ->middleware('permiso.rutahd:productos.gestionar')->whereNumber('productoId')->whereNumber('id');
+
     Route::get('/perfiles/catalogos',[PerfilesCatalogosControlador::class,'listar']);
     Route::get('/perfiles/usuarios',[PerfilesCatalogosControlador::class,'usuarios']);
     Route::get('/usuarios',[UsuariosControlador::class,'index']);

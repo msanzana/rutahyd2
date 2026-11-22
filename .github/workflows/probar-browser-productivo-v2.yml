@@ -91,6 +91,8 @@ jobs:
             await page.close();
             // Comprobar el enlace de recuperación sin enviar contraseña ni consumir token.
             const recoveryPage=await browser.newPage({locale:'es-CL'});
+            recoveryPage.on('pageerror',e=>console.log('ERROR_RECUPERACION_JS',e.message));
+            recoveryPage.on('console',m=>{if(m.type()==='error')console.log('ERROR_CONSOLA_RECUPERACION',m.text().slice(0,320));});
             await recoveryPage.goto(endpoint+'#recuperar?token='+'a'.repeat(64),{
               waitUntil:'domcontentloaded',timeout:45000
             });
@@ -100,7 +102,13 @@ jobs:
               loginVisible:document.querySelector('#loginDialog')?.open===true,
               hasPassword:!!document.querySelector('#recovery-password'),
               tokenInUrl:location.hash.includes('token='),
-              officialStyle:getComputedStyle(document.querySelector('.recovery-layout')||document.body).display
+              officialStyle:getComputedStyle(document.querySelector('.recovery-layout')||document.body).display,
+              location:location.href.replace(/token=[a-f0-9]{64}/i,'token=[REDACTED]'),
+              script:!!document.querySelector('script[src*="recuperacion.js"]'),
+              available:typeof window.RutaHDRecuperacion,
+              active:window.RutaHDRecuperacion?.isActive?.(),
+              dialogCount:document.querySelectorAll('dialog[open]').length,
+              loginStart:document.body.dataset.loginStart
             }));
             console.log('RECUPERACION_PRODUCCION',JSON.stringify(recovery));
             if(!recovery.visible||recovery.loginVisible||!recovery.hasPassword||

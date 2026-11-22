@@ -1,0 +1,167 @@
+name: Publicar catálogos seguros para vendedores (precios v25)
+on:
+  push:
+    branches: [main]
+    paths: [deployment/solicitudes/publicar-selectores-ventas-v25.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 21
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BEFORE_SHA: 4aee794027f79d2bb4fb11012ba920cd14a85d35
+      AFTER_SHA: 282a558fbc2f4a44521018c18106286676e24afe
+      OLD_BASE: 88635dae023c2507a5c80b475b4fa7b6958984bb
+    steps:
+      - name: Generar diff mínimo de catálogos de venta
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          git clone --depth 1 --branch feature/proveedores-productos-barcodes-20261122 https://github.com/msanzana/rutahyd2.git /tmp/hdsource
+          test "$(git -C /tmp/hdsource rev-parse HEAD)" = "$AFTER_SHA"
+          git -C /tmp/hdsource fetch -q --depth 1 origin "$BEFORE_SHA" "$OLD_BASE"
+          mkdir -p /tmp/sale25
+          git -C /tmp/hdsource show "$BEFORE_SHA:app/Http/Controllers/ListasPreciosClientesControlador.php" > /tmp/sale25/controller_before.php
+          cp /tmp/hdsource/app/Http/Controllers/ListasPreciosClientesControlador.php /tmp/sale25/controller_after.php
+          git -C /tmp/hdsource show "$BEFORE_SHA:routes/api.php" > /tmp/sale25/old_branch_routes.php
+          git -C /tmp/hdsource show "$OLD_BASE:routes/api.php" > /tmp/sale25/base_routes.php
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/sale25')
+          origin=(p/'base_routes.php').read_text()
+          old=(p/'old_branch_routes.php').read_text()
+          new=Path('/tmp/hdsource/routes/api.php').read_text()
+          marker='use App\\Http\\Controllers\\ProductoComercialControlador;'
+          for imp in ['use App\\Http\\Controllers\\ListasPreciosControlador;',
+                      'use App\\Http\\Controllers\\ListasPreciosClientesControlador;']:
+              assert marker in origin and imp not in origin
+              origin=origin.replace(marker,marker+'\n'+imp)
+          start=old.index('    // Listas de precios: precio base y listas especiales.')
+          stop=old.index('    // Catálogo de productos de cada proveedor.',start)
+          addition=old[start:stop]
+          place='    // Catálogo de productos de cada proveedor.'
+          assert place in origin
+          origin=origin.replace(place,addition+place)
+          (p/'routes_before.php').write_text(origin)
+          newLines='''    Route::get('/ventas/clientes-disponibles',[ListasPreciosClientesControlador::class,'clientesVenta']);
+              Route::get('/ventas/productos-disponibles',[ListasPreciosClientesControlador::class,'productosVenta']);
+          '''.replace('              Route','    Route').rstrip()+'\n'
+          anchor="    Route::get('/ventas/precio-cliente',[ListasPreciosClientesControlador::class,'cotizar']);"
+          assert anchor in origin and anchor in new
+          assert newLines.strip() in new
+          (p/'routes_after.php').write_text(origin.replace(anchor,newLines+anchor))
+          PY
+          for file in /tmp/sale25/*.php; do php -l "$file"; done
+          grep -Fq 'clientes-disponibles' /tmp/sale25/routes_after.php
+          grep -Fq 'productos-disponibles' /tmp/sale25/routes_after.php
+          ! grep -Fq 'submodulo.rutahd' /tmp/sale25/routes_after.php
+      - name: Instalar FTPS y Chromium
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          mkdir -p /tmp/sale25/browser && cd /tmp/sale25/browser
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+      - name: Respaldar y exigir contenido exacto de producción
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          cat >/tmp/sale25/get.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          set net:timeout 45
+          set net:max-retries 2
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/routes/api.php -o /tmp/sale25/remote_routes_before.php
+          get /htdocs/api-v2/app/Http/Controllers/ListasPreciosClientesControlador.php -o /tmp/sale25/remote_controller_before.php
+          bye
+          EOF
+          lftp -f /tmp/sale25/get.lftp >/dev/null
+          cmp -s /tmp/sale25/routes_before.php /tmp/sale25/remote_routes_before.php ||
+            { echo "::error::Rutas productivas distintas de la versión documentada"; exit 1; }
+          cmp -s /tmp/sale25/controller_before.php /tmp/sale25/remote_controller_before.php ||
+            { echo "::error::Controlador remoto cambiado; no sobrescribir"; exit 1; }
+      - name: Publicar únicamente dos archivos
+        run: |
+          set -euo pipefail
+          set +x
+          touch /tmp/sale25/upload_started
+          cat >/tmp/sale25/put.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/sale25/controller_after.php -o /htdocs/api-v2/app/Http/Controllers/ListasPreciosClientesControlador.php
+          put /tmp/sale25/routes_after.php -o /htdocs/api-v2/routes/api.php
+          bye
+          EOF
+          lftp -f /tmp/sale25/put.lftp >/dev/null
+      - name: Comprobar bytes y que los tres GET exigen JWT
+        run: |
+          set -euo pipefail
+          set +x
+          cat >/tmp/sale25/verify.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          get /htdocs/api-v2/routes/api.php -o /tmp/sale25/remote_routes_after.php
+          get /htdocs/api-v2/app/Http/Controllers/ListasPreciosClientesControlador.php -o /tmp/sale25/remote_controller_after.php
+          bye
+          EOF
+          lftp -f /tmp/sale25/verify.lftp >/dev/null
+          cmp -s /tmp/sale25/routes_after.php /tmp/sale25/remote_routes_after.php
+          cmp -s /tmp/sale25/controller_after.php /tmp/sale25/remote_controller_after.php
+          cd /tmp/sale25/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const b=await chromium.launch();
+          try{
+            const page=await b.newPage();
+            await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:55000});
+            const statuses=await page.evaluate(async()=>{
+              const qs=['ventas/clientes-disponibles',
+                'ventas/productos-disponibles?cliente_id=1',
+                'ventas/precio-cliente?cliente_id=1&producto_id=1'];
+              return await Promise.all(qs.map(async name=>{
+                const res=await fetch('/api/v1/'+name,{headers:{Accept:'application/json'},cache:'no-store'});
+                return {name,status:res.status};
+              }));
+            });
+            console.log('SALES_PRICE25_SECURITY',JSON.stringify(statuses));
+            if(statuses.some(x=>x.status!==401))throw Error('Alguna consulta no exige token');
+          }finally{await b.close();}
+          JS
+      - name: Restaurar dos archivos anteriores si falla
+        if: failure()
+        run: |
+          set +x
+          if [ -f /tmp/sale25/upload_started ] && [ -s /tmp/sale25/remote_routes_before.php ]; then
+            cat >/tmp/sale25/rollback.lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open -u "$FTP_USER","$FTP_PASSWORD" ftp://$FTP_HOST
+          put /tmp/sale25/remote_controller_before.php -o /htdocs/api-v2/app/Http/Controllers/ListasPreciosClientesControlador.php
+          put /tmp/sale25/remote_routes_before.php -o /htdocs/api-v2/routes/api.php
+          bye
+          EOF
+            lftp -f /tmp/sale25/rollback.lftp >/dev/null || echo "::error::Revisar restauración manual"
+          fi
+      - name: Limpiar runner
+        if: always()
+        run: |
+          rm -rf /tmp/sale25 /tmp/hdsource

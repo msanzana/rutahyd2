@@ -172,13 +172,15 @@ jobs:
             request=urllib.request.Request('https://rutahyd2.free.nf'+path,
               headers={'Accept':'application/json','User-Agent':'Mozilla/5.0'})
             try:
-              with urllib.request.urlopen(request,timeout=20) as r:code=r.status
-            except urllib.error.HTTPError as e:code=e.code
+              with urllib.request.urlopen(request,timeout=20) as r:
+                code=r.status;ctype=r.headers.get('Content-Type','')
+            except urllib.error.HTTPError as e:
+              code=e.code;ctype=e.headers.get('Content-Type','')
             except Exception as e:
               print('::warning::SMOKE_NO_CONCLUYENTE',path,type(e).__name__);continue
-            print('V43_SMOKE_PUBLICO',path,code)
-            if code in [502,503,504,403]:
-              print('::warning::HTTP alojamiento/intermediario inconcluso');continue
+            print('V43_SMOKE_PUBLICO',path,code,'json' if 'json' in ctype else 'no-json')
+            if code in [502,503,504,403] or 'json' not in ctype.lower():
+              print('::warning::Respuesta de intermediario/no JSON, smoke inconcluso');continue
             if path.endswith('/estado') and code!=200:
               raise RuntimeError('API estado falló tras publicación')
             if path.endswith('/mix') and code!=401:

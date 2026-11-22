@@ -24,7 +24,7 @@ jobs:
           grep -Fq "Route::get('/giros-sii'" routes/api.php
           grep -Fq "Rule::exists('giros_sii','codigo')" app/Http/Controllers/EntidadesComercialesControlador.php
           ! grep -Fq "'correo_dte'" app/Http/Controllers/EntidadesComercialesControlador.php
-          php -r 'require "app/Support/RutChileno.php"; use App\Support\RutChileno; assert(RutChileno::normalizar("12.345.678-5")==="12345678-5"); assert(RutChileno::normalizar("12345678-0")===null); echo "RUT DV OK\n";'
+          php -r 'require "app/Support/RutChileno.php"; if(\App\Support\RutChileno::normalizar("12.345.678-5")!=="12345678-5" || \App\Support\RutChileno::normalizar("12345678-0")!==null) {fwrite(STDERR,"RUT MOD11 fallo\n");exit(1);} echo "RUT DV OK\n";'
       - name: 'Semillas oficiales: 674 giros sin duplicados y con ceros iniciales'
         run: |
           python3 - <<'PY'

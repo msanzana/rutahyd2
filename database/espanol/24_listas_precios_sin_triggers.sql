@@ -99,7 +99,7 @@ WHERE rel.cliente_id IS NULL;
 INSERT INTO listas_precios_detalle
   (lista_precio_id,producto_id,sku,costo,margen_porcentaje,precio_venta,activo)
 SELECT b.id,p.id,p.sku,p.costo_neto,
-       CASE WHEN p.costo_neto > 0
+       CASE WHEN p.costo_neto > 0 AND COALESCE(pr.precio_neto,0) >= p.costo_neto
             THEN ROUND(((COALESCE(pr.precio_neto,0) - p.costo_neto) / p.costo_neto) * 100,4)
             ELSE NULL END,
        COALESCE(pr.precio_neto,0),p.activo

@@ -40,21 +40,23 @@ jobs:
           assert 'src="assets/js/app-produccion.js"' in s
           assert 'src="assets/js/login-produccion.js"' in s
           assert 'assets/css/produccion.css' in s
+          assert '<meta name="referrer" content="no-referrer">' in s
+          assert 'src="assets/js/recuperacion.js"' in s
           assert 'src="assets/js/catalogos.js"' not in s
           assert 'src="assets/js/app.js"' not in s
           assert 'assets/js/modulos-oficiales.js' in s
           assert 'assets/css/menu-oficial.css' in s
           assert s.count('assets/img/prueba-rutahd2.webp')==3
           # El servidor publica el PNG oficial desde /hd-branding. No reponer WebP ausente.
-          s=s.replace('assets/img/prueba-rutahd2.webp','hd-branding/logo-hd-site.png?v=20261121-prod13')
-          assert s.count('hd-branding/logo-hd-site.png?v=20261121-prod13')==3
-          s=s.replace('href="assets/css/app.css"','href="assets/css/app.css?v=20261121-prod13"')
-          s=s.replace('correcciones-ui.css?v=20261121-1','correcciones-ui.css?v=20261121-prod13')
-          s=s.replace('menu-oficial.css?v=20261121-2','menu-oficial.css?v=20261121-prod13')
-          s=s.replace('produccion.css?v=20261121-1','produccion.css?v=20261121-prod13')
-          s=re.sub(r'src="assets/js/([a-z-]+)\.js"',r'src="assets/js/\1.js?v=20261121-prod13"',s)
-          assert s.count('src="assets/js/login-produccion.js?v=20261121-prod13"')==1
-          assert s.count('src="assets/js/app-produccion.js?v=20261121-prod13"')==1
+          s=s.replace('assets/img/prueba-rutahd2.webp','hd-branding/logo-hd-site.png?v=20261121-prod14')
+          assert s.count('hd-branding/logo-hd-site.png?v=20261121-prod14')==3
+          s=s.replace('href="assets/css/app.css"','href="assets/css/app.css?v=20261121-prod14"')
+          s=s.replace('correcciones-ui.css?v=20261121-1','correcciones-ui.css?v=20261121-prod14')
+          s=s.replace('menu-oficial.css?v=20261121-2','menu-oficial.css?v=20261121-prod14')
+          s=s.replace('produccion.css?v=20261121-1','produccion.css?v=20261121-prod14')
+          s=re.sub(r'src="assets/js/([a-z-]+)\.js"',r'src="assets/js/\1.js?v=20261121-prod14"',s)
+          assert s.count('src="assets/js/login-produccion.js?v=20261121-prod14"')==1
+          assert s.count('src="assets/js/app-produccion.js?v=20261121-prod14"')==1
           Path('/tmp/release_index.html').write_text(s,'utf-8')
           Path('/tmp/redirect_violeta.html').write_text(
             '<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Ruta H&D2 · Producción</title>'
@@ -153,7 +155,7 @@ jobs:
           cmp -s /tmp/front/assets/css/produccion.css /tmp/css_after.css
           cmp -s /tmp/guard_before /tmp/guard_after
           echo "Frontend productivo SHA: $FRONTEND_SHA" >> "$GITHUB_STEP_SUMMARY"
-          echo 'Login JWT exclusivo, recuperación segura y diseño corporativo desplegados; backend y MariaDB intactos.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Recuperación con enlaces query compatibles InfinityFree, no-referrer y diseño H&D; backend y MariaDB intactos.' >> "$GITHUB_STEP_SUMMARY"
       - name: Restaurar archivos originales ante cualquier fallo
         if: failure()
         run: |

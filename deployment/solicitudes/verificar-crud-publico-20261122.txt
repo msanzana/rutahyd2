@@ -1,0 +1,6 @@
+smoke=frontend_clientes_proveedores_bodegas_y_api_jwt
+frontend_deployment=44969783478
+backend_deployment=44969647774
+sin_credenciales=true
+sin_sql=true
+sin_firecrawl=true

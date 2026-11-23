@@ -16,6 +16,7 @@ final class OrdenCompra extends Model
         'numero',
         'proveedor_id',
         'estado',
+        'estado_id',
         'solicitada_en',
         'recibida_en',
         'subtotal_neto',
@@ -36,6 +37,11 @@ final class OrdenCompra extends Model
             'creado_en' => 'date',
             'actualizado_en' => 'date',
         ];
+    }
+
+    public function estadoCatalogo(): BelongsTo
+    {
+        return $this->belongsTo(Estado::class,'estado_id');
     }
 
     public function proveedor(): BelongsTo

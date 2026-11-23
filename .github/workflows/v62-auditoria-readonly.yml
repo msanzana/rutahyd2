@@ -1,0 +1,119 @@
+name: V62 - Auditoria FTPS menu y costos OC sin escrituras
+on:
+  push:
+    branches: [audit/v62-menu-costo-oc-readonly-20261123]
+    paths: [.github/workflows/v62-auditoria-readonly.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  auditar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACK_BASE: 1ba12964b95d62e965d946210e14b7a59ad74048
+      BACK_PIN: d98763fe7b74b469287e755cf687cfd8d7e807ff
+      FRONT_BASE: 2d47db15e5ceae0ef2c919ea176ded2dfc65b3a4
+      FRONT_PIN: 6d5dbebb713a1d4637c6899b5c1d9cea499b1670
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar fuentes congeladas, FTPS seguro
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp >/dev/null
+          git fetch -q --depth=1 origin "$BACK_BASE" "$BACK_PIN"
+          git clone -q --depth=1 --branch fix/v62-menu-primer-subitem-costo-oc-20261123 https://github.com/msanzana/rutahyd2front.git /tmp/v62front
+          git -C /tmp/v62front fetch -q --depth=1 origin "$FRONT_BASE" "$FRONT_PIN"
+          git -C /tmp/v62front checkout -q --detach "$FRONT_PIN"
+          test "$(git -C /tmp/v62front rev-parse HEAD)" = "$FRONT_PIN"
+          umask 077
+          mkdir -p /tmp/v62audit/before
+      - name: Descargar 6 archivos y 4 protecciones (solo GET)
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v62audit')
+          files={
+           'index.html':'/htdocs/index.html',
+           'assets/js/app-produccion.js':'/htdocs/assets/js/app-produccion.js',
+           'assets/js/catalogos-api.js':'/htdocs/assets/js/catalogos-api.js',
+           'assets/js/ordenes-compra-v55.js':'/htdocs/assets/js/ordenes-compra-v55.js',
+           'routes/api.php':'/htdocs/api-v2/routes/api.php',
+           'app/Http/Controllers/OrdenesCompraControlador.php':
+             '/htdocs/api-v2/app/Http/Controllers/OrdenesCompraControlador.php',
+           'root.guard':'/htdocs/.htaccess',
+           'api.guard':'/htdocs/api/.htaccess',
+           'private.guard':'/htdocs/api-v2/.htaccess',
+           'gateway.guard':'/htdocs/api/index.php'
+          }
+          (p/'manifest.txt').write_text(''.join(k+'\t'+v+'\n' for k,v in files.items()))
+          with (p/'read.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name,remote in files.items():
+              dst=p/'before'/name;dst.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+remote+' -o '+str(dst),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v62audit/read.lftp >/dev/null 2>/tmp/v62audit/read-errors.log
+          rm -f /tmp/v62audit/read.lftp
+      - name: Verificar HTML y parche exacto sobre producción
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os,subprocess,hashlib
+          p=Path('/tmp/v62audit');b=p/'before'
+          html=(b/'index.html').read_text()
+          for key in ['v53-cache-20261123','app-produccion.js?v=20261123-v55',
+            'catalogos-api.js?v=20261123-v59',
+            'ordenes-compra-v55.js?v=20261123-v61',
+            'ordenes-compra-v55.css?v=20261123-v59',
+            'select-buscable-v56.js?v=20261123-v56',
+            'clientes-v50.css?v=20261123-v52']:
+            assert html.count(key)==1,'HTML previo divergente: '+key
+          assert 'no-store, no-cache' in (b/'root.guard').read_text()
+          assert 'HTTP_AUTHORIZATION' in (b/'api.guard').read_text()
+          assert 'Require all denied' in (b/'private.guard').read_text()
+          assert 'rutahd2_api_ready' in (b/'gateway.guard').read_text()
+          for line in (p/'manifest.txt').read_text().splitlines():
+            name,_=line.split('\t',1)
+            data=(b/name).read_bytes()
+            print('V62_REMOTE_SHA',name,hashlib.sha256(data).hexdigest(),len(data))
+          for repo,base,pin,paths in [
+            ('/tmp/v62front',os.environ['FRONT_BASE'],os.environ['FRONT_PIN'],
+              ['assets/js/app-produccion.js','assets/js/catalogos-api.js',
+               'assets/js/ordenes-compra-v55.js']),
+            (os.environ['GITHUB_WORKSPACE'],os.environ['BACK_BASE'],os.environ['BACK_PIN'],
+              ['routes/api.php','app/Http/Controllers/OrdenesCompraControlador.php'])
+          ]:
+            for name in paths:
+              patch=subprocess.run(['git','-C',repo,'diff','--no-ext-diff','--binary',
+                base,pin,'--',name],capture_output=True,check=True).stdout
+              assert patch.count(b'diff --git')==1,'Falta parche '+name
+              check=subprocess.run(['patch','--batch','--fuzz=0','--dry-run',
+                '-p1','-d',str(b)],input=patch,capture_output=True)
+              print('V62_PATCH_PREFLIGHT',name,
+                'OK' if check.returncode==0 else 'CONFLICT')
+              if check.returncode:
+                print(check.stdout.decode(errors='replace')[:1000])
+                raise RuntimeError('No sobrescribir diferencias en '+name)
+          print('V62_FTPS_READONLY_OK')
+          PY
+      - name: Destruir scripts con secreto
+        if: always()
+        run: rm -f /tmp/v62audit/*.lftp

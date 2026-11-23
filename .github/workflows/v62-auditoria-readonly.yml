@@ -19,7 +19,7 @@ jobs:
       BACK_BASE: 1ba12964b95d62e965d946210e14b7a59ad74048
       BACK_PIN: d98763fe7b74b469287e755cf687cfd8d7e807ff
       FRONT_BASE: 2d47db15e5ceae0ef2c919ea176ded2dfc65b3a4
-      FRONT_PIN: 6d5dbebb713a1d4637c6899b5c1d9cea499b1670
+      FRONT_PIN: da33af03e7f6d6521cef19b6daceb3777a43bcb7
     steps:
       - uses: actions/checkout@v4
       - name: Preparar fuentes congeladas, FTPS seguro

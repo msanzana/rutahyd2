@@ -1,1 +1,3 @@
 Ruta H&D V52, 23-11-2026. Frontend prueba Chromium Playwright 45099678876 success (Código Automatico/ID, giro EMPRESA solo, paginadores numerados GIROS/productos) y backend Laravel/MySQL temporal 45099435780 success. Sin DDL, MySQL metadata restringida ni POST productivo. Autorizada publicación selectiva por FTPS de 13 archivos previstos (11 frontend JS/CSS, 1 backend PHP, index final) con backup antes, patch --fuzz=0, checksum FTP, guardas y rollback. Mantener V48-V51. Pin front 80dfdbdca7f347863950166500d9b0de9d499f89 y back a60307b8dab65fc99bbb40927b2809d55066afc1. Si diff remoto no coincide, detener sin alterar producción.
+
+Preflight read-only con impresión de versiones JS/CSS reales para corregir etiquetas sin sobrescribir; no hubo subida en primer intento.

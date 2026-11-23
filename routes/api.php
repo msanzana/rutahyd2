@@ -51,6 +51,8 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
         ->middleware('throttle:120,1');
     // V55: Orden de compra y catálogo de estados, con permisos Compras existentes.
     // El estado no se modifica vía PUT: solo cancelación explícita o futura recepción.
+    Route::get('/ordenes-compra/proveedores',[OrdenesCompraControlador::class,'proveedores'])
+        ->middleware('permiso.rutahd:compras.gestionar');
     Route::get('/ordenes-compra/estados',[OrdenesCompraControlador::class,'estados'])
         ->middleware('permiso.rutahd:compras.gestionar');
     Route::get('/ordenes-compra',[OrdenesCompraControlador::class,'listar'])

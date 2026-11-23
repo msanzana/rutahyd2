@@ -37,7 +37,7 @@ function statusCode(int $want,array $got,string $label): array {
 try{
  assertOk(DB::getDatabaseName()==='rutahyd2_es_local',
     'PROHIBIDO EJECUTAR EN PRODUCCIÓN');
- assertOk(DB::getSchemaBuilder()->hasTable('restablecimientos_contrasena'),'Falta SQL18');
+ assertOk(count(DB::select("SHOW TABLES LIKE 'restablecimientos_contrasena'"))===1,'Falta SQL18');
  $adminRole=(int)DB::table('roles')->where('codigo','administrador')->value('id');
  $role=(int)DB::table('roles')->where('codigo','vendedor')->value('id');
  statusCode(401,reqApi('GET','/api/v1/usuarios'),'Anónimo');

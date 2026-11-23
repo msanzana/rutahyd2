@@ -1,0 +1,246 @@
+name: V60 - Publicar encabezado PDF OC FTPS
+on:
+  push:
+    branches: [deploy/v60-pdf-oc-encabezado-ftps-20261123]
+    paths: [.github/workflows/v60-publicar-pdf-oc-ftps.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  desplegar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACK_BASE: b8300121cec9a2b7a869a722fef12b73a7012b00
+      BACK_PIN: 1ba12964b95d62e965d946210e14b7a59ad74048
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar tres archivos de origen sin leer credenciales del sitio
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp php-cli >/dev/null
+          git fetch -q --depth=1 origin "$BACK_BASE" "$BACK_PIN"
+          umask 077
+          mkdir -p /tmp/v60deploy/{before,after,check}
+
+      - name: Obtener respaldo V59 FTPS y protecciones (solo GET)
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p=Path('/tmp/v60deploy')
+          files={
+            'app/Services/PdfOrdenCompra.php':'/htdocs/api-v2/app/Services/PdfOrdenCompra.php',
+            'app/Http/Controllers/OrdenesCompraControlador.php':
+              '/htdocs/api-v2/app/Http/Controllers/OrdenesCompraControlador.php',
+            'config/rutahd.php':'/htdocs/api-v2/config/rutahd.php',
+            'root.guard':'/htdocs/.htaccess',
+            'api.guard':'/htdocs/api/.htaccess',
+            'private.guard':'/htdocs/api-v2/.htaccess',
+            'gateway.guard':'/htdocs/api/index.php'
+          }
+          (p/'manifest.txt').write_text(''.join(k+'\t'+v+'\n' for k,v in files.items()))
+          with (p/'read.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name,remote in files.items():
+              target=p/'before'/name
+              target.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+remote+' -o '+str(target),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v60deploy/read.lftp >/dev/null 2>/tmp/v60deploy/read-errors.log
+          rm -f /tmp/v60deploy/read.lftp
+
+      - name: Preflight SHA productivos, parches estrictos y sintaxis
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,os,shutil,subprocess
+          p=Path('/tmp/v60deploy');b=p/'before'
+          expected={
+            'app/Services/PdfOrdenCompra.php':'22b0ba4fbeea7138a1c614f2f16b6e1a6b332b943b9947f041ac739ba159a866',
+            'app/Http/Controllers/OrdenesCompraControlador.php':'fe28e23617628587b5364bc7c9d5f23aeee4189b56622edbb7191c2f0c63474a',
+            'config/rutahd.php':'cc478f4d4b3c0a7f124ae11ed94b2e42c96f7984b0e5b71fafed2ed80f93a10f',
+            'root.guard':'a6cbd7462dc5a8492cbdb15e406ad5058557f616375380b813dcf8d24ed47d1e',
+            'api.guard':'ae0248cbcc21787c4595995a9cf76fd8c2edf34bb90cb1051820fc830bde9706',
+            'private.guard':'f19e0a6ec4db41ce29fa249819d1121707608a25e2f697f023d94788f9751a0b',
+            'gateway.guard':'37b5ad7eabd2d7a9ba22c831a3464db8d16fc8cf32950aa6a8a6da811b942687'
+          }
+          for name,sha in expected.items():
+            assert hashlib.sha256((b/name).read_bytes()).hexdigest()==sha,(
+              'Archivo remoto distinto: '+name)
+          assert 'no-store, no-cache' in (b/'root.guard').read_text()
+          assert 'HTTP_AUTHORIZATION' in (b/'api.guard').read_text()
+          assert 'Require all denied' in (b/'private.guard').read_text()
+          assert 'rutahd2_api_ready' in (b/'gateway.guard').read_text()
+          for name in ['config/rutahd.php',
+            'app/Http/Controllers/OrdenesCompraControlador.php',
+            'app/Services/PdfOrdenCompra.php']:
+            target=p/'after'/name
+            target.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copy2(b/name,target)
+            diff=subprocess.run(['git','diff','--no-ext-diff','--binary',
+              os.environ['BACK_BASE'],os.environ['BACK_PIN'],'--',name],
+              capture_output=True,check=True).stdout
+            assert diff.count(b'diff --git')==1,name
+            ret=subprocess.run(['patch','--batch','--fuzz=0','-p1',
+              '-d',str(p/'after')],input=diff,capture_output=True)
+            if ret.returncode:
+              print(ret.stdout.decode(errors='replace')[:1200])
+              raise RuntimeError('No se pudo parchear sin conflictos: '+name)
+            print('V60_PATCH_OK',name)
+          service=(p/'after/app/Services/PdfOrdenCompra.php').read_text()
+          assert "0.15 0.12 0.22" in service
+          assert "'EMISOR'" in service and "'PROVEEDOR'" in service
+          print('V60_PREFLIGHT_SHA_OK')
+          PY
+          php -l /tmp/v60deploy/after/config/rutahd.php
+          php -l /tmp/v60deploy/after/app/Http/Controllers/OrdenesCompraControlador.php
+          php -l /tmp/v60deploy/after/app/Services/PdfOrdenCompra.php
+          echo V60_PHP_SYNTAX_OK
+
+      - name: Guardar respaldo antes de cualquier PUT
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v60-respaldo-antes-pdf-encabezado
+          path: /tmp/v60deploy/before/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Subir configuración, controlador y generador PDF en ese orden
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/v60deploy/upload-started
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v60deploy')
+          files=[
+            'config/rutahd.php',
+            'app/Http/Controllers/OrdenesCompraControlador.php',
+            'app/Services/PdfOrdenCompra.php'
+          ]
+          (p/'uploaded.txt').write_text('\n'.join(files)+'\n')
+          manifest=dict(x.split('\t',1) for x in (p/'manifest.txt').read_text().splitlines())
+          with (p/'put.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              print('put '+str(p/'after'/name)+' -o '+manifest[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v60deploy/put.lftp >/dev/null 2>/tmp/v60deploy/put-errors.log
+          rm -f /tmp/v60deploy/put.lftp
+          echo V60_FTPS_PUBLISHED
+
+      - name: Readback exacto de los 3 archivos y 4 guardas
+        run: |
+          set -euo pipefail
+          set +x
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v60deploy')
+          files=(p/'uploaded.txt').read_text().splitlines()+[
+            'root.guard','api.guard','private.guard','gateway.guard']
+          manifest=dict(x.split('\t',1) for x in (p/'manifest.txt').read_text().splitlines())
+          with (p/'verify.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              dst=p/'check'/name;dst.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+manifest[name]+' -o '+str(dst),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v60deploy/verify.lftp >/dev/null 2>/tmp/v60deploy/verify-errors.log
+          rm -f /tmp/v60deploy/verify.lftp
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/v60deploy')
+          for name in (p/'uploaded.txt').read_text().splitlines():
+            assert (p/'after'/name).read_bytes()==(p/'check'/name).read_bytes(),name
+          for name in ['root.guard','api.guard','private.guard','gateway.guard']:
+            assert (p/'before'/name).read_bytes()==(p/'check'/name).read_bytes(),name
+          print('V60_BYTES_OK: 3 archivos exactos, 4 protecciones intactas')
+          PY
+
+      - name: Smoke público HTTP y autenticación intacta, sin POST
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,urllib.request,urllib.error
+          base='https://rutahyd2.free.nf'
+          req=urllib.request.Request(base+'/',headers={'User-Agent':'RutaHD2-CI-V60/1.0'})
+          with urllib.request.urlopen(req,timeout=45) as r:
+            body=r.read().decode(errors='replace')
+            assert r.status==200
+          assert 'v53-cache-20261123' in body
+          assert 'ordenes-compra-v55.js?v=20261123-v59' in body
+          print('V60_PUBLIC_HTML_200_OK')
+          try:
+            req=urllib.request.Request(base+'/api/v1/ordenes-compra',
+              headers={'Accept':'application/json','User-Agent':'RutaHD2-CI-V60/1.0'})
+            with urllib.request.urlopen(req,timeout=45):
+              raise AssertionError('API sin JWT fue permitida')
+          except urllib.error.HTTPError as e:
+            assert e.code==401,('API anónima distinta de 401',e.code)
+            assert 'application/json' in (e.headers.get('content-type',''))
+          print('V60_API_JWT_401_OK')
+          PY
+
+      - name: Revertir si falla alguna etapa posterior a la primera escritura
+        if: failure()
+        run: |
+          set +x
+          if [ ! -f /tmp/v60deploy/upload-started ]; then
+            echo V60_ROLLBACK_NO_APLICA
+            exit 0
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v60deploy')
+          manifest=dict(x.split('\t',1) for x in (p/'manifest.txt').read_text().splitlines())
+          files=['app/Services/PdfOrdenCompra.php',
+            'app/Http/Controllers/OrdenesCompraControlador.php',
+            'config/rutahd.php']
+          with (p/'rollback.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              print('put '+str(p/'before'/name)+' -o '+manifest[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v60deploy/rollback.lftp >/dev/null 2>/tmp/v60deploy/rollback-errors.log &&
+            echo 'V60_ROLLBACK_ATTEMPTED: originales restaurados' ||
+            echo '::error::Rollback incompleto: restaurar rutahd-v60-respaldo-antes-pdf-encabezado'
+
+      - name: Limpiar scripts de FTP
+        if: always()
+        run: rm -f /tmp/v60deploy/*.lftp

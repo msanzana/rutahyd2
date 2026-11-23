@@ -36,7 +36,7 @@ if(!str_contains($pdf,'startxref'))throw new RuntimeException('No xref');
 foreach([
  '0.15 0.12 0.22 rg BT /F2 9 Tf 55.00 705.00 Td (EMISOR)' => 'Emisor oscuro visible',
  '0.15 0.12 0.22 rg BT /F2 9 Tf 315.00 705.00 Td (PROVEEDOR)' => 'Proveedor oscuro visible',
- '(Emision: 23-11-2026)' => 'Fecha de emision',
+ '(Emisión: 23-11-2026)' => 'Fecha de emision',
  '(Fecha solicitada: 23-11-2026)' => 'Fecha solicitada',
  '(Emisor de Prueba H&D)' => 'Razon de emisor',
  '(Proveedor Comercial de Prueba)' => 'Proveedor',

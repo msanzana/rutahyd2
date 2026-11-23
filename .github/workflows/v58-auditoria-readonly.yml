@@ -1,0 +1,109 @@
+name: V58 - Auditoria FTPS solo lectura de dialogos Compras
+on:
+  push:
+    branches: [audit/v58-boton-oc-readonly-20261123]
+    paths: [.github/workflows/v58-auditoria-readonly.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  lectura:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FRONT_BASE: e0d98b0af2224a19a38b5adf3ee31d883320763f
+      FRONT_PIN: 8b5abe0594248ca75b72730d74821c616100c56d
+    steps:
+      - uses: actions/checkout@v4
+      - name: Descargar fuente fijada y preparar transporte
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp >/dev/null
+          git clone -q --depth=1 --branch fix/v58-boton-nueva-oc-visible-20261123 https://github.com/msanzana/rutahyd2front.git /tmp/v58-front
+          git -C /tmp/v58-front fetch -q --depth=1 origin "$FRONT_BASE" "$FRONT_PIN"
+          git -C /tmp/v58-front checkout -q --detach "$FRONT_PIN"
+          test "$(git -C /tmp/v58-front rev-parse HEAD)" = "$FRONT_PIN"
+          mkdir -p /tmp/v58audit/before
+      - name: FTPS solo lectura, HTML y dos recursos actuales
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p=Path('/tmp/v58audit')
+          files={
+            'index.html':'/htdocs/index.html',
+            'assets/js/ordenes-compra-v55.js':'/htdocs/assets/js/ordenes-compra-v55.js',
+            'assets/css/ordenes-compra-v55.css':'/htdocs/assets/css/ordenes-compra-v55.css',
+            'root.guard':'/htdocs/.htaccess',
+            'api.guard':'/htdocs/api/.htaccess',
+            'private.guard':'/htdocs/api-v2/.htaccess',
+            'gateway.guard':'/htdocs/api/index.php'
+          }
+          (p/'manifest.txt').write_text(''.join(k+'\t'+v+'\n' for k,v in files.items()))
+          with (p/'read.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:
+              print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name,remote in files.items():
+              dst=p/'before'/name;dst.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+remote+' -o '+str(dst),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v58audit/read.lftp >/dev/null 2>/tmp/v58audit/read-errors.log
+          rm -f /tmp/v58audit/read.lftp
+      - name: Contrastar hashes y parches exactos sin escritura
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,os,subprocess
+          from pathlib import Path
+          p=Path('/tmp/v58audit');b=p/'before'
+          html=(b/'index.html').read_text()
+          for key in ['v53-cache-20261123','app-produccion.js?v=20261123-v55',
+            'clientes-v50.css?v=20261123-v52',
+            'ordenes-compra-v55.css?v=20261123-v57',
+            'ordenes-compra-v55.js?v=20261123-v57',
+            'select-buscable-v56.js?v=20261123-v56']:
+            assert key in html,'Falta marcador esperado '+key
+          assert 'ordenes-compra-v55.js?v=20261123-v58' not in html
+          assert 'no-store, no-cache' in (b/'root.guard').read_text()
+          assert 'HTTP_AUTHORIZATION' in (b/'api.guard').read_text()
+          assert 'Require all denied' in (b/'private.guard').read_text()
+          assert 'rutahd2_api_ready' in (b/'gateway.guard').read_text()
+          for name in ['index.html','assets/js/ordenes-compra-v55.js',
+            'assets/css/ordenes-compra-v55.css',
+            'root.guard','api.guard','private.guard','gateway.guard']:
+            x=(b/name).read_bytes()
+            print('V58_REMOTE_SHA',name,hashlib.sha256(x).hexdigest(),len(x))
+          for name in ['assets/js/ordenes-compra-v55.js',
+            'assets/css/ordenes-compra-v55.css']:
+            diff=subprocess.run(['git','-C','/tmp/v58-front','diff',
+              '--no-ext-diff','--binary',
+              os.environ['FRONT_BASE'],os.environ['FRONT_PIN'],'--',name],
+              capture_output=True,check=True).stdout
+            assert diff.count(b'diff --git')==1,name
+            applied=subprocess.run(['patch','--batch','--fuzz=0','--dry-run',
+              '-p1','-d',str(b)],input=diff,capture_output=True)
+            print('V58_PATCH_PREFLIGHT',name,
+              'OK' if applied.returncode==0 else 'CONFLICT')
+            if applied.returncode:
+              print(applied.stdout.decode(errors='replace')[:1300])
+              raise RuntimeError('Archivo V57 diverge: '+name)
+          print('V58_FTPS_READONLY_OK')
+          PY
+      - name: Retirar scripts con credenciales
+        if: always()
+        run: rm -f /tmp/v58audit/*.lftp

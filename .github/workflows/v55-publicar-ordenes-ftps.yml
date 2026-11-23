@@ -27,9 +27,9 @@ jobs:
           set -euo pipefail
           set +x
           test -n "$FTP_PASSWORD"
-          test "$(git rev-parse HEAD)" = "$BACK_PIN"
           sudo apt-get update -qq && sudo apt-get install -y -qq lftp php-cli >/dev/null
           git fetch -q --depth=1 origin "$BACK_BASE" "$BACK_PIN"
+          git diff --quiet "$BACK_PIN" HEAD -- app routes || { echo "Fuentes backend divergentes"; exit 1; }
           git clone -q --depth=1 --branch feature/v55-ordenes-compra-20261123 https://github.com/msanzana/rutahyd2front.git /tmp/v55-front
           git -C /tmp/v55-front fetch -q --depth=1 origin "$FRONT_BASE" "$FRONT_PIN"
           git -C /tmp/v55-front checkout -q --detach "$FRONT_PIN"

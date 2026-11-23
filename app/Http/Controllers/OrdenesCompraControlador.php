@@ -99,6 +99,12 @@ final class OrdenesCompraControlador extends Controller
      */
     public function costosProductos(Request $request)
     {
+        // Cuota independiente de crear OC: consultar costos no puede agotar
+        // el límite del guardado ni las cotizaciones tributarias.
+        $key='oc-costos-productos:'.(int)($request->user()?->id??0);
+        abort_if(RateLimiter::tooManyAttempts($key,120),429,
+            'Demasiadas consultas de costos. Inténtalo nuevamente más tarde.');
+        RateLimiter::hit($key,60);
         $data=$request->validate([
             'proveedor_id'=>['required','integer','min:1'],
             'productos'=>['required','array','min:1','max:100'],

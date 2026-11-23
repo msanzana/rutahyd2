@@ -88,7 +88,7 @@ jobs:
             'api.htaccess','private.htaccess','gateway']:
             b=(old/name).read_bytes()
             print('V56_REMOTE_SHA',name,hashlib.sha256(b).hexdigest(),len(b))
-          for name in ['index.html','assets/js/ordenes-compra-v55.js',
+          for name in ['assets/js/ordenes-compra-v55.js',
             'assets/css/ordenes-compra-v55.css']:
             patch=subprocess.run(['git','-C','/tmp/v56front','diff','--binary',
               '--no-ext-diff',os.environ['FRONT_BASE'],os.environ['FRONT_PIN'],
@@ -100,6 +100,11 @@ jobs:
             if result.returncode:
               print(result.stdout.decode(errors='replace')[:1600])
               raise AssertionError('Divergencia remota: cancelar')
+          assert html.count('ordenes-compra-v55.js?v=20261123-v55')==1
+          assert html.count('ordenes-compra-v55.css?v=20261123-v55')==1
+          assert html.count('select-buscable-v56.js')==0
+          assert html.count('select-buscable-v56.css')==0
+          print('V56_HTML_LITERALS_READY: reemplazo mínimo sin diff total')
           print('V56_FTPS_READONLY_OK')
           PY
       - name: Borrar scripts temporales con credenciales

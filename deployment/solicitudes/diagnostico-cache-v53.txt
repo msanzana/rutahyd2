@@ -1,0 +1,1 @@
+Ruta H&D V53: inspección solo lectura de index.html y .htaccess de /htdocs por FTPS, hashes, reglas de cache y cabeceras públicas desde Chromium. NO modificar archivos ni datos, NO DDL, NO POST. Etiquetas V52 existentes deben preservarse.

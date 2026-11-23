@@ -3,3 +3,5 @@ Ruta H&D V2 · V50. DDL37 confirmado ejecutado por el titular el 22-11-2026. CI 
 Reintento de preflight de solo lectura: registrar versiones y abortar si difieren; aún sin publicación V50.
 
 Preflight ajustado a assets de producción: catalogos-api v42prod, modulos-oficiales/app-produccion v39prod. Mantener backup, parches estrictos y no SQL.
+
+Ruta nueva /clientes/tipos-juridicos por inserción única y controlada sobre routes/api.php productivo; 3 parches PHP estrictos permanecen. Reintento sin SQL.

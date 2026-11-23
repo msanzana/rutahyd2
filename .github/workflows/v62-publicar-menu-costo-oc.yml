@@ -1,0 +1,289 @@
+name: V62 - Publicar primer subitem y costo neto de OC
+on:
+  push:
+    branches: [deploy/v62-menu-primer-subitem-costo-oc-20261123]
+    paths: [.github/workflows/v62-publicar-menu-costo-oc.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACK_BASE: 1ba12964b95d62e965d946210e14b7a59ad74048
+      BACK_PIN: d98763fe7b74b469287e755cf687cfd8d7e807ff
+      FRONT_BASE: 2d47db15e5ceae0ef2c919ea176ded2dfc65b3a4
+      FRONT_PIN: da33af03e7f6d6521cef19b6daceb3777a43bcb7
+    steps:
+      - uses: actions/checkout@v4
+      - name: Congelar fuentes y preparar transporte
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp php-cli >/dev/null
+          git fetch -q --depth=1 origin "$BACK_BASE" "$BACK_PIN"
+          git clone -q --depth=1 --branch fix/v62-menu-primer-subitem-costo-oc-20261123 https://github.com/msanzana/rutahyd2front.git /tmp/v62front
+          git -C /tmp/v62front fetch -q --depth=1 origin "$FRONT_BASE" "$FRONT_PIN"
+          git -C /tmp/v62front checkout -q --detach "$FRONT_PIN"
+          test "$(git -C /tmp/v62front rev-parse HEAD)" = "$FRONT_PIN"
+          umask 077
+          mkdir -p /tmp/v62deploy/{before,after,check}
+      - name: Respaldar originales productivos y guardas en FTPS solo lectura
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v62deploy')
+          files={
+            'index.html':'/htdocs/index.html',
+            'assets/js/app-produccion.js':'/htdocs/assets/js/app-produccion.js',
+            'assets/js/catalogos-api.js':'/htdocs/assets/js/catalogos-api.js',
+            'assets/js/ordenes-compra-v55.js':'/htdocs/assets/js/ordenes-compra-v55.js',
+            'app/Http/Controllers/OrdenesCompraControlador.php':
+              '/htdocs/api-v2/app/Http/Controllers/OrdenesCompraControlador.php',
+            'routes/api.php':'/htdocs/api-v2/routes/api.php',
+            'root.guard':'/htdocs/.htaccess',
+            'api.guard':'/htdocs/api/.htaccess',
+            'private.guard':'/htdocs/api-v2/.htaccess',
+            'gateway.guard':'/htdocs/api/index.php'
+          }
+          (p/'manifest.txt').write_text(''.join(k+'\t'+v+'\n' for k,v in files.items()))
+          with (p/'read.lftp').open('w') as f:
+            for command in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(command,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name,remote in files.items():
+              target=p/'before'/name;target.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+remote+' -o '+str(target),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v62deploy/read.lftp >/dev/null 2>/tmp/v62deploy/read-error.log
+          rm -f /tmp/v62deploy/read.lftp
+      - name: Validar SHA, aplicar cinco parches exactos y tres versiones HTML
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os,hashlib,shutil,subprocess
+          p=Path('/tmp/v62deploy');b=p/'before'
+          sha={
+            'index.html':'203d786bf354e0ca683488b84166b2b35873f2549e3bc3bf2d2f97b1c87a2d1f',
+            'assets/js/app-produccion.js':'db99a5b400a519b49ce02bfb3e4014dfd01b1a7ea6e27d00ef677b00be90e469',
+            'assets/js/catalogos-api.js':'a8668cc577710ccd70d31239e5169e7e253a84e4ac24c28374d9fdf17eeefe65',
+            'assets/js/ordenes-compra-v55.js':'8531f3d6d5f303a026f8788d2fc997e1442c48ecc3b49a321fc2639cb80846e7',
+            'routes/api.php':'ae422368515e330c88cca7d28719f7a5c2b6a5d817338967f5b4960c6522640f',
+            'app/Http/Controllers/OrdenesCompraControlador.php':'e6328858c6cc8971abe78cd61968bfd5b35bb62c34f406185c83dae7f3573d25',
+            'root.guard':'a6cbd7462dc5a8492cbdb15e406ad5058557f616375380b813dcf8d24ed47d1e',
+            'api.guard':'ae0248cbcc21787c4595995a9cf76fd8c2edf34bb90cb1051820fc830bde9706',
+            'private.guard':'f19e0a6ec4db41ce29fa249819d1121707608a25e2f697f023d94788f9751a0b',
+            'gateway.guard':'37b5ad7eabd2d7a9ba22c831a3464db8d16fc8cf32950aa6a8a6da811b942687'
+          }
+          for name,expected in sha.items():
+            actual=hashlib.sha256((b/name).read_bytes()).hexdigest()
+            assert actual==expected,'Archivo productivo cambió desde auditoría: '+name
+          assert 'no-store, no-cache' in (b/'root.guard').read_text()
+          assert 'HTTP_AUTHORIZATION' in (b/'api.guard').read_text()
+          assert 'Require all denied' in (b/'private.guard').read_text()
+          assert 'rutahd2_api_ready' in (b/'gateway.guard').read_text()
+          print('V62_PREFLIGHT_SHA_OK: seis archivos productivos y cuatro guardas')
+          for repo,base,pin,files in [
+            ('/tmp/v62front',os.environ['FRONT_BASE'],os.environ['FRONT_PIN'],
+              ['assets/js/app-produccion.js','assets/js/catalogos-api.js',
+               'assets/js/ordenes-compra-v55.js']),
+            (os.environ['GITHUB_WORKSPACE'],os.environ['BACK_BASE'],os.environ['BACK_PIN'],
+              ['app/Http/Controllers/OrdenesCompraControlador.php','routes/api.php'])
+          ]:
+            for name in files:
+              dest=p/'after'/name;dest.parent.mkdir(parents=True,exist_ok=True)
+              shutil.copy2(b/name,dest)
+              delta=subprocess.run(['git','-C',repo,'diff','--no-ext-diff','--binary',
+                base,pin,'--',name],capture_output=True,check=True).stdout
+              assert delta.count(b'diff --git')==1,'Falta delta '+name
+              patch=subprocess.run(['patch','--batch','--fuzz=0','-p1',
+                '-d',str(p/'after')],input=delta,capture_output=True)
+              if patch.returncode:
+                print(patch.stdout.decode(errors='replace')[:1200])
+                raise RuntimeError('No aplicar sin revisión: '+name)
+              print('V62_PATCH_OK',name)
+          html=(b/'index.html').read_text()
+          for old,new in [
+            ('app-produccion.js?v=20261123-v55','app-produccion.js?v=20261123-v62'),
+            ('catalogos-api.js?v=20261123-v59','catalogos-api.js?v=20261123-v62'),
+            ('ordenes-compra-v55.js?v=20261123-v61','ordenes-compra-v55.js?v=20261123-v62')
+          ]:
+            assert html.count(old)==1,'Etiqueta faltante o duplicada: '+old
+            html=html.replace(old,new)
+          assert html.count('data-nav="compras_ordenes"')==1
+          assert html.count('select-buscable-v56.js?v=20261123-v56')==1
+          assert 'ordenes-compra-v55.css?v=20261123-v59' in html
+          assert 'v53-cache-20261123' in html
+          (p/'after/index.html').write_text(html)
+          print('V62_HTML_MINIMAL_OK: solo tres etiquetas')
+          PY
+          node --check /tmp/v62deploy/after/assets/js/app-produccion.js
+          node --check /tmp/v62deploy/after/assets/js/catalogos-api.js
+          node --check /tmp/v62deploy/after/assets/js/ordenes-compra-v55.js
+          php -l /tmp/v62deploy/after/routes/api.php
+          php -l /tmp/v62deploy/after/app/Http/Controllers/OrdenesCompraControlador.php
+          echo V62_SYNTAX_OK
+      - name: Guardar backup antes de publicar
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v62-respaldo-antes-menu-costos-oc
+          path: /tmp/v62deploy/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar backend primero, JS y HTML al final
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/v62deploy/upload-started
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v62deploy')
+          files=[
+            'app/Http/Controllers/OrdenesCompraControlador.php',
+            'routes/api.php',
+            'assets/js/catalogos-api.js',
+            'assets/js/app-produccion.js',
+            'assets/js/ordenes-compra-v55.js',
+            'index.html'
+          ]
+          (p/'uploaded.txt').write_text('\n'.join(files)+'\n')
+          manifest=dict(x.split('\t',1) for x in (p/'manifest.txt').read_text().splitlines())
+          with (p/'put.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              print('put '+str(p/'after'/name)+' -o '+manifest[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v62deploy/put.lftp >/dev/null 2>/tmp/v62deploy/put-error.log
+          rm -f /tmp/v62deploy/put.lftp
+          echo V62_FTPS_PUBLISHED
+      - name: Readback idéntico y cuatro guardas intactas
+        run: |
+          set -euo pipefail
+          set +x
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v62deploy')
+          files=(p/'uploaded.txt').read_text().splitlines()+[
+            'root.guard','api.guard','private.guard','gateway.guard']
+          manifest=dict(x.split('\t',1) for x in (p/'manifest.txt').read_text().splitlines())
+          with (p/'verify.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              dst=p/'check'/name;dst.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+manifest[name]+' -o '+str(dst),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v62deploy/verify.lftp >/dev/null 2>/tmp/v62deploy/verify-error.log
+          rm -f /tmp/v62deploy/verify.lftp
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/v62deploy')
+          for name in (p/'uploaded.txt').read_text().splitlines():
+            assert (p/'check'/name).read_bytes()==(p/'after'/name).read_bytes(),name
+          for name in ['root.guard','api.guard','private.guard','gateway.guard']:
+            assert (p/'check'/name).read_bytes()==(p/'before'/name).read_bytes(),name
+          print('V62_BYTES_OK: seis archivos byte-perfectos y cuatro guardas sin cambios')
+          PY
+      - name: Comprobación pública Chromium sin sesión ni acciones de negocio
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v62deploy/browser
+          cd /tmp/v62deploy/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({viewport:{width:1400,height:900},locale:'es-CL'});
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/',{
+              waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>Boolean(window.RutaHDProduccion?.navigate)&&
+              Boolean(window.RutaHDOrdenesCompra?.mount),null,{timeout:45000});
+            const info=await page.evaluate(()=>({
+              release:document.querySelector('meta[name="rutahd-release"]')?.content,
+              app:!!document.querySelector('script[src*="app-produccion.js?v=20261123-v62"]'),
+              catalog:!!document.querySelector('script[src*="catalogos-api.js?v=20261123-v62"]'),
+              oc:!!document.querySelector('script[src*="ordenes-compra-v55.js?v=20261123-v62"]'),
+              list:!!document.querySelector('#purchaseSubnav [data-nav="compras_ordenes"]'),
+              clients:!!document.querySelector('#clientSubnav [data-nav="clientes_listado"]'),
+              choices:!!document.querySelector('script[src*="select-buscable-v56.js?v=20261123-v56"]'),
+              api:typeof window.RutaHDApiCatalogos?.purchaseProductCosts==='function'
+            }));
+            const anon=await page.evaluate(async()=>{
+              const r=await fetch('/api/v1/ordenes-compra',{
+                headers:{Accept:'application/json'},cache:'no-store'});
+              return {status:r.status,type:r.headers.get('content-type')||''};
+            });
+            console.log('V62_PUBLIC_SMOKE',JSON.stringify({
+              http:response?.status(),info,anon,errors
+            }));
+            if(response?.status()!==200||info.release!=='v53-cache-20261123'||
+              !info.app||!info.catalog||!info.oc||!info.list||!info.clients||
+              !info.choices||!info.api||anon.status!==401||
+              !anon.type.includes('application/json')||errors.length)
+              throw Error('Smoke V62 incompatible o API sin protección');
+            console.log('V62_PUBLIC_SMOKE_OK');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar V61/V60 si falla una fase posterior a PUT
+        if: failure()
+        run: |
+          set +x
+          if [ ! -f /tmp/v62deploy/upload-started ];then
+            echo V62_ROLLBACK_NO_APLICA
+            exit 0
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v62deploy')
+          files=['index.html','assets/js/app-produccion.js',
+            'assets/js/catalogos-api.js','assets/js/ordenes-compra-v55.js',
+            'routes/api.php','app/Http/Controllers/OrdenesCompraControlador.php']
+          manifest=dict(x.split('\t',1) for x in (p/'manifest.txt').read_text().splitlines())
+          with (p/'rollback.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              print('put '+str(p/'before'/name)+' -o '+manifest[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v62deploy/rollback.lftp >/dev/null 2>/tmp/v62deploy/rollback-error.log &&
+            echo V62_ROLLBACK_RESTORED ||
+            echo '::error::Rollback incompleto; restaurar artifact rutahd-v62-respaldo-antes-menu-costos-oc'
+      - name: Borrar scripts con secretos
+        if: always()
+        run: rm -f /tmp/v62deploy/*.lftp

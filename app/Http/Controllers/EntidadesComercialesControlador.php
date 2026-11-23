@@ -28,7 +28,7 @@ final class EntidadesComercialesControlador extends Controller
     ];
     private const COLUMNAS = [
         'clientes' => [
-            'codigo','nombre','rut','giro','actividad_economica_codigo',
+            'nombre','rut','giro','actividad_economica_codigo',
             'tipo_juridico_id','correo_electronico','telefono',
             'direccion','ciudad_id','observaciones','activo'
         ],
@@ -76,8 +76,6 @@ final class EntidadesComercialesControlador extends Controller
                 'telefono'=>array_merge($opcional,[
                     'string','regex:/^\\+56 [0-9]{9}$/D'
                 ]),
-                'codigo' => array_merge($opcional, ['string', 'max:50',
-                    Rule::unique('clientes', 'codigo')->ignore($id)]),
                 'giro'=>array_merge($opcional,['string','max:255']),
                 'actividad_economica_codigo'=>array_merge($opcional,[
                     'regex:/^[0-9]{6}$/D',
@@ -151,6 +149,21 @@ final class EntidadesComercialesControlador extends Controller
             abort_unless($canonico!==null,422,
                 'RUT inválido: verifica cuerpo y dígito verificador');
             $datos['rut']=$canonico;
+        }
+        // Personas naturales no registran giro en este CRUD. La distinción
+        // se hace por código estable del catálogo jurídico, nunca por
+        // su nombre traducible. Al pasar Empresa -> Persona natural,
+        // limpiar ambos campos en la misma actualización.
+        if($recurso==='clientes'){
+            $tipoId=$datos['tipo_juridico_id']
+                ?? ($nuevo?null:DB::table('clientes')->where('id',$id)
+                    ->value('tipo_juridico_id'));
+            $tipoCodigo=$tipoId===null?null:DB::table('tipos_juridicos_clientes')
+                ->where('id',$tipoId)->value('codigo');
+            if($tipoCodigo!=='EMPRESA'){
+                $datos['giro']=null;
+                $datos['actividad_economica_codigo']=null;
+            }
         }
         if(in_array($recurso,['clientes','proveedores'],true)
             && !empty($datos['actividad_economica_codigo'])){

@@ -59,9 +59,87 @@ final class RecursoControlador extends Controller
         return new $clase();
     }
 
+    public function tiposJuridicosClientes(Request $solicitud)
+    {
+        $this->obtener($solicitud,'clientes');
+        return response()->json(['items'=>DB::table('tipos_juridicos_clientes')
+            ->select('id','codigo','nombre','activo')
+            ->orderBy('nombre')->get()])->header('Cache-Control','no-store');
+    }
+
+    private function listarClientes(Request $solicitud)
+    {
+        $datos=$solicitud->validate([
+            'page'=>['sometimes','integer','min:1','max:10000'],
+            'por_pagina'=>['sometimes','integer','min:1','max:100'],
+            'buscar'=>['sometimes','nullable','string','max:120'],
+            'filtros'=>['sometimes','array','max:9'],
+            'filtros.rut'=>['sometimes','nullable','string','max:25'],
+            'filtros.nombre'=>['sometimes','nullable','string','max:190'],
+            'filtros.direccion'=>['sometimes','nullable','string','max:190'],
+            'filtros.ciudad'=>['sometimes','nullable','string','max:120'],
+            'filtros.correo_electronico'=>['sometimes','nullable','string','max:190'],
+            'filtros.giro'=>['sometimes','nullable','string','max:120'],
+            'filtros.tipo_juridico_id'=>['sometimes','nullable','integer','min:1'],
+            'filtros.lista_precio_id'=>['sometimes','nullable','integer','min:1'],
+            'filtros.activo'=>['sometimes','nullable','in:0,1'],
+            'orden'=>['sometimes','in:id,rut,nombre,direccion,ciudad,correo_electronico,tipo_juridico_nombre,lista_precio_nombre'],
+            'direccion_orden'=>['sometimes','in:asc,desc'],
+        ]);
+        $q=DB::table('clientes as c')
+            ->leftJoin('ciudades as ci','ci.id','=','c.ciudad_id')
+            ->leftJoin('tipos_juridicos_clientes as tj','tj.id','=','c.tipo_juridico_id')
+            ->leftJoin('clientes_listas_precios as clp',function($join){
+                $join->on('clp.cliente_id','=','c.id')->where('clp.activo','=',1);
+            })
+            ->leftJoin('listas_precios as lp',function($join){
+                $join->on('lp.id','=','clp.lista_precio_id')->where('lp.activo','=',1);
+            })
+            ->select('c.*','ci.nombre as ciudad','tj.nombre as tipo_juridico_nombre',
+                'lp.id as lista_precio_id','lp.nombre as lista_precio_nombre');
+        $term=trim((string)($datos['buscar']??''));
+        if($term!==''){
+            $like='%'.$term.'%';
+            $q->where(function($where)use($like){
+                $where->where('c.nombre','like',$like)
+                    ->orWhere('c.rut','like',$like)
+                    ->orWhere('c.correo_electronico','like',$like)
+                    ->orWhere('c.direccion','like',$like)
+                    ->orWhere('c.giro','like',$like)
+                    ->orWhere('ci.nombre','like',$like)
+                    ->orWhere('tj.nombre','like',$like)
+                    ->orWhere('lp.nombre','like',$like);
+            });
+        }
+        $campos=[
+            'rut'=>'c.rut','nombre'=>'c.nombre','direccion'=>'c.direccion',
+            'ciudad'=>'ci.nombre','correo_electronico'=>'c.correo_electronico',
+            'giro'=>'c.giro'
+        ];
+        foreach(($datos['filtros']??[]) as $key=>$value){
+            if($value===null||$value==='')continue;
+            if(isset($campos[$key]))$q->where($campos[$key],'like','%'.trim((string)$value).'%');
+            elseif($key==='tipo_juridico_id')$q->where('c.tipo_juridico_id',(int)$value);
+            elseif($key==='lista_precio_id')$q->where('lp.id',(int)$value);
+            elseif($key==='activo')$q->where('c.activo',(int)$value);
+        }
+        $sortable=[
+            'id'=>'c.id','rut'=>'c.rut','nombre'=>'c.nombre',
+            'direccion'=>'c.direccion','ciudad'=>'ci.nombre',
+            'correo_electronico'=>'c.correo_electronico',
+            'tipo_juridico_nombre'=>'tj.nombre','lista_precio_nombre'=>'lp.nombre'
+        ];
+        $sort=$datos['orden']??'id';
+        $q->orderBy($sortable[$sort],$datos['direccion_orden']??'desc');
+        if($sort!=='id')$q->orderBy('c.id','desc');
+        return response()->json($q->paginate((int)($datos['por_pagina']??25)))
+            ->header('Cache-Control','no-store');
+    }
+
     public function listar(Request $solicitud,string $recurso)
     {
         $modelo=$this->obtener($solicitud,$recurso);
+        if($recurso==='clientes')return $this->listarClientes($solicitud);
         $datos=$solicitud->validate([
             'por_pagina'=>['sometimes','integer','min:1','max:100'],
             'filtros'=>['sometimes','array','max:5'],
@@ -81,8 +159,8 @@ final class RecursoControlador extends Controller
                 if ($recurso==='clientes') $where->orWhere('codigo','like',$term);
             });
         }
-        $columnas=DB::getSchemaBuilder()->getColumnListing($modelo->getTable());
-        if (in_array('id',$columnas,true)) $q->orderByDesc('id');
+        // El contrato de estos recursos incluye id: evitar introspección restringida.
+        $q->orderByDesc('id');
         $filas=$q->paginate((int)($datos['por_pagina']??25));
         if($recurso==='clientes'){
             $ids=$filas->getCollection()->pluck('id')->map(fn($id)=>(int)$id)->all();

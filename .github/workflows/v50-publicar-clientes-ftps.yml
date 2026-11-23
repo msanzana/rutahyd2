@@ -104,6 +104,7 @@ jobs:
             if done.returncode:
               print(done.stdout.decode(errors='replace')[:1300])
               raise RuntimeError('Base productiva distinta: cancelar sin escribir')
+          (p/'after/assets/css').mkdir(parents=True,exist_ok=True)
           shutil.copy2('/tmp/v50-front/assets/css/clientes-v50.css',
             p/'after/assets/css/clientes-v50.css')
           html=(p/'after/index.html').read_text()

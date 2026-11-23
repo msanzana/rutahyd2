@@ -67,7 +67,7 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::post('/ordenes-compra/{id}/anular',[OrdenesCompraControlador::class,'anular'])
         ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
     Route::post('/ordenes-compra/{id}/reenviar',[OrdenesCompraControlador::class,'reenviar'])
-        ->middleware('permiso.rutahd:compras.gestionar')->middleware('throttle:4,1')
+        ->middleware('permiso.rutahd:compras.gestionar')
         ->whereNumber('id');
     Route::get('/ordenes-compra/{id}/pdf',[OrdenesCompraControlador::class,'pdf'])
         ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');

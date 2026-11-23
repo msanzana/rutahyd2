@@ -237,8 +237,10 @@ jobs:
               };
               // Solo montar datos ficticios en DOM efímero; nunca POST al servidor.
               const host=document.createElement('div');host.id='v58-smoke-host';
-              const workspace=document.querySelector('#workspaceContent')||document.body;
-              workspace.append(host);
+              // El workspace real se oculta sin sesión; la prueba anónima
+              // debe montar una vista DEMO visible, fuera de esa zona.
+              host.style.cssText='position:fixed;left:20px;top:120px;width:min(1100px,calc(100vw - 40px));z-index:1';
+              document.body.append(host);
               const oldAcl=window.RutaHDAccesos,oldApi=window.RutaHDApiCatalogos;
               window.RutaHDAccesos={authenticated:()=>true,has:()=>true};
               window.RutaHDApiCatalogos={

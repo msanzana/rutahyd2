@@ -1,0 +1,127 @@
+name: V55 - Auditoria FTPS de solo lectura previa a publicacion
+on:
+  push:
+    branches: [audit/v55-remote-preflight-20261123]
+    paths: [.github/workflows/v55-ftps-auditoria-readonly.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  auditar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACK_BASE: a60307b8dab65fc99bbb40927b2809d55066afc1
+      BACK_PIN: f8ef78845e8b01703e98d0c9d9333c00d9f70db5
+      FRONT_BASE: 3046e3ea2c95342a5bea7d8959553d747f064db3
+      FRONT_PIN: c360f8c5dddb53f120805301eaaad4cc9855e538
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar versiones fijadas y FTPS
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp >/dev/null
+          git fetch -q --depth=1 origin "$BACK_BASE" "$BACK_PIN"
+          git clone -q --depth=1 --branch feature/v55-ordenes-compra-20261123 https://github.com/msanzana/rutahyd2front.git /tmp/v55-audit-front
+          git -C /tmp/v55-audit-front fetch -q --depth=1 origin "$FRONT_BASE" "$FRONT_PIN"
+          git -C /tmp/v55-audit-front checkout -q --detach "$FRONT_PIN"
+          test "$(git -C /tmp/v55-audit-front rev-parse HEAD)" = "$FRONT_PIN"
+          mkdir -p /tmp/v55audit/before
+      - name: Descargar SIN escritura los ocho archivos existentes y protecciones
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          root=Path('/tmp/v55audit')
+          files={
+            'index.html':'/htdocs/index.html',
+            'assets/js/app-produccion.js':'/htdocs/assets/js/app-produccion.js',
+            'assets/js/catalogos-api.js':'/htdocs/assets/js/catalogos-api.js',
+            'assets/js/listados-ui.js':'/htdocs/assets/js/listados-ui.js',
+            'assets/js/buscador-productos-v39.js':'/htdocs/assets/js/buscador-productos-v39.js',
+            'routes/api.php':'/htdocs/api-v2/routes/api.php',
+            'app/Models/OrdenCompra.php':'/htdocs/api-v2/app/Models/OrdenCompra.php',
+            'app/Models/DetalleOrdenCompra.php':'/htdocs/api-v2/app/Models/DetalleOrdenCompra.php',
+            'root.guard':'/htdocs/.htaccess',
+            'api.guard':'/htdocs/api/.htaccess',
+            'private.guard':'/htdocs/api-v2/.htaccess',
+            'gateway.guard':'/htdocs/api/index.php'
+          }
+          (root/'manifest').write_text(''.join(k+'\t'+v+'\n' for k,v in files.items()))
+          with (root/'read.lftp').open('w') as f:
+            for cmd in ('set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3'):print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for k,v in files.items():
+              dest=root/'before'/k
+              dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+v+' -o '+str(dest),file=f)
+            for d in ['/htdocs/assets/js','/htdocs/assets/css',
+              '/htdocs/api-v2/app/Http/Controllers','/htdocs/api-v2/app/Services',
+              '/htdocs/api-v2/app/Models']:
+              print('cls -1 '+d,file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v55audit/read.lftp >/tmp/v55audit/listing.txt 2>/tmp/v55audit/ftp-errors.log
+          rm -f /tmp/v55audit/read.lftp
+      - name: Comparar patch exacto con archivos publicados y protección del sitio
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,os,re,subprocess
+          from pathlib import Path
+          root=Path('/tmp/v55audit');before=root/'before'
+          html=(before/'index.html').read_text()
+          app=(before/'assets/js/app-produccion.js').read_text()
+          assert 'v53-cache-20261123' in html,'Falta release V53'
+          assert 'app-produccion.js?v=20261123-v54' in html,'Falta marcador V54'
+          assert 'modulos-oficiales.js?v=20261123-v52' in html,'Falta V52'
+          assert 'no-store, no-cache' in (before/'root.guard').read_text()
+          assert 'HTTP_AUTHORIZATION' in (before/'api.guard').read_text()
+          assert 'Require all denied' in (before/'private.guard').read_text()
+          assert 'rutahd2_api_ready' in (before/'gateway.guard').read_text()
+          assert (chr(36)*2+"('#ubicacionesSubnav [data-nav]').forEach") in app
+          assert 'compras_ordenes' not in html,'El frontend OC ya parece publicado'
+          print('V55_REMOTE_FOUND V54 + V53 + V52, API protegida')
+          for item in (root/'manifest').read_text().splitlines():
+            name,_=item.split('\t',1)
+            data=(before/name).read_bytes()
+            print('V55_REMOTE_SHA',name,hashlib.sha256(data).hexdigest(),len(data))
+          tags=re.findall(r'(?:assets/js/|assets/css/)[A-Za-z0-9_.-]+[.]\w+[?]v=[A-Za-z0-9_.-]+',html)
+          for tag in tags:
+            if any(name in tag for name in ('app-produccion','catalogos-api','buscador-productos','listados-ui','modulos-oficiales','clientes-v50')):
+              print('V55_CURRENT_TAG',tag)
+          for repo,base,pin,paths in [
+            ('/tmp/v55-audit-front',os.environ['FRONT_BASE'],os.environ['FRONT_PIN'],
+              ['assets/js/app-produccion.js','assets/js/catalogos-api.js',
+               'assets/js/listados-ui.js','assets/js/buscador-productos-v39.js']),
+            (os.environ['GITHUB_WORKSPACE'],os.environ['BACK_BASE'],os.environ['BACK_PIN'],
+              ['routes/api.php','app/Models/OrdenCompra.php',
+               'app/Models/DetalleOrdenCompra.php'])]:
+            for path in paths:
+              diff=subprocess.run(['git','-C',repo,'diff','--no-ext-diff',
+                '--binary',base,pin,'--',path],capture_output=True,check=True).stdout
+              assert diff.startswith(b'diff --git'),'Sin patch esperado: '+path
+              candidate=subprocess.run(['patch','--batch','--fuzz=0','--dry-run',
+                '-p1','-d',str(before)],input=diff,capture_output=True)
+              print('V55_DELTA_PRECHECK',path,'OK' if candidate.returncode==0 else 'CONFLICT')
+              if candidate.returncode:
+                print(candidate.stdout.decode(errors='replace')[:1200])
+                raise AssertionError('Cambios remotos divergentes; cancelar antes de publicar')
+          print('V55_FTPS_READONLY_READY; no hubo escrituras ni consultas SQL')
+          PY
+      - name: Borrar posibles scripts que incluyan claves
+        if: always()
+        run: rm -f /tmp/v55audit/*.lftp

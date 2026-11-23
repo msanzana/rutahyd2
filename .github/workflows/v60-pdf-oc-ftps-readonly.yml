@@ -1,0 +1,96 @@
+name: V60 - Auditoria FTPS PDF OC solo lectura
+on:
+  push:
+    branches: [audit/v60-pdf-oc-encabezado-readonly-20261123]
+    paths: [.github/workflows/v60-pdf-oc-ftps-readonly.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  lectura:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACK_BASE: b8300121cec9a2b7a869a722fef12b73a7012b00
+      BACK_PIN: 25c270204882f3f1c528845f492be6386f92ee9d
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar fuente exacta y FTPS
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp >/dev/null
+          git fetch -q --depth=1 origin "$BACK_BASE" "$BACK_PIN"
+          mkdir -p /tmp/v60audit/before
+      - name: Descargar original sin escritura
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v60audit')
+          files={
+           'app/Services/PdfOrdenCompra.php':'/htdocs/api-v2/app/Services/PdfOrdenCompra.php',
+           'app/Http/Controllers/OrdenesCompraControlador.php':
+             '/htdocs/api-v2/app/Http/Controllers/OrdenesCompraControlador.php',
+           'config/rutahd.php':'/htdocs/api-v2/config/rutahd.php',
+           'root.guard':'/htdocs/.htaccess',
+           'api.guard':'/htdocs/api/.htaccess',
+           'private.guard':'/htdocs/api-v2/.htaccess',
+           'gateway.guard':'/htdocs/api/index.php',
+          }
+          (p/'manifest.txt').write_text(''.join(k+'\t'+v+'\n' for k,v in files.items()))
+          with (p/'read.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name,remote in files.items():
+              dest=p/'before'/name;dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+remote+' -o '+str(dest),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v60audit/read.lftp >/dev/null 2>/tmp/v60audit/read-errors.log
+          rm -f /tmp/v60audit/read.lftp
+      - name: Validar contra V59 y simular 3 parches estrictos
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,os,subprocess
+          p=Path('/tmp/v60audit'); b=p/'before'
+          for name in ['app/Services/PdfOrdenCompra.php',
+            'app/Http/Controllers/OrdenesCompraControlador.php','config/rutahd.php',
+            'root.guard','api.guard','private.guard','gateway.guard']:
+            data=(b/name).read_bytes()
+            print('V60_REMOTE_SHA',name,hashlib.sha256(data).hexdigest(),len(data))
+          assert 'no-store, no-cache' in (b/'root.guard').read_text()
+          assert 'HTTP_AUTHORIZATION' in (b/'api.guard').read_text()
+          assert 'Require all denied' in (b/'private.guard').read_text()
+          assert 'rutahd2_api_ready' in (b/'gateway.guard').read_text()
+          for name in ['app/Services/PdfOrdenCompra.php',
+            'app/Http/Controllers/OrdenesCompraControlador.php','config/rutahd.php']:
+            diff=subprocess.run(['git','diff','--no-ext-diff','--binary',
+              os.environ['BACK_BASE'],os.environ['BACK_PIN'],'--',name],
+              check=True,capture_output=True).stdout
+            assert diff.count(b'diff --git')==1,'No hay diff para '+name
+            check=subprocess.run(['patch','--batch','--fuzz=0','--dry-run',
+              '-p1','-d',str(b)],input=diff,capture_output=True)
+            print('V60_PATCH_PREFLIGHT',name,'OK' if check.returncode==0 else 'CONFLICT')
+            if check.returncode:
+              print(check.stdout.decode(errors='replace')[:1100])
+              raise AssertionError('Aborta: producción distinta de base V59')
+          print('V60_FTPS_READONLY_OK')
+          PY
+      - name: Destruir scripts temporales de conexión
+        if: always()
+        run: rm -f /tmp/v60audit/*.lftp

@@ -72,6 +72,22 @@ final class OrdenesCompraControlador extends Controller
             ->orderBy('me.orden')->get(['e.id','e.codigo','e.nombre'])]);
     }
 
+    public function proveedores(Request $request)
+    {
+        $v=$request->validate([
+            'buscar'=>['sometimes','nullable','string','max:120'],
+            'page'=>['sometimes','integer','min:1','max:10000']
+        ]);
+        $q=DB::table('proveedores')->where('activo',1)
+            ->select('id','nombre','rut','correo_electronico','direccion');
+        if(!empty($v['buscar'])){
+            $like='%'.trim($v['buscar']).'%';
+            $q->where(fn($s)=>$s->where('nombre','like',$like)
+                ->orWhere('rut','like',$like));
+        }
+        return $this->respuesta($q->orderBy('nombre')->orderBy('id')->paginate(25));
+    }
+
     public function listar(Request $request)
     {
         $v=$request->validate([

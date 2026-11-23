@@ -1,0 +1,97 @@
+name: V61 - Diagnostico SMTP OC solo lectura sin credenciales
+on:
+  push:
+    branches: [audit/v61-correo-oc-smtp-readonly-20261123]
+    paths: [.github/workflows/v61-auditoria-smtp-readonly.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  diagnostico:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar FTPS
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp >/dev/null
+          install -m 700 -d /tmp/v61-smtp
+      - name: Leer .env del backend mediante FTP sin imprimir ni alterar secretos
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p=Path('/tmp/v61-smtp')
+          with (p/'get.lftp').open('w') as f:
+            for cmd in [
+             'set cmd:fail-exit yes','set ftp:ssl-force yes',
+             'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+             'set net:timeout 45','set net:max-retries 3'
+            ]:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            print('get /htdocs/api-v2/.env -o /tmp/v61-smtp/backend.private.env',file=f)
+            print('cls -1 /htdocs/api-v2/bootstrap/cache',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v61-smtp/get.lftp >/tmp/v61-smtp/cache-list.txt 2>/tmp/v61-smtp/ftp-errors.log
+          rm -f /tmp/v61-smtp/get.lftp
+      - name: Solo indicadores booleanos de correo, nunca revelar los valores
+        run: |
+          set -euo pipefail
+          set +x
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('/tmp/v61-smtp')
+          env={}
+          for raw in (p/'backend.private.env').read_text(errors='replace').splitlines():
+            line=raw.strip()
+            if not line or line.startswith('#') or '=' not in line:continue
+            key,value=line.split('=',1)
+            key=key.strip()
+            if not re.fullmatch('[A-Z0-9_]+',key):continue
+            val=value.strip()
+            if len(val)>=2 and val[0]==val[-1] and val[0] in ('"',"'"):
+              val=val[1:-1]
+            env[key]=val
+          nonempty=lambda name:bool(env.get(name,'').strip())
+          mailer=env.get('MAIL_MAILER','log').lower()
+          host=env.get('MAIL_HOST','').strip().lower()
+          port=env.get('MAIL_PORT','587').strip()
+          enc=env.get('MAIL_ENCRYPTION','').strip().lower()
+          user=env.get('MAIL_USERNAME','').strip().lower()
+          sender=env.get('MAIL_FROM_ADDRESS','').strip().lower()
+          state={
+            'MAIL_MAILER_IS_SMTP':mailer=='smtp',
+            'MAIL_HOST_PRESENT':nonempty('MAIL_HOST'),
+            'MAIL_USERNAME_PRESENT':nonempty('MAIL_USERNAME'),
+            'MAIL_PASSWORD_PRESENT':nonempty('MAIL_PASSWORD'),
+            'MAIL_FROM_ADDRESS_PRESENT':nonempty('MAIL_FROM_ADDRESS'),
+            'MAIL_FROM_NAME_PRESENT':nonempty('MAIL_FROM_NAME'),
+            'SMTP_PORT_STANDARD':port in ('465','587'),
+            'SMTP_ENCRYPTION_STANDARD':enc in ('ssl','tls','starttls'),
+            'SMTP_GMAIL_PROVIDER':host in ('smtp.gmail.com','smtp.googlemail.com'),
+            'GMAIL_FROM_MATCHES_USERNAME':bool(user and sender and user==sender),
+            'CONFIG_CACHE_PRESENT':'config.php' in (p/'cache-list.txt').read_text(errors='replace')
+          }
+          print('V61_SMTP_SAFE_AUDIT',state)
+          print('V61_SMTP_SECRET_VALUES_REDACTED')
+          assert (p/'backend.private.env').exists()
+          PY
+      - name: Eliminar todo rastro de credenciales y archivos privados
+        if: always()
+        run: |
+          rm -f /tmp/v61-smtp/backend.private.env /tmp/v61-smtp/*.lftp /tmp/v61-smtp/ftp-errors.log

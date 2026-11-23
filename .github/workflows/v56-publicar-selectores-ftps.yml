@@ -1,0 +1,301 @@
+name: V56 - Publicar selector buscable y OC compacta FTPS
+on:
+  push:
+    branches: [deploy/v56-selects-compacto-ftps-20261123]
+    paths: [.github/workflows/v56-publicar-selectores-ftps.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FRONT_BASE: c360f8c5dddb53f120805301eaaad4cc9855e538
+      FRONT_PIN: 8f5df98355a688366e45dedbf23ebe3775d3d767
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar fuente aprobada y transporte
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp >/dev/null
+          git clone -q --depth=1 --branch feature/v56-oc-compacta-selects-20261123 https://github.com/msanzana/rutahyd2front.git /tmp/v56front
+          git -C /tmp/v56front fetch -q --depth=1 origin "$FRONT_BASE" "$FRONT_PIN"
+          git -C /tmp/v56front checkout -q --detach "$FRONT_PIN"
+          test "$(git -C /tmp/v56front rev-parse HEAD)" = "$FRONT_PIN"
+          umask 077
+          mkdir -p /tmp/v56/{before,after,check}
+      - name: Respaldo remoto previo solo lectura
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v56')
+          original={
+           'index.html':'/htdocs/index.html',
+           'assets/js/ordenes-compra-v55.js':'/htdocs/assets/js/ordenes-compra-v55.js',
+           'assets/css/ordenes-compra-v55.css':'/htdocs/assets/css/ordenes-compra-v55.css',
+           'root.guard':'/htdocs/.htaccess',
+           'api.guard':'/htdocs/api/.htaccess',
+           'private.guard':'/htdocs/api-v2/.htaccess',
+           'gateway.guard':'/htdocs/api/index.php'
+          }
+          new={
+           'assets/js/select-buscable-v56.js':'/htdocs/assets/js/select-buscable-v56.js',
+           'assets/css/select-buscable-v56.css':'/htdocs/assets/css/select-buscable-v56.css'
+          }
+          manifest={**original,**new}
+          (p/'manifest.txt').write_text(''.join(k+'\t'+v+'\n' for k,v in manifest.items()))
+          with (p/'read.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name,remote in original.items():
+              dest=p/'before'/name;dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+remote+' -o '+str(dest),file=f)
+            print('cls -1 /htdocs/assets/js',file=f)
+            print('cls -1 /htdocs/assets/css',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v56/read.lftp >/tmp/v56/listing.txt 2>/tmp/v56/read-error.log
+          rm -f /tmp/v56/read.lftp
+      - name: Preflight SHA exactos, V55 existente y protección API
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p=Path('/tmp/v56');before=p/'before'
+          expected={
+           'index.html':'6479a4bae1982f84254f06e56f006ee78f528b2d001c89823a794ba4c9b76919',
+           'assets/js/ordenes-compra-v55.js':'d72fccda32480821a5f220c34cc5f84e9c0534068e244d843e6fb8b04458af9c',
+           'assets/css/ordenes-compra-v55.css':'249b552b0c919ba680054783414af1b3fed6a42c92028f455c2b571c625964f5',
+           'root.guard':'a6cbd7462dc5a8492cbdb15e406ad5058557f616375380b813dcf8d24ed47d1e',
+           'api.guard':'ae0248cbcc21787c4595995a9cf76fd8c2edf34bb90cb1051820fc830bde9706',
+           'private.guard':'f19e0a6ec4db41ce29fa249819d1121707608a25e2f697f023d94788f9751a0b',
+           'gateway.guard':'37b5ad7eabd2d7a9ba22c831a3464db8d16fc8cf32950aa6a8a6da811b942687'
+          }
+          for name,sha in expected.items():
+            actual=hashlib.sha256((before/name).read_bytes()).hexdigest()
+            assert actual==sha,'Archivo remoto cambió: '+name
+          listed={x.strip().split('/')[-1] for x in (p/'listing.txt').read_text().splitlines()}
+          assert 'select-buscable-v56.js' not in listed
+          assert 'select-buscable-v56.css' not in listed
+          html=(before/'index.html').read_text()
+          assert 'v53-cache-20261123' in html
+          assert 'clientes-v50.css?v=20261123-v52' in html
+          assert 'app-produccion.js?v=20261123-v55' in html
+          assert 'no-store, no-cache' in (before/'root.guard').read_text()
+          assert 'HTTP_AUTHORIZATION' in (before/'api.guard').read_text()
+          assert 'Require all denied' in (before/'private.guard').read_text()
+          assert 'rutahd2_api_ready' in (before/'gateway.guard').read_text()
+          print('V56_PREFLIGHT_SHA_OK: producción V55 sin cambios; guardas intactas')
+          PY
+      - name: Parches sin fuzz de JS y CSS; HTML con cambios literales mínimos
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os,shutil,subprocess
+          p=Path('/tmp/v56')
+          files=['assets/js/ordenes-compra-v55.js',
+            'assets/css/ordenes-compra-v55.css']
+          for name in files:
+            dst=p/'after'/name;dst.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copy2(p/'before'/name,dst)
+            patch=subprocess.run(['git','-C','/tmp/v56front','diff',
+              '--no-ext-diff','--binary',
+              os.environ['FRONT_BASE'],os.environ['FRONT_PIN'],'--',name],
+              capture_output=True,check=True).stdout
+            assert patch.count(b'diff --git')==1,name
+            apply=subprocess.run(['patch','--batch','--fuzz=0','-p1',
+              '-d',str(p/'after')],input=patch,capture_output=True)
+            if apply.returncode:
+              print(apply.stdout.decode(errors='replace')[:1000])
+              raise RuntimeError('No coincide el archivo productivo: '+name)
+            print('V56_PATCH_OK',name)
+          for name in ['assets/js/select-buscable-v56.js',
+            'assets/css/select-buscable-v56.css']:
+            src=Path('/tmp/v56front')/name
+            dst=p/'after'/name;dst.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copy2(src,dst)
+          html=(p/'before/index.html').read_text()
+          css='  <link rel="stylesheet" href="assets/css/ordenes-compra-v55.css?v=20261123-v55">'
+          newCss=('  <link rel="stylesheet" href="assets/css/ordenes-compra-v55.css?v=20261123-v56">\n'
+            '  <link rel="stylesheet" href="assets/css/select-buscable-v56.css?v=20261123-v56">')
+          js='  <script src="assets/js/ordenes-compra-v55.js?v=20261123-v55" defer></script>'
+          newJs=('  <script src="assets/js/ordenes-compra-v55.js?v=20261123-v56" defer></script>\n'
+            '  <script src="assets/js/select-buscable-v56.js?v=20261123-v56" defer></script>')
+          assert html.count(css)==1 and html.count(js)==1
+          assert 'select-buscable-v56' not in html
+          html=html.replace(css,newCss).replace(js,newJs)
+          assert html.count('data-nav="compras_ordenes"')==1
+          assert html.count('clientes-v50.css?v=20261123-v52')==1
+          assert html.count('app-produccion.js?v=20261123-v55')==1
+          assert html.count('v53-cache-20261123')==1
+          (p/'after/index.html').write_text(html)
+          print('V56_HTML_LITERAL_OK: sólo etiquetas, sin reescribir menús o registros')
+          PY
+          node --check /tmp/v56/after/assets/js/select-buscable-v56.js
+          node --check /tmp/v56/after/assets/js/ordenes-compra-v55.js
+      - name: Guardar respaldo original antes de subir
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v56-respaldo-antes-combobox
+          path: /tmp/v56/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Subir recursos primero e index último
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/v56/upload-started
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v56')
+          manifest=dict(x.split('\t',1) for x in (p/'manifest.txt').read_text().splitlines())
+          files=['assets/css/select-buscable-v56.css',
+            'assets/js/select-buscable-v56.js',
+            'assets/css/ordenes-compra-v55.css',
+            'assets/js/ordenes-compra-v55.js','index.html']
+          (p/'uploaded.txt').write_text('\n'.join(files)+'\n')
+          with (p/'put.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              print('put '+str(p/'after'/name)+' -o '+manifest[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v56/put.lftp >/dev/null 2>/tmp/v56/put-error.log
+          rm -f /tmp/v56/put.lftp
+          echo 'V56_FTPS_UPLOADED: 5 archivos, index último'
+      - name: Verificar bytes remotos y cuatro protecciones sin cambios
+        run: |
+          set -euo pipefail
+          set +x
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v56')
+          manifest=dict(x.split('\t',1) for x in (p/'manifest.txt').read_text().splitlines())
+          names=(p/'uploaded.txt').read_text().splitlines()+[
+            'root.guard','api.guard','private.guard','gateway.guard']
+          with (p/'verify.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in names:
+              dst=p/'check'/name;dst.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+manifest[name]+' -o '+str(dst),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v56/verify.lftp >/dev/null 2>/tmp/v56/verify-error.log
+          rm -f /tmp/v56/verify.lftp
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/v56')
+          for name in (p/'uploaded.txt').read_text().splitlines():
+            assert (p/'check'/name).read_bytes()==(p/'after'/name).read_bytes(),name
+          for name in ['root.guard','api.guard','private.guard','gateway.guard']:
+            assert (p/'check'/name).read_bytes()==(p/'before'/name).read_bytes(),name
+          print('V56_BYTES_OK: cinco archivos exactos, cuatro protecciones intactas')
+          PY
+      - name: Smoke público navegador, sin JWT ni POST
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v56/browser
+          cd /tmp/v56/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try {
+            const page=await browser.newPage({locale:'es-CL',
+              viewport:{width:1280,height:800}});
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/',{
+              waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>Boolean(window.RutaHDProduccion?.navigate)&&
+              Boolean(window.RutaHDSelectBuscable?.enhance)&&
+              Boolean(window.RutaHDOrdenesCompra?.mount),null,{timeout:45000});
+            const checks=await page.evaluate(()=>{
+              const select=document.createElement('select');select.id='v56-anon-smoke';
+              select.append(new Option('Seleccione',''),new Option('Opción demostración','1'));
+              document.body.append(select);
+              window.RutaHDSelectBuscable.refresh(document.body);
+              return {
+                meta:document.querySelector('meta[name="rutahd-release"]')?.content,
+                oc:!!document.querySelector('#purchaseSubnav [data-nav="compras_ordenes"]'),
+                css:!!document.querySelector('link[href*="ordenes-compra-v55.css?v=20261123-v56"]'),
+                js:!!document.querySelector('script[src*="ordenes-compra-v55.js?v=20261123-v56"]'),
+                choiceCss:!!document.querySelector('link[href*="select-buscable-v56.css?v=20261123-v56"]'),
+                choiceJs:!!document.querySelector('script[src*="select-buscable-v56.js?v=20261123-v56"]'),
+                combo:!!select.parentElement.querySelector('[role=combobox]'),
+                clients:!!document.querySelector('#clientSubnav [data-nav="clientes_listado"]')
+              };
+            });
+            console.log('V56_PUBLIC_SMOKE',JSON.stringify({
+              status:response?.status(),checks,errors
+            }));
+            if(response?.status()!==200||
+              checks.meta!=='v53-cache-20261123'||
+              !Object.values(checks).every(Boolean)||errors.length)
+              throw Error('Falló smoke V56');
+            console.log('V56_PUBLIC_SMOKE_OK');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar originales y eliminar dos nuevos si falla
+        if: failure()
+        run: |
+          set +x
+          if [ ! -f /tmp/v56/upload-started ];then
+            echo 'V56_ROLLBACK_NO_APLICA: no se modificó producción'
+            exit 0
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v56')
+          manifest=dict(x.split('\t',1) for x in (p/'manifest.txt').read_text().splitlines())
+          existing=['index.html','assets/js/ordenes-compra-v55.js',
+            'assets/css/ordenes-compra-v55.css']
+          new=['assets/js/select-buscable-v56.js','assets/css/select-buscable-v56.css']
+          with (p/'rollback.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in existing:
+              print('put '+str(p/'before'/name)+' -o '+manifest[name],file=f)
+            print('set cmd:fail-exit no',file=f)
+            for name in new:print('rm '+manifest[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v56/rollback.lftp >/dev/null 2>/tmp/v56/rollback-error.log &&
+            echo 'V56_ROLLBACK_ATTEMPTED: antiguos restaurados, nuevos retirados' ||
+            echo '::error::Rollback incompleto, restaurar respaldo rutahd-v56-respaldo-antes-combobox'
+      - name: Eliminar scripts que contienen credenciales
+        if: always()
+        run: rm -f /tmp/v56/*.lftp

@@ -1,0 +1,254 @@
+name: V61 - Publicar reenvio correo de OC (frontend)
+on:
+  push:
+    branches: [deploy/v61-reenvio-oc-ftps-20261123]
+    paths: [.github/workflows/v61-publicar-reenvio-oc.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FRONT_BASE: de3b637e45ad0104423914ba987d6a52e4e1a2e9
+      FRONT_PIN: 2d47db15e5ceae0ef2c919ea176ded2dfc65b3a4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar fuente congelada y FTPS
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp >/dev/null
+          git clone -q --depth=1 --branch fix/v61-reenvio-oc-visible-20261123 https://github.com/msanzana/rutahyd2front.git /tmp/v61front
+          git -C /tmp/v61front fetch -q --depth=1 origin "$FRONT_BASE" "$FRONT_PIN"
+          git -C /tmp/v61front checkout -q --detach "$FRONT_PIN"
+          test "$(git -C /tmp/v61front rev-parse HEAD)" = "$FRONT_PIN"
+          umask 077
+          mkdir -p /tmp/v61deploy/{before,after,check}
+
+      - name: Respaldo original FTPS, sin escrituras
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p=Path('/tmp/v61deploy')
+          files={
+           'index.html':'/htdocs/index.html',
+           'assets/js/ordenes-compra-v55.js':'/htdocs/assets/js/ordenes-compra-v55.js',
+           'root.guard':'/htdocs/.htaccess',
+           'api.guard':'/htdocs/api/.htaccess',
+           'private.guard':'/htdocs/api-v2/.htaccess',
+           'gateway.guard':'/htdocs/api/index.php'
+          }
+          (p/'manifest.txt').write_text(''.join(k+'\t'+v+'\n' for k,v in files.items()))
+          with (p/'read.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name,remote in files.items():
+              target=p/'before'/name;target.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+remote+' -o '+str(target),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v61deploy/read.lftp >/dev/null 2>/tmp/v61deploy/read-error.log
+          rm -f /tmp/v61deploy/read.lftp
+
+      - name: Verificar estado productivo V59 y parche exacto
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,os,subprocess,shutil
+          from pathlib import Path
+          p=Path('/tmp/v61deploy');b=p/'before'
+          html=(b/'index.html').read_text()
+          for name in ['v53-cache-20261123',
+            'ordenes-compra-v55.js?v=20261123-v59',
+            'ordenes-compra-v55.css?v=20261123-v59',
+            'catalogos-api.js?v=20261123-v59',
+            'select-buscable-v56.js?v=20261123-v56']:
+            assert html.count(name)==1,'Versión inesperada: '+name
+          assert 'no-store, no-cache' in (b/'root.guard').read_text()
+          assert 'HTTP_AUTHORIZATION' in (b/'api.guard').read_text()
+          assert 'Require all denied' in (b/'private.guard').read_text()
+          assert 'rutahd2_api_ready' in (b/'gateway.guard').read_text()
+          for file in ['index.html','assets/js/ordenes-compra-v55.js',
+            'root.guard','api.guard','private.guard','gateway.guard']:
+            print('V61_REMOTE_SHA',file,hashlib.sha256((b/file).read_bytes()).hexdigest())
+          name='assets/js/ordenes-compra-v55.js'
+          dst=p/'after'/name;dst.parent.mkdir(parents=True,exist_ok=True)
+          shutil.copy2(b/name,dst)
+          patch=subprocess.run(['git','-C','/tmp/v61front','diff','--no-ext-diff','--binary',
+            os.environ['FRONT_BASE'],os.environ['FRONT_PIN'],'--',name],
+            check=True,capture_output=True).stdout
+          assert patch.count(b'diff --git')==1,'Patch incorrecto'
+          result=subprocess.run(['patch','--batch','--fuzz=0','-p1',
+            '-d',str(p/'after')],input=patch,capture_output=True)
+          if result.returncode:
+            print(result.stdout.decode(errors='replace')[:1200])
+            raise RuntimeError('Divergencia JS en producción')
+          new=(p/'after'/name).read_text()
+          assert 'confirmarReenvio' in new and 'Reenviar correo de orden' in new
+          assert html.count('ordenes-compra-v55.js?v=20261123-v59')==1
+          html=html.replace('ordenes-compra-v55.js?v=20261123-v59',
+            'ordenes-compra-v55.js?v=20261123-v61')
+          assert html.count('data-nav="compras_ordenes"')==1
+          assert 'v53-cache-20261123' in html
+          (p/'after/index.html').write_text(html)
+          print('V61_PREFLIGHT_OK: solo JS y una versión HTML')
+          PY
+          node --check /tmp/v61deploy/after/assets/js/ordenes-compra-v55.js
+
+      - name: Guardar respaldo antes de publicar
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v61-respaldo-antes-reenvio-oc
+          path: /tmp/v61deploy/before/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Publicar JS y HTML al final
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/v61deploy/upload-started
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p=Path('/tmp/v61deploy')
+          files=['assets/js/ordenes-compra-v55.js','index.html']
+          manifest=dict(x.split('\t',1) for x in (p/'manifest.txt').read_text().splitlines())
+          with (p/'put.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              print('put '+str(p/'after'/name)+' -o '+manifest[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v61deploy/put.lftp >/dev/null 2>/tmp/v61deploy/put-error.log
+          rm -f /tmp/v61deploy/put.lftp
+          echo 'V61_FTPS_PUBLISHED'
+
+      - name: Readback de archivos y protecciones
+        run: |
+          set -euo pipefail
+          set +x
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p=Path('/tmp/v61deploy')
+          files=['index.html','assets/js/ordenes-compra-v55.js',
+            'root.guard','api.guard','private.guard','gateway.guard']
+          manifest=dict(x.split('\t',1) for x in (p/'manifest.txt').read_text().splitlines())
+          with (p/'verify.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              dst=p/'check'/name;dst.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+manifest[name]+' -o '+str(dst),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v61deploy/verify.lftp >/dev/null 2>/tmp/v61deploy/verify-error.log
+          rm -f /tmp/v61deploy/verify.lftp
+          for_file=1
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/v61deploy')
+          for name in ['index.html','assets/js/ordenes-compra-v55.js']:
+            assert (p/'check'/name).read_bytes()==(p/'after'/name).read_bytes(),name
+          for name in ['root.guard','api.guard','private.guard','gateway.guard']:
+            assert (p/'check'/name).read_bytes()==(p/'before'/name).read_bytes(),name
+          print('V61_BYTES_OK: 2 archivos exactos, 4 guardas intactas')
+          PY
+
+      - name: Smoke navegador público sin sesión y sin enviar correos
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v61deploy/browser
+          cd /tmp/v61deploy/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({viewport:{width:1440,height:900}});
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/',{
+              waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>Boolean(window.RutaHDOrdenesCompra?.mount),
+              null,{timeout:45000});
+            const checks=await page.evaluate(()=>{
+              const script=document.querySelector('script[src*="ordenes-compra-v55.js?v=20261123-v61"]');
+              const valid=!!window.RutaHDApiCatalogos?.resendPurchaseOrder;
+              return {
+                release:document.querySelector('meta[name="rutahd-release"]')?.content,
+                script:!!script,
+                menu:!!document.querySelector('#purchaseSubnav [data-nav="compras_ordenes"]'),
+                backendReenvioApi:valid
+              };
+            });
+            const auth=await page.evaluate(async()=>{
+              const r=await fetch('/api/v1/ordenes-compra',
+                {headers:{Accept:'application/json'},cache:'no-store'});
+              return {status:r.status,type:r.headers.get('content-type')||''};
+            });
+            console.log('V61_PUBLIC_SMOKE',JSON.stringify({
+              http:response?.status(),checks,auth,errors}));
+            if(response?.status()!==200||checks.release!=='v53-cache-20261123'||
+              !checks.script||!checks.menu||!checks.backendReenvioApi||
+              auth.status!==401||!auth.type.includes('application/json')||errors.length)
+              throw Error('Smoke V61 incorrecto');
+            console.log('V61_PUBLIC_SMOKE_OK');
+          }finally{await browser.close();}
+          JS
+
+      - name: Restaurar originales si falla fase posterior a subida
+        if: failure()
+        run: |
+          set +x
+          if [ ! -f /tmp/v61deploy/upload-started ];then
+            echo V61_ROLLBACK_NO_APLICA
+            exit 0
+          fi
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p=Path('/tmp/v61deploy')
+          manifest=dict(x.split('\t',1) for x in (p/'manifest.txt').read_text().splitlines())
+          files=['index.html','assets/js/ordenes-compra-v55.js']
+          with (p/'rollback.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              print('put '+str(p/'before'/name)+' -o '+manifest[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v61deploy/rollback.lftp >/dev/null 2>/tmp/v61deploy/rollback-errors.log &&
+            echo 'V61_ROLLBACK_ATTEMPTED: archivos originales restaurados' ||
+            echo '::error::Rollback incompleto, restaurar respaldo V61'
+      - name: Destruir scripts temporales
+        if: always()
+        run: rm -f /tmp/v61deploy/*.lftp

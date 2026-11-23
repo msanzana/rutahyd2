@@ -45,7 +45,9 @@ foreach([
  '(Correo: emisor@example.invalid)' => 'Correo emisor',
  '(Correo: prueba@example.invalid)' => 'Correo proveedor'
 ] as $fragment=>$etiqueta){
-    if(!str_contains($pdf,$fragment))throw new RuntimeException('PDF omite '.$etiqueta);
+    $encoded=iconv('UTF-8','Windows-1252//TRANSLIT//IGNORE',$fragment);
+    if($encoded===false||!str_contains($pdf,$encoded))
+        throw new RuntimeException('PDF omite '.$etiqueta);
 }
 if(substr_count($pdf,'(EMISOR)')!==2 || substr_count($pdf,'(PROVEEDOR)')!==2)
     throw new RuntimeException('El encabezado debe repetirse en las dos paginas');

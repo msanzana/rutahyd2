@@ -92,6 +92,43 @@ final class OrdenesCompraControlador extends Controller
         return $this->respuesta($q->orderBy('nombre')->orderBy('id')->paginate(25));
     }
 
+    /**
+     * Costos netos del catálogo al seleccionar productos para una OC.
+     * Consulta puntual, sin escrituras, exclusiva de Compras y limitada
+     * a productos activos vinculados al proveedor recibido.
+     */
+    public function costosProductos(Request $request)
+    {
+        $data=$request->validate([
+            'proveedor_id'=>['required','integer','min:1'],
+            'productos'=>['required','array','min:1','max:100'],
+            'productos.*'=>['required','integer','min:1','distinct'],
+        ]);
+        $proveedorId=(int)$data['proveedor_id'];
+        $proveedorActivo=DB::table('proveedores')->where('id',$proveedorId)
+            ->where('activo',1)->exists();
+        if(!$proveedorActivo)throw ValidationException::withMessages([
+            'proveedor_id'=>['El proveedor no está activo.']
+        ]);
+        $ids=array_map('intval',$data['productos']);
+        $productos=DB::table('productos as p')
+            ->whereIn('p.id',$ids)->where('p.activo',1)
+            ->whereExists(fn($q)=>$q->selectRaw('1')
+                ->from('productos_proveedores as pp')
+                ->whereColumn('pp.producto_id','p.id')
+                ->where('pp.proveedor_id',$proveedorId)
+                ->where('pp.activo',1))
+            ->get(['p.id','p.costo_neto']);
+        if($productos->count()!==count($ids))
+            throw ValidationException::withMessages([
+                'productos'=>['Uno o más productos no pertenecen al proveedor activo.']
+            ]);
+        return $this->respuesta(['costos'=>$productos->map(fn($p)=>[
+            'producto_id'=>(int)$p->id,
+            'costo_unitario_neto'=>$p->costo_neto===null?null:(string)$p->costo_neto,
+        ])->values()->all()]);
+    }
+
     public function listar(Request $request)
     {
         $v=$request->validate([

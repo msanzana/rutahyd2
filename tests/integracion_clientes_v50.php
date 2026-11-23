@@ -77,6 +77,20 @@ try{
   checkCustomer($id>0&&$created['telefono']==='+56 912345678','Phone must be stored verbatim');
   checkCustomer((int)$created['tipo_juridico_id']===(int)$types['EMPRESA'],
     'Legal FK stored');
+  // V52: Código de registro es exclusivamente el ID del servidor.
+  customerExpect(422,customerCall('PUT','/api/v1/recursos/clientes/'.$id,
+    ['codigo'=>'99999999'],$admin),'Legacy business code not writable');
+  $activity=DB::table('giros_sii')->where('activo',1)
+    ->orderBy('codigo')->first(['codigo','descripcion']);
+  checkCustomer((bool)$activity,'Test needs active SII giro');
+  $companyWithGiro=customerExpect(200,customerCall('PUT',
+    '/api/v1/recursos/clientes/'.$id,[
+      'tipo_juridico_id'=>(int)$types['EMPRESA'],
+      'actividad_economica_codigo'=>$activity->codigo
+    ],$admin),'Company giro SII allowed');
+  checkCustomer($companyWithGiro['giro']===$activity->descripcion,
+    'Official activity description required for empresa');
+
   $baseList=DB::table('listas_precios')->where('es_base',1)->value('id');
   checkCustomer((int)$baseList>0,'Base price list missing');
   checkCustomer(DB::table('clientes_listas_precios')
@@ -155,6 +169,9 @@ try{
     'tipo_juridico_id'=>(int)$types['PERSONA_NATURAL']
   ],$admin),'Edit customer legal type/phone');
   checkCustomer(($edited['telefono']??'')==='+56 987654321','Edited phone persisted');
+  checkCustomer(($edited['giro']??null)===null &&
+    ($edited['actividad_economica_codigo']??null)===null,
+    'Switching to persona natural must clear giro and code SII');
   $page=customerExpect(200,customerCall('GET','/api/v1/recursos/clientes?'.
     http_build_query(['filtros'=>['tipo_juridico_id'=>(int)$types['PERSONA_NATURAL']],
       'orden'=>'nombre','direccion_orden'=>'asc']),[],$admin),'Sort/filter edited customer');
@@ -170,7 +187,7 @@ try{
   checkCustomer(($off['activo']??null)===false,'Soft delete state');
   customerExpect(200,customerCall('PUT','/api/v1/recursos/clientes/'.$id,
     ['activo'=>true],$admin),'Reactivate preserving legal type and phone');
-  echo "V51_BACK_OK: price pivot create/edit, phone +56 NNNNNNNNN, RUT, legal types, CRUD, advanced filters, active price list, JWT.\n";
+  echo "V52_BACK_OK: empresa-only giro, immutable internal code, pivot and phone +56 NNNNNNNNN, RUT, legal types, CRUD, advanced filters, active price list, JWT.\n";
 }catch(Throwable $e){
   fwrite(STDERR,'V50_BACK_FAIL '.$e->getMessage()."\n");
   exit(1);

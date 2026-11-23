@@ -1,0 +1,82 @@
+name: V54 - Auditar solo lectura frontend productivo
+on:
+  push:
+    branches: [audit/v54-produccion-lectura-20261123]
+    paths: [.github/workflows/v54-auditoria-frontend-readonly.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  auditar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Descargar solo lectura HTML, app y protecciones
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp >/dev/null
+          umask 077
+          mkdir -p /tmp/rutahd-v54
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/rutahd-v54')
+          files={
+            'app.js':'/htdocs/assets/js/app-produccion.js',
+            'index.html':'/htdocs/index.html',
+            'root.htaccess':'/htdocs/.htaccess',
+            'api.guard':'/htdocs/api/.htaccess',
+            'private.guard':'/htdocs/api-v2/.htaccess',
+            'gateway':'/htdocs/api/index.php',
+          }
+          with (p/'readonly.lftp').open('w') as f:
+            for cmd in ('set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 35','set net:max-retries 2'):print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name,path in files.items():
+              print('get '+path+' -o '+str(p/name),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/rutahd-v54/readonly.lftp >/dev/null 2>/tmp/rutahd-v54/ftp-error.log
+          rm -f /tmp/rutahd-v54/readonly.lftp
+      - name: Comparar SHA y diagnóstico sin revelar datos
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,re
+          p=Path('/tmp/rutahd-v54')
+          for name in ['app.js','index.html','root.htaccess']:
+            b=(p/name).read_bytes()
+            print('V54_FTPS_FILE',name,'bytes',len(b),'sha256',hashlib.sha256(b).hexdigest())
+          app=(p/'app.js').read_text()
+          html=(p/'index.html').read_text()
+          assert b'HTTP_AUTHORIZATION' in (p/'api.guard').read_bytes()
+          assert b'Require all denied' in (p/'private.guard').read_bytes()
+          assert b'rutahd2_api_ready' in (p/'gateway').read_bytes()
+          assert 'v53-cache-20261123' in html
+          assert html.count('app-produccion.js?v=20261122-v50')==1, 'Version unexpected'
+          assert 'clientes_listado' in html
+          assert 'no-store, no-cache' in (p/'root.htaccess').read_text()
+          bad=chr(36)+"('#ubicacionesSubnav [data-nav]').forEach"
+          good=chr(36)*2+"('#ubicacionesSubnav [data-nav]').forEach"
+          print('V54_REMOTE_MENU_SELECTOR_BAD',bad in app)
+          print('V54_REMOTE_MENU_SELECTOR_GOOD',good in app)
+          assert (bad in app) != (good in app),'Selector de arranque desconocido'
+          print('V54_FTPS_READONLY_OK: datos sin modificaciones, API protegida')
+          PY
+      - name: Eliminar temporales FTPS
+        if: always()
+        run: rm -f /tmp/rutahd-v54/*.lftp

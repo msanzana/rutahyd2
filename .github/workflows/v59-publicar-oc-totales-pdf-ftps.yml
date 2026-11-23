@@ -1,0 +1,316 @@
+name: V59 - Publicar impuestos OC, total y PDF compacto FTPS
+on:
+  push:
+    branches: [deploy/v59-oc-totales-pdf-ftps-20261123]
+    paths: [.github/workflows/v59-publicar-oc-totales-pdf-ftps.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACK_BASE: f8ef78845e8b01703e98d0c9d9333c00d9f70db5
+      BACK_PIN: b8300121cec9a2b7a869a722fef12b73a7012b00
+      FRONT_BASE: 8b5abe0594248ca75b72730d74821c616100c56d
+      FRONT_PIN: 1a3dac165796f57c16629638eb1a01f22c0e75cb
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fuentes congeladas y herramientas FTPS/PHP
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp php-cli >/dev/null
+          git fetch -q --depth=1 origin "$BACK_BASE" "$BACK_PIN"
+          git clone -q --depth=1 --branch fix/v59-oc-totales-pdf-20261123 https://github.com/msanzana/rutahyd2front.git /tmp/v59-front
+          git -C /tmp/v59-front fetch -q --depth=1 origin "$FRONT_BASE" "$FRONT_PIN"
+          git -C /tmp/v59-front checkout -q --detach "$FRONT_PIN"
+          test "$(git -C /tmp/v59-front rev-parse HEAD)" = "$FRONT_PIN"
+          umask 077
+          mkdir -p /tmp/v59deploy/{before,after,check}
+
+      - name: Leer y respaldar archivos de producción sin escribir
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v59deploy')
+          files={
+            'index.html':'/htdocs/index.html',
+            'assets/js/ordenes-compra-v55.js':'/htdocs/assets/js/ordenes-compra-v55.js',
+            'assets/css/ordenes-compra-v55.css':'/htdocs/assets/css/ordenes-compra-v55.css',
+            'assets/js/catalogos-api.js':'/htdocs/assets/js/catalogos-api.js',
+            'app/Http/Controllers/OrdenesCompraControlador.php':
+              '/htdocs/api-v2/app/Http/Controllers/OrdenesCompraControlador.php',
+            'routes/api.php':'/htdocs/api-v2/routes/api.php',
+            'root.guard':'/htdocs/.htaccess',
+            'api.guard':'/htdocs/api/.htaccess',
+            'private.guard':'/htdocs/api-v2/.htaccess',
+            'gateway.guard':'/htdocs/api/index.php'
+          }
+          (p/'manifest.txt').write_text(''.join(k+'\t'+v+'\n' for k,v in files.items()))
+          with (p/'read.lftp').open('w') as f:
+            for command in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(command,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name,remote in files.items():
+              target=p/'before'/name
+              target.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+remote+' -o '+str(target),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v59deploy/read.lftp >/dev/null 2>/tmp/v59deploy/read-errors.log
+          rm -f /tmp/v59deploy/read.lftp
+
+      - name: Comprobar SHA exactos y aplicar parches sin fuzzy en staging
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,os,subprocess,shutil
+          from pathlib import Path
+          p=Path('/tmp/v59deploy');before=p/'before'
+          sha={
+            'index.html':'c72acb7130b616c38e16c251c31338f6448cd7a8caa415c12331181fb499f9e9',
+            'assets/js/ordenes-compra-v55.js':'52c7d3c1227072bd490e7111b8409bfb20c355becb1b36759bced8d82523e7d0',
+            'assets/css/ordenes-compra-v55.css':'3dc0da221a3f51a3918b036aa5e6b340f6caaf8eca7621260a049aab8b625fdd',
+            'assets/js/catalogos-api.js':'15741ffe246c93f6c0a472f0980e17b0bb0503820d20f55b89370c81ecbdf0f1',
+            'app/Http/Controllers/OrdenesCompraControlador.php':'0464fff7afe4231bf7c9e22cd5092580c5bd2c2ef376cbfbf93e14bde4d9fcfd',
+            'routes/api.php':'fbaa43dcbb804886bf16ce6be9040b85d87529c79be889afa8f4113ca4013f2a',
+            'root.guard':'a6cbd7462dc5a8492cbdb15e406ad5058557f616375380b813dcf8d24ed47d1e',
+            'api.guard':'ae0248cbcc21787c4595995a9cf76fd8c2edf34bb90cb1051820fc830bde9706',
+            'private.guard':'f19e0a6ec4db41ce29fa249819d1121707608a25e2f697f023d94788f9751a0b',
+            'gateway.guard':'37b5ad7eabd2d7a9ba22c831a3464db8d16fc8cf32950aa6a8a6da811b942687'
+          }
+          for name,expected in sha.items():
+            actual=hashlib.sha256((before/name).read_bytes()).hexdigest()
+            assert actual==expected,'Producción cambió desde auditoría: '+name
+          html=(before/'index.html').read_text()
+          for tag in ['v53-cache-20261123','clientes-v50.css?v=20261123-v52',
+            'ordenes-compra-v55.css?v=20261123-v58',
+            'ordenes-compra-v55.js?v=20261123-v58',
+            'catalogos-api.js?v=20261123-v55']:
+            assert html.count(tag)==1,'Versionado remoto distinto: '+tag
+          assert 'no-store, no-cache' in (before/'root.guard').read_text()
+          assert 'HTTP_AUTHORIZATION' in (before/'api.guard').read_text()
+          assert 'Require all denied' in (before/'private.guard').read_text()
+          assert 'rutahd2_api_ready' in (before/'gateway.guard').read_text()
+          print('V59_PREFLIGHT_SHA_OK: 6 archivos y cuatro guardas')
+          for repo,base,pin,paths in [
+            ('/tmp/v59-front',os.environ['FRONT_BASE'],os.environ['FRONT_PIN'],
+              ['assets/js/ordenes-compra-v55.js','assets/css/ordenes-compra-v55.css',
+               'assets/js/catalogos-api.js']),
+            (os.environ['GITHUB_WORKSPACE'],os.environ['BACK_BASE'],os.environ['BACK_PIN'],
+              ['app/Http/Controllers/OrdenesCompraControlador.php','routes/api.php'])]:
+            for name in paths:
+              target=p/'after'/name
+              target.parent.mkdir(parents=True,exist_ok=True)
+              shutil.copy2(before/name,target)
+              delta=subprocess.run(['git','-C',repo,'diff','--no-ext-diff','--binary',
+                base,pin,'--',name],check=True,capture_output=True).stdout
+              assert delta.count(b'diff --git')==1,'Patch faltante: '+name
+              applied=subprocess.run(['patch','--batch','--fuzz=0','-p1',
+                '-d',str(p/'after')],input=delta,capture_output=True)
+              if applied.returncode:
+                print(applied.stdout.decode(errors='replace')[:1100])
+                raise RuntimeError('Diferencias FTPS sin resolver: '+name)
+              print('V59_PATCH_OK',name)
+          changes=[
+            ('ordenes-compra-v55.css?v=20261123-v58','ordenes-compra-v55.css?v=20261123-v59'),
+            ('ordenes-compra-v55.js?v=20261123-v58','ordenes-compra-v55.js?v=20261123-v59'),
+            ('catalogos-api.js?v=20261123-v55','catalogos-api.js?v=20261123-v59')]
+          for old,new in changes:
+            assert html.count(old)==1,old
+            html=html.replace(old,new)
+          assert html.count('data-nav="compras_ordenes"')==1
+          assert 'v53-cache-20261123' in html
+          assert 'select-buscable-v56.js?v=20261123-v56' in html
+          (p/'after/index.html').write_text(html)
+          print('V59_HTML_MINIMAL_OK: solo 3 versiones')
+          PY
+          php -l /tmp/v59deploy/after/app/Http/Controllers/OrdenesCompraControlador.php
+          php -l /tmp/v59deploy/after/routes/api.php
+          node --check /tmp/v59deploy/after/assets/js/catalogos-api.js
+          node --check /tmp/v59deploy/after/assets/js/ordenes-compra-v55.js
+          echo V59_STAGED_SYNTAX_OK
+
+      - name: Almacenar respaldo completo ANTES de subir
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v59-respaldo-antes-totales-pdf
+          path: /tmp/v59deploy/before/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Publicar backend primero, luego frontend e index último
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/v59deploy/upload-started
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v59deploy')
+          files=[
+            'app/Http/Controllers/OrdenesCompraControlador.php',
+            'routes/api.php',
+            'assets/js/catalogos-api.js',
+            'assets/css/ordenes-compra-v55.css',
+            'assets/js/ordenes-compra-v55.js',
+            'index.html'
+          ]
+          manifest=dict(line.split('\t',1) for line in (p/'manifest.txt').read_text().splitlines())
+          (p/'uploads.txt').write_text('\n'.join(files)+'\n')
+          with (p/'put.lftp').open('w') as f:
+            for command in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(command,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              print('put '+str(p/'after'/name)+' -o '+manifest[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v59deploy/put.lftp >/dev/null 2>/tmp/v59deploy/put-errors.log
+          rm -f /tmp/v59deploy/put.lftp
+          echo V59_FTPS_PUBLISHED
+
+      - name: Verificación FTPS posterior por bytes con protecciones intactas
+        run: |
+          set -euo pipefail
+          set +x
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v59deploy')
+          names=(p/'uploads.txt').read_text().splitlines()+[
+            'root.guard','api.guard','private.guard','gateway.guard']
+          manifest=dict(line.split('\t',1) for line in (p/'manifest.txt').read_text().splitlines())
+          with (p/'verify.lftp').open('w') as f:
+            for command in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(command,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in names:
+              dst=p/'check'/name;dst.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+manifest[name]+' -o '+str(dst),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v59deploy/verify.lftp >/dev/null 2>/tmp/v59deploy/verify-errors.log
+          rm -f /tmp/v59deploy/verify.lftp
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/v59deploy')
+          for name in (p/'uploads.txt').read_text().splitlines():
+            assert (p/'check'/name).read_bytes()==(p/'after'/name).read_bytes(),name
+          for name in ['root.guard','api.guard','private.guard','gateway.guard']:
+            assert (p/'check'/name).read_bytes()==(p/'before'/name).read_bytes(),name
+          print('V59_BYTES_OK: seis archivos exactos, cuatro protecciones intactas')
+          PY
+
+      - name: Smoke HTTP/Chromium ANÓNIMO, sin operaciones productivas
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v59deploy/browser
+          cd /tmp/v59deploy/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({viewport:{width:1600,height:900},locale:'es-CL'});
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const res=await page.goto('https://rutahyd2.free.nf/',{
+              waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>Boolean(window.RutaHDOrdenesCompra?.mount)&&
+              typeof window.RutaHDApiCatalogos?.calculatePurchaseOrder==='function',
+              null,{timeout:45000});
+            const checks=await page.evaluate(()=>{
+              const diag=document.createElement('dialog');
+              diag.className='modal hd-oc-modal hd-oc-modal--pdf';
+              diag.innerHTML='<section class="hd-oc-modal-body">'+
+                '<div class="hd-oc-modal-heading"><h2>PDF de prueba de layout</h2></div>'+
+                '<iframe class="hd-oc-pdf-frame" title="Visor vacío"></iframe></section>';
+              document.body.append(diag);diag.showModal();
+              const rectangle=diag.getBoundingClientRect();
+              diag.close();diag.remove();
+              return {
+                meta:document.querySelector('meta[name="rutahd-release"]')?.content,
+                css:!!document.querySelector('link[href*="ordenes-compra-v55.css?v=20261123-v59"]'),
+                js:!!document.querySelector('script[src*="ordenes-compra-v55.js?v=20261123-v59"]'),
+                catalog:!!document.querySelector('script[src*="catalogos-api.js?v=20261123-v59"]'),
+                select:!!document.querySelector('script[src*="select-buscable-v56.js?v=20261123-v56"]'),
+                menu:!!document.querySelector('#purchaseSubnav [data-nav="compras_ordenes"]'),
+                clients:!!document.querySelector('#clientSubnav [data-nav="clientes_listado"]'),
+                pdfWidth:rectangle.width,pdfHeight:rectangle.height
+              };
+            });
+            const anon=await page.evaluate(async()=>{
+              const r=await fetch('/api/v1/ordenes-compra',{
+                headers:{Accept:'application/json'},cache:'no-store'});
+              return {status:r.status,type:r.headers.get('content-type')||''};
+            });
+            console.log('V59_PUBLIC_SMOKE',JSON.stringify({
+              http:res?.status(),checks,anon,errors
+            }));
+            if(res?.status()!==200||checks.meta!=='v53-cache-20261123'||
+              !checks.css||!checks.js||!checks.catalog||!checks.select||
+              !checks.menu||!checks.clients||
+              checks.pdfWidth>761||checks.pdfHeight>751||
+              anon.status!==401||!anon.type.includes('application/json')||errors.length)
+              throw Error('Smoke de OC V59 incompleto');
+            console.log('V59_PUBLIC_SMOKE_OK');
+          }finally{await browser.close();}
+          JS
+
+      - name: Restaurar originales si falla cualquier fase posterior a escritura
+        if: failure()
+        run: |
+          set +x
+          if [ ! -f /tmp/v59deploy/upload-started ];then
+            echo 'V59_ROLLBACK_NO_APLICA: sin modificación remota'
+            exit 0
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v59deploy')
+          manifest=dict(line.split('\t',1) for line in (p/'manifest.txt').read_text().splitlines())
+          files=['index.html','assets/js/ordenes-compra-v55.js',
+            'assets/css/ordenes-compra-v55.css','assets/js/catalogos-api.js',
+            'routes/api.php','app/Http/Controllers/OrdenesCompraControlador.php']
+          with (p/'rollback.lftp').open('w') as f:
+            for command in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(command,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              print('put '+str(p/'before'/name)+' -o '+manifest[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v59deploy/rollback.lftp >/dev/null 2>/tmp/v59deploy/rollback-errors.log &&
+            echo 'V59_ROLLBACK_ATTEMPTED: seis archivos anteriores restaurados' ||
+            echo '::error::Rollback incompleto; usar respaldo rutahd-v59-respaldo-antes-totales-pdf'
+
+      - name: Destruir scripts locales que incluyen clave FTPS
+        if: always()
+        run: rm -f /tmp/v59deploy/*.lftp

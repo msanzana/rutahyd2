@@ -7,6 +7,7 @@ use App\Services\PdfOrdenCompra;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
@@ -328,11 +329,16 @@ final class OrdenesCompraControlador extends Controller
             'mensaje'=>'Orden anulada. No se modificó el inventario.']);
     }
 
-    public function reenviar(int $id)
+    public function reenviar(Request $request,int $id)
     {
         $documento=$this->documento($id);
         abort_unless($documento['estado_codigo']==='ACTIVA',409,
             'Solo se reenvían órdenes activas');
+        // Límite individual, sin compartir contador con otras operaciones CRUD.
+        $key='oc-reenvio:'.$id.':'.(int)$request->user()?->id;
+        abort_if(RateLimiter::tooManyAttempts($key,4),429,
+            'Demasiados reenvíos de esta orden. Inténtalo más tarde.');
+        RateLimiter::hit($key,60);
         $this->enviarProveedor($documento);
         return $this->respuesta(['mensaje'=>'Aviso y PDF enviados nuevamente al proveedor.']);
     }

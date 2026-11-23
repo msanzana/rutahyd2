@@ -145,6 +145,7 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::put('/perfil/preferencias',[PreferenciasUsuarioControlador::class,'guardar']);
     Route::delete('/sesion',[SesionControlador::class,'salir']);
     // Consultas paginadas solo de recursos admitidos y con permiso por rol.
+    Route::get('/clientes/tipos-juridicos',[RecursoControlador::class,'tiposJuridicosClientes']);
     Route::get('/recursos/{recurso}',[RecursoControlador::class,'listar']);
     Route::get('/recursos/{recurso}/{id}',[RecursoControlador::class,'ver'])->whereNumber('id');
     // Escrituras permitidas solo para clientes, proveedores y bodegas.

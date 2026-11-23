@@ -89,6 +89,15 @@ try{
     checkOC((float)$preview['total_bruto']===238.00,'Total bruto de previsualización');
     checkOC((int)DB::table('ordenes_compra')->count()===$beforePreview,
         'Previsualizar no debe insertar ni modificar OC');
+    $caso2500=$body;
+    $caso2500['detalles'][0]['costo_unitario_neto']='1250.0000';
+    $vista2500=expectOC(200,callOC('POST','/api/v1/ordenes-compra/calcular',
+        $caso2500,$token),'caso subtotal 2500');
+    checkOC((float)$vista2500['subtotal_neto']===2500.00,'Neto 2500');
+    checkOC((float)$vista2500['total_impuestos']===475.00,'IVA 475');
+    checkOC((float)$vista2500['total_bruto']===2975.00,'Bruto 2975');
+    checkOC((int)DB::table('ordenes_compra')->count()===$beforePreview,
+        'Calcular 2500 tampoco puede guardar');
     expectOC(422,callOC('POST','/api/v1/ordenes-compra',
         array_merge($body,['estado_id'=>999]),$token),'estado inmutable');
     $bad=$body;$bad['detalles'][0]['producto_id']=$otherId;

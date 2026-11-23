@@ -19,7 +19,9 @@ final class Cliente extends Model
         'telefono',
         'direccion',
         'ciudad_id',
-        'sector',
+        'giro',
+        'actividad_economica_codigo',
+        'tipo_juridico_id',
         'observaciones',
         'activo',
     ];

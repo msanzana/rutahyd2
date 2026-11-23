@@ -17,11 +17,18 @@ final class PdfOrdenCompra
         return str_replace(['\\','(',')',"\r","\n"],['\\\\','\\(','\\)',' ',' '],$latin);
     }
 
-    private static function cmdText(float $x,float $y,string $valor,int $size=10,bool $bold=false): string
+    /**
+     * El color de relleno es estado del documento PDF, no de cada recuadro.
+     * Es obligatorio fijarlo ANTES de todo texto: de otro modo la letra
+     * hereda el violeta claro que usó el rectángulo y queda invisible.
+     */
+    private static function cmdText(float $x,float $y,string $valor,int $size=10,
+        bool $bold=false,string $color='0.15 0.12 0.22'): string
     {
         $font=$bold?'F2':'F1';
-        return sprintf('BT /%s %d Tf %.2F %.2F Td (%s) Tj ET'."\n",
-            $font,$size,$x,$y,self::texto($valor));
+        return $color.' rg '.
+            sprintf('BT /%s %d Tf %.2F %.2F Td (%s) Tj ET'."\n",
+                $font,$size,$x,$y,self::texto($valor));
     }
 
     private static function rect(float $x,float $y,float $w,float $h,string $color): string
@@ -47,6 +54,22 @@ final class PdfOrdenCompra
         return mb_strlen($s,'UTF-8')<=$max?$s:mb_substr($s,0,$max-1,'UTF-8').'…';
     }
 
+    private static function dato(?string $valor): string
+    {
+        $s=trim((string)$valor);
+        return $s!==''?$s:'No configurado';
+    }
+
+    private static function fecha(?string $valor): string
+    {
+        $s=trim((string)$valor);
+        if($s==='')return 'No registrada';
+        // Desde MariaDB llega YYYY-MM-DD o YYYY-MM-DD HH:MM:SS.
+        if(preg_match('/^(\\d{4})-(\\d{2})-(\\d{2})/', $s,$m)===1)
+            return $m[3].'-'.$m[2].'-'.$m[1];
+        return self::truncar($s,20);
+    }
+
     public function generar(array $documento): string
     {
         $numero=(string)($documento['numero']??'OC');
@@ -59,59 +82,84 @@ final class PdfOrdenCompra
         $observaciones=(string)($documento['observaciones']??'');
         $rows=$documento['detalles']??[];
         if(!is_array($rows))$rows=[];
-        $chunks=array_chunk($rows,19);
+        $emisor=$documento['emisor']??[];
+        if(!is_array($emisor))$emisor=[];
+        // Se usa la ficha privada del emisor. Los valores no configurados
+        // quedan explícitos: nunca se inventa un RUT, domicilio o giro.
+        $emisorNombre=self::dato((string)($emisor['nombre']??'Comercializadora H&D'));
+        $emisorRut=self::dato((string)($emisor['rut']??''));
+        $emisorGiro=self::dato((string)($emisor['giro']??''));
+        $emisorDireccion=self::dato((string)($emisor['direccion']??''));
+        $emisorCorreo=self::dato((string)($emisor['correo']??''));
+        $fechaSolicitud=self::fecha($fecha);
+        $fechaEmision=self::fecha((string)($documento['creado_en']??''));
+        $chunks=array_chunk($rows,18);
         if(!$chunks)$chunks=[[]];
         $totalPaginas=count($chunks);
         $streams=[];
         foreach($chunks as $index=>$detalle){
             $pageNo=$index+1;
             $s="% Ruta H&D2 / orden de compra\n";
-            // Cabecera violeta H&D
-            $s.=self::rect(0,742,595,100,'0.18 0.06 0.40');
-            $s.='1 1 1 rg'."\n";
-            $s.=self::cmdText(44,796,'H&D  /  RUTA H&D2',19,true);
-            $s.=self::cmdText(44,769,'ORDEN DE COMPRA',12,true);
-            $s.=self::cmdText(403,796,self::truncar($numero,22),12,true);
-            $s.=self::cmdText(403,774,'Estado: '.$estado,9);
-            $s.='0.13 0.12 0.18 rg'."\n";
-            $s.=self::rect(42,651,511,76,'0.96 0.95 0.98');
-            $s.=self::cmdText(55,708,'PROVEEDOR',9,true);
-            $s.=self::cmdText(55,691,self::truncar($proveedor,54),11,true);
-            $s.=self::cmdText(55,673,'RUT: '.$rut.'    Correo: '.self::truncar($correo,42),9);
-            $s.=self::cmdText(55,658,'Dirección: '.self::truncar($direccion,70),8);
-            $s.=self::cmdText(43,631,'Fecha solicitada: '.$fecha,10);
-            $s.=self::rect(42,592,511,27,'0.87 0.83 0.93');
-            $s.='0.15 0.10 0.26 rg'."\n";
-            $s.=self::cmdText(50,603,'PRODUCTO',9,true);
-            $s.=self::cmdText(333,603,'CANT.',9,true);
-            $s.=self::cmdText(402,603,'COSTO NETO',9,true);
-            $s.=self::cmdText(497,603,'SUBTOTAL',9,true);
-            $y=573;
+            // Banda corporativa. Cada línea de texto define su propio color
+            // para que los fondos no hagan desaparecer la información.
+            $s.=self::rect(0,739,595,103,'0.18 0.06 0.40');
+            $s.=self::cmdText(42,798,'H&D  /  RUTA H&D2',18,true,'1 1 1');
+            $s.=self::cmdText(42,770,'ORDEN DE COMPRA',13,true,'1 1 1');
+            $s.=self::cmdText(379,797,self::truncar($numero,24),11,true,'1 1 1');
+            $s.=self::cmdText(379,774,'Estado: '.self::truncar($estado,27),9,false,'1 1 1');
+
+            // Dos tarjetas de identificación simétricas.
+            // Los datos del proveedor provienen de la ficha asociada a la OC.
+            $s.=self::rect(42,618,248,108,'0.96 0.95 0.98');
+            $s.=self::rect(302,618,251,108,'0.96 0.95 0.98');
+            $s.=self::cmdText(55,705,'EMISOR',9,true);
+            $s.=self::cmdText(55,687,self::truncar($emisorNombre,40),11,true);
+            $s.=self::cmdText(55,672,'RUT: '.self::truncar($emisorRut,36),8);
+            $s.=self::cmdText(55,657,'Giro: '.self::truncar($emisorGiro,35),8);
+            $s.=self::cmdText(55,642,'Direccion: '.self::truncar($emisorDireccion,35),8);
+            $s.=self::cmdText(55,627,'Correo: '.self::truncar($emisorCorreo,36),8);
+
+            $s.=self::cmdText(315,705,'PROVEEDOR',9,true);
+            $s.=self::cmdText(315,687,self::truncar(self::dato($proveedor),40),11,true);
+            $s.=self::cmdText(315,672,'RUT: '.self::truncar(self::dato($rut),36),8);
+            $s.=self::cmdText(315,657,'Correo: '.self::truncar(self::dato($correo),35),8);
+            $s.=self::cmdText(315,642,'Direccion: '.self::truncar(self::dato($direccion),35),8);
+            $s.=self::cmdText(315,627,'Proveedor ID: '.(string)($documento['proveedor_id']??'—'),8);
+
+            $s.=self::rect(42,578,511,28,'0.93 0.90 0.97');
+            $s.=self::cmdText(52,588,'Emision: '.$fechaEmision,9,true);
+            $s.=self::cmdText(302,588,'Fecha solicitada: '.$fechaSolicitud,9,true);
+
+            $s.=self::rect(42,540,511,28,'0.86 0.81 0.92');
+            $s.=self::cmdText(49,551,'PRODUCTO',9,true);
+            $s.=self::cmdText(330,551,'CANT.',9,true);
+            $s.=self::cmdText(398,551,'COSTO NETO',9,true);
+            $s.=self::cmdText(488,551,'SUBTOTAL',9,true);
+            $y=521;
             foreach($detalle as $row){
                 $sku=(string)($row['sku']??'');
                 $nombre=(string)($row['nombre']??'');
                 $cantidad=(string)($row['cantidad']??'0');
                 $costo=(string)($row['costo_unitario_neto']??'0');
                 $subtotal=(string)($row['subtotal_neto']??'0');
-                $s.=self::cmdText(50,$y,self::truncar($sku.'  '.$nombre,43),8);
-                $s.=self::cmdText(334,$y,$cantidad,8);
-                $s.=self::cmdText(400,$y,'$ '.number_format((float)$costo,4,',','.'),8);
-                $s.=self::cmdText(489,$y,'$ '.number_format((float)$subtotal,2,',','.'),8);
-                $s.=self::sep(45,$y-10,551);
-                $y-=23;
+                $s.=self::cmdText(49,$y,self::truncar($sku.'  '.$nombre,42),8);
+                $s.=self::cmdText(331,$y,$cantidad,8);
+                $s.=self::cmdText(398,$y,'$ '.number_format((float)$costo,4,',','.'),8);
+                $s.=self::cmdText(484,$y,'$ '.number_format((float)$subtotal,2,',','.'),8);
+                $s.=self::sep(45,$y-7,551);
+                $y-=20;
             }
             if($index===$totalPaginas-1){
-                $bottom=max(75,$y-34);
+                $bottom=min(155,max(132,$y-29));
                 $s.=self::lineaResumen('Subtotal neto',(string)$documento['subtotal_neto'],$bottom);
-                $s.=self::lineaResumen('Impuestos',(string)$documento['total_impuestos'],$bottom-19);
-                $s.=self::lineaResumen('Total bruto',(string)$documento['total_bruto'],$bottom-47,true);
+                $s.=self::lineaResumen('Impuestos',(string)$documento['total_impuestos'],$bottom-22);
+                $s.=self::lineaResumen('Total bruto',(string)$documento['total_bruto'],$bottom-50,true);
                 if($observaciones!==''){
-                    $s.=self::cmdText(45,80,'Observaciones: '.self::truncar($observaciones,85),8);
+                    $s.=self::cmdText(45,58,'Observaciones: '.self::truncar($observaciones,90),8);
                 }
             }
-            $s.='0.35 0.32 0.41 rg'."\n";
-            $s.=self::cmdText(44,39,'Documento emitido por Ruta H&D2 · Comercializadora H&D',8);
-            $s.=self::cmdText(499,39,'Página '.$pageNo.' / '.$totalPaginas,8);
+            $s.=self::cmdText(42,29,'Ruta H&D2  /  Documento de compra',8);
+            $s.=self::cmdText(496,29,'Pagina '.$pageNo.' / '.$totalPaginas,8);
             $streams[]=$s;
         }
         // Esqueleto ISO PDF 1.4 con una página por stream; xref en bytes exactos.

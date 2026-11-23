@@ -197,8 +197,8 @@ jobs:
             assert html.count(old)==1,'Versión existente inesperada: '+old
             html=html.replace(old,newValue)
           oldScript='  <script src="assets/js/app-produccion.js?v=20261123-v54" defer></script>'
-          newScript='  <script src="assets/js/ordenes-compra-v55.js?v=20261123-v55" defer></script>\n'+
-            '  <script src="assets/js/app-produccion.js?v=20261123-v55" defer></script>'
+          newScript=('  <script src="assets/js/ordenes-compra-v55.js?v=20261123-v55" defer></script>\n'+
+            '  <script src="assets/js/app-produccion.js?v=20261123-v55" defer></script>')
           assert html.count(oldScript)==1
           html=html.replace(oldScript,newScript)
           assert html.count('data-nav="compras_ordenes"')==1

@@ -1,0 +1,94 @@
+name: V55 - DDL OC estados y PDF en MySQL temporal
+on:
+  push:
+    branches: [feature/v55-ordenes-compra-estados-20261123]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compra:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci_temporal_v55
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci_temporal_v55"
+          --health-interval=10s --health-timeout=5s --health-retries=15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar PHP y cliente MySQL
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq php-cli poppler-utils mysql-client >/dev/null
+      - name: Sintaxis de contratos OC
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/OrdenesCompraControlador.php
+          php -l app/Services/PdfOrdenCompra.php
+          php -l app/Models/OrdenCompra.php
+          php -l app/Models/DetalleOrdenCompra.php
+          php -l app/Models/Estado.php
+          php -l app/Models/Modulo.php
+          php -l app/Models/ModuloEstado.php
+          php -l routes/api.php
+          if grep -Eiq 'information_schema|Schema::hasTable|getSchemaBuilder|CREATE TRIGGER' \
+            database/espanol/38_estados_modulos_oc_productos_ddl.sql;then
+            echo 'DDL38 contiene expresiones prohibidas';exit 1
+          fi
+          grep -Fq "middleware('permiso.rutahd:compras.gestionar')" routes/api.php
+          grep -Fq "proveedor_id" app/Http/Controllers/OrdenesCompraControlador.php
+      - name: Comprobar PDF corporativo con archivos de prueba
+        run: |
+          set -euo pipefail
+          php tests/pdf_orden_compra_v55.php
+          pdfinfo /tmp/rutahd_v55_oc_test.pdf | grep -F 'Pages:' | grep -Eq '2$'
+          pdftotext /tmp/rutahd_v55_oc_test.pdf - | grep -Fq 'ORDEN DE COMPRA'
+          pdftotext /tmp/rutahd_v55_oc_test.pdf - | grep -Fq 'SKU-024'
+          echo V55_DOCUMENTO_PDF_OK
+      - name: Preparar esquema legado en MySQL efímero (NO producción)
+        env:
+          MYSQL_PWD: ci_temporal_v55
+        run: |
+          set -euo pipefail
+          mysql -h 127.0.0.1 -uroot < database/espanol/01_esquema_completo_34_tablas_es.sql
+          mysql -h 127.0.0.1 -uroot rutahyd2_es_local \
+            < database/espanol/13_catalogos_comerciales_aditivos.sql
+          mysql -h 127.0.0.1 -uroot rutahyd2_es_local \
+            < database/espanol/20_proveedores_productos_codigos_barras_ddl.sql
+          mysql -h 127.0.0.1 -uroot rutahyd2_es_local -e "
+            INSERT INTO proveedores(id,nombre,correo_electronico)
+              VALUES(50000,'Proveedor de CI','no-real@example.invalid');
+            INSERT INTO productos(id,nombre,activo)
+              VALUES(50000,'Producto legado',1);
+            INSERT INTO presentaciones_productos(id,producto_id,nombre)
+              VALUES(50000,50000,'Unidad de prueba');
+            INSERT INTO ordenes_compra(id,numero,proveedor_id,estado)
+              VALUES(50000,'OC-ANTERIOR',50000,'borrador');
+            INSERT INTO detalles_ordenes_compra(orden_compra_id,presentacion_id,cantidad,
+              costo_unitario_neto,subtotal_neto)
+              VALUES(50000,50000,2.000,1200.0000,2400.00);
+          "
+      - name: Ejecutar DDL38 solo en MySQL temporal y validar integridad
+        env:
+          MYSQL_PWD: ci_temporal_v55
+        run: |
+          set -euo pipefail
+          mysql -h 127.0.0.1 -uroot rutahyd2_es_local \
+            < database/espanol/38_estados_modulos_oc_productos_ddl.sql
+          test "$(mysql -h 127.0.0.1 -uroot -N rutahyd2_es_local -e \
+            "SELECT COUNT(*) FROM estados WHERE codigo IN ('ACTIVA','RECEPCIONADA','NULA')")" = "3"
+          test "$(mysql -h 127.0.0.1 -uroot -N rutahyd2_es_local -e \
+            "SELECT COUNT(*) FROM modulos_estados")" = "3"
+          test "$(mysql -h 127.0.0.1 -uroot -N rutahyd2_es_local -e \
+            "SELECT d.producto_id FROM detalles_ordenes_compra d WHERE orden_compra_id=50000")" = "50000"
+          test "$(mysql -h 127.0.0.1 -uroot -N rutahyd2_es_local -e \
+            "SELECT e.codigo FROM ordenes_compra oc JOIN estados e ON e.id=oc.estado_id WHERE oc.id=50000")" = "ACTIVA"
+          if mysql -h 127.0.0.1 -uroot rutahyd2_es_local -e \
+            "INSERT INTO modulos_estados (modulo_id,estado_id) SELECT modulo_id,estado_id FROM modulos_estados LIMIT 1" >/dev/null 2>&1;then
+              echo 'Falta UNIQUE pivote';exit 1
+          fi
+          echo V55_SCHEMA_LEGACY_MIGRATION_OK

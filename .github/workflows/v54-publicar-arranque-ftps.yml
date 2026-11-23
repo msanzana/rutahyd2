@@ -1,0 +1,219 @@
+name: V54 - Publicar corrección mínima de arranque con rollback
+on:
+  push:
+    branches: [deploy/v54-arranque-clientes-20261123]
+    paths: [.github/workflows/v54-publicar-arranque-ftps.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      APP_OLD_SHA256: 8f01f47c07368d199da97b7ab69376a25f8fd01806c9978aa6f8b7b5ed4b9d01
+      HTML_OLD_SHA256: 08a1e04c676270216d52b5473ae5c143a47487604c2447360c80332e1378782e
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar FTPS y utilidades
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp >/dev/null
+          umask 077
+          mkdir -p /tmp/rutahd54/{before,after,check}
+      - name: Descarga de respaldo y preflight exacto SIN escrituras
+        run: |
+          set -euo pipefail
+          set +x
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/rutahd54')
+          files={
+            'app.js':'/htdocs/assets/js/app-produccion.js',
+            'index.html':'/htdocs/index.html',
+            'root.htaccess':'/htdocs/.htaccess',
+            'api.guard':'/htdocs/api/.htaccess',
+            'private.guard':'/htdocs/api-v2/.htaccess',
+            'gateway':'/htdocs/api/index.php',
+          }
+          (p/'locations.txt').write_text(''.join(k+'\t'+v+'\n' for k,v in files.items()))
+          with (p/'read.lftp').open('w') as f:
+            for cmd in ('set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 35','set net:max-retries 3'):print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name,remote in files.items():
+              print('get '+remote+' -o '+str(p/'before'/name),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/rutahd54/read.lftp >/dev/null 2>/tmp/rutahd54/ftp-error.log
+          rm -f /tmp/rutahd54/read.lftp
+          python3 - <<'PY'
+          from pathlib import Path
+          import os,hashlib
+          p=Path('/tmp/rutahd54/before')
+          app=(p/'app.js').read_bytes()
+          html=(p/'index.html').read_bytes()
+          assert hashlib.sha256(app).hexdigest()==os.environ['APP_OLD_SHA256'],'App cambió: cancelar sin escribir'
+          assert hashlib.sha256(html).hexdigest()==os.environ['HTML_OLD_SHA256'],'HTML cambió: cancelar sin escribir'
+          assert b'HTTP_AUTHORIZATION' in (p/'api.guard').read_bytes()
+          assert b'Require all denied' in (p/'private.guard').read_bytes()
+          assert b'rutahd2_api_ready' in (p/'gateway').read_bytes()
+          assert b'v53-cache-20261123' in html
+          assert b'no-store, no-cache' in (p/'root.htaccess').read_bytes()
+          assert b'modulos-oficiales.js?v=20261123-v52' in html
+          print('V54_PREFLIGHT_OK: SHA actual auditado, V53 y V52 intactos; guardas protegidas')
+          PY
+      - name: Parchar un selector y una etiqueta de versión exclusivamente
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/rutahd54')
+          app=(p/'before/app.js').read_bytes()
+          old=bytes([36])+b"('#ubicacionesSubnav [data-nav]').forEach"
+          new=bytes([36,36])+b"('#ubicacionesSubnav [data-nav]').forEach"
+          assert app.count(old)==1 and app.count(new)==0,'Selector remoto inesperado'
+          fixed=app.replace(old,new)
+          assert len(fixed)==len(app)+1
+          (p/'after/app.js').write_bytes(fixed)
+          html=(p/'before/index.html').read_bytes()
+          oldtag=b'app-produccion.js?v=20261122-v50'
+          newtag=b'app-produccion.js?v=20261123-v54'
+          assert html.count(oldtag)==1 and newtag not in html,'Versión productiva cambió'
+          updated=html.replace(oldtag,newtag)
+          assert b'v53-cache-20261123' in updated
+          assert b'modulos-oficiales.js?v=20261123-v52' in updated
+          (p/'after/index.html').write_bytes(updated)
+          print('V54_PATCH_OK: solo JS (1 carácter) y etiqueta de caché index')
+          PY
+          cp /tmp/rutahd54/after/app.js /tmp/rutahd54/after/app-produccion.js
+          node --check /tmp/rutahd54/after/app-produccion.js
+      - name: Guardar respaldo antes de modificar
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v54-respaldo-antes-arranque
+          path: /tmp/rutahd54/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Subir JS corregido e index último
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/rutahd54/upload-started
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/rutahd54')
+          with (p/'put.lftp').open('w') as f:
+            for cmd in ('set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 35','set net:max-retries 3'):print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            print('put '+str(p/'after/app.js')+' -o /htdocs/assets/js/app-produccion.js',file=f)
+            print('put '+str(p/'after/index.html')+' -o /htdocs/index.html',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/rutahd54/put.lftp >/dev/null 2>/tmp/rutahd54/ftp-put-error.log
+          echo 'V54_PUBLISHED: solo app-produccion.js e index.html'
+      - name: Verificar bytes FTP y tres protecciones del backend
+        run: |
+          set -euo pipefail
+          set +x
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/rutahd54')
+          files=dict(x.split('\t',1) for x in (p/'locations.txt').read_text().splitlines())
+          with (p/'verify.lftp').open('w') as f:
+            for cmd in ('set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 35','set net:max-retries 3'):print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name,remote in files.items():
+              print('get '+remote+' -o '+str(p/'check'/name),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/rutahd54/verify.lftp >/dev/null 2>/tmp/rutahd54/ftp-verify-error.log
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/rutahd54')
+          for name in ['app.js','index.html']:
+            assert (p/'after'/name).read_bytes()==(p/'check'/name).read_bytes(),name
+          for name in ['root.htaccess','api.guard','private.guard','gateway']:
+            assert (p/'before'/name).read_bytes()==(p/'check'/name).read_bytes(),name
+          print('V54_BYTES_OK: JS e HTML coinciden; raíz, API y gateway intactos')
+          PY
+      - name: Smoke público sin sesión ni operaciones SQL
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rutahd54/browser
+          cd /tmp/rutahd54/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({locale:'es-CL',viewport:{width:1280,height:780}});
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const r=await page.goto('https://rutahyd2.free.nf/',{
+              waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>Boolean(window.RutaHDProduccion),{timeout:40000});
+            await page.waitForTimeout(1800);
+            const check=await page.evaluate(()=>({
+              meta:document.querySelector('meta[name="rutahd-release"]')?.content,
+              script:document.querySelector('script[src*="app-produccion.js?v=20261123-v54"]')?.src,
+              customers:!!document.querySelector('#clientSubnav [data-nav="clientes_listado"]'),
+              giro:!!document.querySelector('script[src*="giros-sii-v39.js?v=20261123-v52"]'),
+              login:document.querySelector('#loginDialog')?.open,
+              status:!!window.RutaHDProduccion
+            }));
+            console.log('V54_PUBLIC_SMOKE',JSON.stringify({status:r?.status(),check,errors}));
+            if(r?.status()!==200||check.meta!=='v53-cache-20261123'||!check.script||
+              !check.customers||!check.giro||!check.status||
+              errors.some(x=>/forEach|ubicacionesSubnav|Cannot read properties|is not a function/i.test(x)))
+              throw Error('No pasó el smoke V54: revertir');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar exactamente los dos archivos anteriores si falla
+        if: failure()
+        run: |
+          set +x
+          if [ ! -f /tmp/rutahd54/upload-started ];then
+            echo 'V54_ROLLBACK_NO_APLICA: no se había escrito producción'
+            exit 0
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/rutahd54')
+          with (p/'rollback.lftp').open('w') as f:
+            for cmd in ('set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 35','set net:max-retries 3'):print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            print('put '+str(p/'before/app.js')+' -o /htdocs/assets/js/app-produccion.js',file=f)
+            print('put '+str(p/'before/index.html')+' -o /htdocs/index.html',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/rutahd54/rollback.lftp >/dev/null 2>/tmp/rutahd54/ftp-rollback-error.log ||
+            echo '::error::Verificar restauración manual desde respaldo rutahd-v54-respaldo-antes-arranque'
+      - name: Eliminar scripts FTP que puedan contener credenciales
+        if: always()
+        run: rm -f /tmp/rutahd54/*.lftp

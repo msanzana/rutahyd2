@@ -1,0 +1,255 @@
+name: V51 - Publicar formulario Clientes por FTPS
+on:
+  push:
+    branches: [deploy/v51-clientes-formulario-20261123]
+    paths: [deployment/solicitudes/publicar-clientes-formulario-v51.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  clientes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACK_BASE: 7aec9f2befa1689b16f61853b5aa78de895e6c33
+      BACK_PIN: aacbac2483699cc52219b37b6f350e227f51e730
+      FRONT_BASE: a3cfac116cc8227d318af851d8a4b3a62257313d
+      FRONT_PIN: 52b40e857215c8db7122f422e2063255d75cc97e
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar fuentes fijas V51 y FTPS
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp php-cli
+          git fetch -q --depth=1 origin "$BACK_BASE" "$BACK_PIN"
+          git clone -q --depth 1 --branch hotfix/v51-clientes-formulario-precios-20261123 \
+            https://github.com/msanzana/rutahyd2front.git /tmp/v51-front
+          git -C /tmp/v51-front fetch -q --depth=1 origin "$FRONT_BASE" "$FRONT_PIN"
+          git -C /tmp/v51-front checkout -q --detach "$FRONT_PIN"
+          test "$(git -C /tmp/v51-front rev-parse HEAD)" = "$FRONT_PIN"
+          mkdir -p /tmp/v51/{before,after,check}
+      - name: Respaldar originales V50 y verificar protecciones con FTPS GET
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import os,pathlib
+          p=pathlib.Path('/tmp/v51')
+          paths={
+            'app/Http/Controllers/EntidadesComercialesControlador.php':
+              '/htdocs/api-v2/app/Http/Controllers/EntidadesComercialesControlador.php',
+            'assets/js/modulos-oficiales.js':'/htdocs/assets/js/modulos-oficiales.js',
+            'assets/css/clientes-v50.css':'/htdocs/assets/css/clientes-v50.css',
+            'index.html':'/htdocs/index.html',
+            'guard-private':'/htdocs/api-v2/.htaccess',
+            'guard-api':'/htdocs/api/.htaccess',
+            'gateway':'/htdocs/api/index.php'
+          }
+          (p/'manifest').write_text('\n'.join(k+'\t'+v for k,v in paths.items())+'\n')
+          with (p/'read.lftp').open('w') as f:
+            for command in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(command,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name,remote in paths.items():
+              target=p/'before'/name;target.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+remote+' -o '+str(target),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v51/read.lftp >/dev/null
+          grep -Fq 'Require all denied' /tmp/v51/before/guard-private
+          grep -Fq 'HTTP_AUTHORIZATION' /tmp/v51/before/guard-api
+          grep -Fq 'rutahd2_api_ready' /tmp/v51/before/gateway
+          grep -Fq 'clientes-v50.css?v=20261122-v50' /tmp/v51/before/index.html
+          grep -Fq 'modulos-oficiales.js?v=20261122-v50' /tmp/v51/before/index.html
+          grep -Fq 'catalogos-api.js?v=20261122-v50' /tmp/v51/before/index.html
+          grep -Fq 'usuarios.js?v=20261122-v48prod' /tmp/v51/before/index.html
+          grep -Fq 'proveedores-productos.js?v=20261122-v49prod' /tmp/v51/before/index.html
+          ! grep -Fq 'clientes-v50.css?v=20261123-v51' /tmp/v51/before/index.html
+          echo 'V51_READ_OK: base V50 vigente y guardas intactas'
+      - name: Aplicar 3 parches estrictos y caché HTML puntual
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,pathlib,shutil,subprocess
+          p=pathlib.Path('/tmp/v51')
+          files=[
+            'app/Http/Controllers/EntidadesComercialesControlador.php',
+            'assets/css/clientes-v50.css','assets/js/modulos-oficiales.js','index.html'
+          ]
+          for name in files:
+            target=p/'after'/name;target.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copy2(p/'before'/name,target)
+          diffs=[
+            (os.environ['GITHUB_WORKSPACE'],os.environ['BACK_BASE'],
+              os.environ['BACK_PIN'],[files[0]]),
+            ('/tmp/v51-front',os.environ['FRONT_BASE'],
+              os.environ['FRONT_PIN'],files[1:3])
+          ]
+          for repo,base,pin,paths in diffs:
+            patch=subprocess.run(['git','-C',repo,'diff','--no-ext-diff',
+              '--binary',base,pin,'--',*paths],capture_output=True,check=True).stdout
+            assert patch.count(b'diff --git')==len(paths),'Diff contiene rutas inesperadas'
+            result=subprocess.run(['patch','--batch','--fuzz=0','-p1','-d',str(p/'after')],
+              input=patch,capture_output=True)
+            if result.returncode:
+              print(result.stdout.decode(errors='replace')[:1800])
+              raise RuntimeError('Código vigente distinto de V50; abortar sin sobrescribir')
+          html=(p/'before/index.html').read_text()
+          replacements={
+            'modulos-oficiales.js?v=20261122-v50':
+              'modulos-oficiales.js?v=20261123-v51',
+            'clientes-v50.css?v=20261122-v50':
+              'clientes-v50.css?v=20261123-v51'
+          }
+          for old,new in replacements.items():
+            assert html.count(old)==1,old
+            html=html.replace(old,new)
+          for present in ['catalogos-api.js?v=20261122-v50',
+            'app-produccion.js?v=20261122-v50',
+            'usuarios.js?v=20261122-v48prod',
+            'proveedores-productos.js?v=20261122-v49prod',
+            'data-nav="clientes_listado"','toggleClientSubnav']:
+            assert present in html,present
+          (p/'after/index.html').write_text(html)
+          js=(p/'after/assets/js/modulos-oficiales.js').read_text()
+          php=(p/'after/app/Http/Controllers/EntidadesComercialesControlador.php').read_text()
+          assert 'hd-customer-identity-row' in js
+          assert 'mountSelector(group,row?.ciudad_id' in js
+          assert 'LISTA BASE asignada por defecto' in js
+          assert 'asignarListaCliente($id,(int)$listaId)' in php
+          assert 'Los clientes nuevos reciben la LISTA BASE' not in php
+          print('V51_PATCH_OK: 4 archivos, base V50 conservada')
+          PY
+          node --check /tmp/v51/after/assets/js/modulos-oficiales.js
+          php -l /tmp/v51/after/app/Http/Controllers/EntidadesComercialesControlador.php
+      - name: Guardar respaldo inmutable de los 4 archivos y guardas
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v51-respaldo-previo-clientes
+          path: /tmp/v51/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Subir PHP, CSS, JavaScript e index al final
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/v51/upload-started
+          python3 - <<'PY'
+          import os,pathlib
+          p=pathlib.Path('/tmp/v51')
+          remote=dict(l.split('\t',1) for l in (p/'manifest').read_text().splitlines())
+          files=['app/Http/Controllers/EntidadesComercialesControlador.php',
+            'assets/css/clientes-v50.css','assets/js/modulos-oficiales.js','index.html']
+          (p/'upload').write_text('\n'.join(files)+'\n')
+          with (p/'put.lftp').open('w') as f:
+            for command in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(command,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              print('put '+str(p/'after'/name)+' -o '+remote[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v51/put.lftp >/dev/null
+          echo 'V51_PUT_OK: cuatro archivos transferidos'
+      - name: Verificar bytes remotos y protecciones de API
+        run: |
+          set -euo pipefail
+          set +x
+          python3 - <<'PY'
+          import os,pathlib
+          p=pathlib.Path('/tmp/v51')
+          remote=dict(l.split('\t',1) for l in (p/'manifest').read_text().splitlines())
+          files=(p/'upload').read_text().splitlines()+[
+            'guard-private','guard-api','gateway']
+          with (p/'verify.lftp').open('w') as f:
+            for command in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(command,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              target=p/'check'/name;target.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+remote[name]+' -o '+str(target),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v51/verify.lftp >/dev/null
+          python3 - <<'PY'
+          import pathlib
+          p=pathlib.Path('/tmp/v51')
+          for name in (p/'upload').read_text().splitlines():
+            assert (p/'check'/name).read_bytes()==(p/'after'/name).read_bytes(),name
+          for name in ['guard-private','guard-api','gateway']:
+            assert (p/'check'/name).read_bytes()==(p/'before'/name).read_bytes(),name
+          print('V51_BYTES_OK: 4 archivos exactos, guardas y gateway intactos')
+          PY
+      - name: Comprobar carga pública sin JWT ni operaciones de escritura
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v51/browser
+          cd /tmp/v51/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({locale:'es-CL'});
+            await page.goto('https://rutahyd2.free.nf/?v51=clientes',{
+              waitUntil:'domcontentloaded',timeout:55000});
+            await page.waitForTimeout(3500);
+            const evidence=await page.evaluate(()=>({
+              logo:!!document.querySelector('.brand-logo'),
+              menu:!!document.querySelector('#clientSubnav [data-nav="clientes_listado"]'),
+              js:!!document.querySelector('script[src*="modulos-oficiales.js?v=20261123-v51"]'),
+              css:!!document.querySelector('link[href*="clientes-v50.css?v=20261123-v51"]'),
+              v50App:!!document.querySelector('script[src*="app-produccion.js?v=20261122-v50"]'),
+              v49:!!document.querySelector('script[src*="proveedores-productos.js?v=20261122-v49prod"]'),
+              v48:!!document.querySelector('script[src*="usuarios.js?v=20261122-v48prod"]'),
+              loaded:typeof window.RutaHDOficial?.mount==='function'
+            }));
+            console.log('V51_SMOKE_PUBLICO',JSON.stringify(evidence));
+            if(!Object.values(evidence).every(Boolean))
+              console.log('::warning::Puede ser desafío público de InfinityFree; bytes FTPS sí comprobados.');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar cuatro originales si falla después de subir
+        if: failure()
+        run: |
+          set +x
+          if [ ! -f /tmp/v51/upload-started ];then
+            echo 'V51_ROLLBACK_NO_APLICA: subida no iniciada'
+            exit 0
+          fi
+          python3 - <<'PY'
+          import os,pathlib
+          p=pathlib.Path('/tmp/v51')
+          remote=dict(l.split('\t',1) for l in (p/'manifest').read_text().splitlines())
+          files=['app/Http/Controllers/EntidadesComercialesControlador.php',
+            'assets/css/clientes-v50.css','assets/js/modulos-oficiales.js','index.html']
+          with (p/'rollback.lftp').open('w') as f:
+            for command in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(command,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:print('put '+str(p/'before'/name)+' -o '+remote[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v51/rollback.lftp >/dev/null ||
+            echo '::error::Rollback falló, restaurar rutahd-v51-respaldo-previo-clientes'
+      - name: Limpiar scripts con claves FTPS
+        if: always()
+        run: rm -f /tmp/v51/*.lftp

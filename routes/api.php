@@ -59,7 +59,7 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
         ->middleware('permiso.rutahd:compras.gestionar');
     // Cálculo autorizado sin escrituras; comparte validación exacta con crear/editar.
     Route::post('/ordenes-compra/costos-productos',[OrdenesCompraControlador::class,'costosProductos'])
-        ->middleware('permiso.rutahd:compras.gestionar')->middleware('throttle:120,1');
+        ->middleware('permiso.rutahd:compras.gestionar');
     Route::post('/ordenes-compra/calcular',[OrdenesCompraControlador::class,'calcular'])
         ->middleware('permiso.rutahd:compras.gestionar')->middleware('throttle:120,1');
     Route::post('/ordenes-compra',[OrdenesCompraControlador::class,'crear'])

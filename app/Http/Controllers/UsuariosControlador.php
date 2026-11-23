@@ -50,28 +50,43 @@ final class UsuariosControlador extends Controller
             'correo_electronico' => ['required','email','max:190','unique:usuarios,correo_electronico'],
             'rol_id' => ['required','integer','min:1'],
             'ciudad_id'=>['sometimes','nullable','integer','exists:ciudades,id'],
+            // Opcional: si se proporciona, se crea una cuenta activa sin requerir SMTP.
+            // La contraseña NUNCA se devuelve, envía por correo ni almacena en texto.
+            'contrasena'=>['sometimes','required','string','min:12','max:128','confirmed'],
+            'contrasena_confirmation'=>['required_with:contrasena','same:contrasena'],
         ])->validate();
         $rol = $this->rolOperativo((int)$datos['rol_id']);
-        abort_unless(config('mail.default') === 'smtp', 503,
-            'Configura SMTP antes de invitar usuarios');
+        $conContrasena=array_key_exists('contrasena',$datos);
+        // La invitación conserva el mecanismo de correo existente cuando se
+        // dejan vacías ambas casillas. SMTP no es requisito para alta manual.
+        if(!$conContrasena){
+            abort_unless(config('mail.default') === 'smtp', 503,
+                'Configura SMTP antes de invitar usuarios');
+        }
         $usuario = Usuario::query()->create([
             'nombre' => trim($datos['nombre']),
             'correo_electronico' => mb_strtolower(trim($datos['correo_electronico'])),
             'rol_id' => $rol->id,
             'ciudad_id'=>$datos['ciudad_id']??null,
-            'hash_contrasena' => Hash::make(bin2hex(random_bytes(32))),
+            'hash_contrasena' => Hash::make($conContrasena
+                ? $datos['contrasena'] : bin2hex(random_bytes(32))),
             'activo' => true,
         ]);
-        try {
-            RecuperacionContrasenaControlador::enviarEnlace($usuario);
-        } catch (\Throwable $e) {
-            // La cuenta creada sin correo no debe quedar con acceso ni contraseña utilizable.
-            DB::table('restablecimientos_contrasena')->where('usuario_id',$usuario->id)->delete();
-            $usuario->delete();
-            throw $e;
+        if(!$conContrasena){
+            try {
+                RecuperacionContrasenaControlador::enviarEnlace($usuario);
+            } catch (\Throwable $e) {
+                // Una invitación sin correo no deja una cuenta utilizable.
+                DB::table('restablecimientos_contrasena')->where('usuario_id',$usuario->id)->delete();
+                $usuario->delete();
+                throw $e;
+            }
         }
         return response()->json(['id'=>$usuario->id,'creado'=>true,
-            'mensaje'=>'Usuario invitado. Se envió un enlace privado para definir su contraseña.'], 201)
+            'modo'=>$conContrasena?'contrasena_inicial':'invitacion',
+            'mensaje'=>$conContrasena
+                ? 'Usuario creado. Puede iniciar sesión con su contraseña inicial.'
+                : 'Usuario invitado. Se envió un enlace privado para definir su contraseña.'], 201)
             ->header('Cache-Control', 'no-store');
     }
 

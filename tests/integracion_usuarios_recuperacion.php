@@ -40,6 +40,20 @@ try{
  assertOk(count(DB::select("SHOW TABLES LIKE 'restablecimientos_contrasena'"))===1,'Falta SQL18');
  $adminRole=(int)DB::table('roles')->where('codigo','administrador')->value('id');
  $role=(int)DB::table('roles')->where('codigo','vendedor')->value('id');
+ $supervisorRole=(int)DB::table('roles')->where('codigo','supervisor')->value('id');
+ assertOk($adminRole>0&&$role>0&&$supervisorRole>0,'Roles de prueba no disponibles');
+ // El fixture se crea solo dentro de la base efímera, con credenciales CI.
+ foreach([
+   ['integracion@ejemplo.invalid',$adminRole,'ClaveCI!soloParaPruebas-2026'],
+   ['lector@ejemplo.invalid',$supervisorRole,'NoUsarEnProduccion-2026']
+ ] as [$correo,$rol,$clave]){
+   if(!DB::table('usuarios')->where('correo_electronico',$correo)->exists()){
+     DB::table('usuarios')->insert([
+       'nombre'=>'Fixture de usuario CI','correo_electronico'=>$correo,
+       'rol_id'=>$rol,'hash_contrasena'=>Hash::make($clave),'activo'=>1
+     ]);
+   }
+ }
  statusCode(401,reqApi('GET','/api/v1/usuarios'),'Anónimo');
  $admin=statusCode(200,reqApi('POST','/api/v1/sesion',[
     'correo_electronico'=>'integracion@ejemplo.invalid',

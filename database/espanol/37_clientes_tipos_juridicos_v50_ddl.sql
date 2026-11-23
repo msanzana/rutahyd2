@@ -2,7 +2,7 @@
 -- EJECUCIÓN MANUAL ÚNICA en phpMyAdmin, después de respaldo completo.
 -- Base: if0_43460400_rutahyd2_es. Requiere DDL24 (listas), DDL32
 -- (ciudad_id) y DDL33/34 (giros SII) previamente ejecutados.
--- NO consulta information_schema. NO usa triggers ni procedimientos.
+-- No consulta catálogos internos del motor. Sin triggers ni procedimientos.
 -- No repetir ALTER ni DROP si ya ejecutaste este archivo.
 -- Antes del paso de DROP se conserva copia de comuna y sector.
 SET NAMES utf8mb4;

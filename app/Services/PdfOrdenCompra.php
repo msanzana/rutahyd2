@@ -116,18 +116,18 @@ final class PdfOrdenCompra
             $s.=self::cmdText(55,687,self::truncar($emisorNombre,40),11,true);
             $s.=self::cmdText(55,672,'RUT: '.self::truncar($emisorRut,36),8);
             $s.=self::cmdText(55,657,'Giro: '.self::truncar($emisorGiro,35),8);
-            $s.=self::cmdText(55,642,'Direccion: '.self::truncar($emisorDireccion,35),8);
+            $s.=self::cmdText(55,642,'Dirección: '.self::truncar($emisorDireccion,35),8);
             $s.=self::cmdText(55,627,'Correo: '.self::truncar($emisorCorreo,36),8);
 
             $s.=self::cmdText(315,705,'PROVEEDOR',9,true);
             $s.=self::cmdText(315,687,self::truncar(self::dato($proveedor),40),11,true);
             $s.=self::cmdText(315,672,'RUT: '.self::truncar(self::dato($rut),36),8);
             $s.=self::cmdText(315,657,'Correo: '.self::truncar(self::dato($correo),35),8);
-            $s.=self::cmdText(315,642,'Direccion: '.self::truncar(self::dato($direccion),35),8);
+            $s.=self::cmdText(315,642,'Dirección: '.self::truncar(self::dato($direccion),35),8);
             $s.=self::cmdText(315,627,'Proveedor ID: '.(string)($documento['proveedor_id']??'—'),8);
 
             $s.=self::rect(42,578,511,28,'0.93 0.90 0.97');
-            $s.=self::cmdText(52,588,'Emision: '.$fechaEmision,9,true);
+            $s.=self::cmdText(52,588,'Emisión: '.$fechaEmision,9,true);
             $s.=self::cmdText(302,588,'Fecha solicitada: '.$fechaSolicitud,9,true);
 
             $s.=self::rect(42,540,511,28,'0.86 0.81 0.92');
@@ -159,7 +159,7 @@ final class PdfOrdenCompra
                 }
             }
             $s.=self::cmdText(42,29,'Ruta H&D2  /  Documento de compra',8);
-            $s.=self::cmdText(496,29,'Pagina '.$pageNo.' / '.$totalPaginas,8);
+            $s.=self::cmdText(496,29,'Página '.$pageNo.' / '.$totalPaginas,8);
             $streams[]=$s;
         }
         // Esqueleto ISO PDF 1.4 con una página por stream; xref en bytes exactos.

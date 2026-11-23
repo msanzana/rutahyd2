@@ -28,8 +28,9 @@ final class EntidadesComercialesControlador extends Controller
     ];
     private const COLUMNAS = [
         'clientes' => [
-            'codigo', 'nombre', 'rut', 'correo_electronico', 'telefono',
-            'direccion', 'ciudad_id', 'sector', 'observaciones', 'activo'
+            'codigo','nombre','rut','giro','actividad_economica_codigo',
+            'tipo_juridico_id','correo_electronico','telefono',
+            'direccion','ciudad_id','observaciones','activo'
         ],
         'proveedores' => [
             'nombre', 'razon_social', 'nombre_fantasia', 'rut', 'giro',
@@ -71,9 +72,18 @@ final class EntidadesComercialesControlador extends Controller
         ];
         if ($recurso === 'clientes') {
             return array_merge($comunes, [
+                'rut'=>array_merge($obligatorio,['string','max:25']),
                 'codigo' => array_merge($opcional, ['string', 'max:50',
                     Rule::unique('clientes', 'codigo')->ignore($id)]),
-                'sector' => array_merge($opcional, ['string', 'max:120']),
+                'giro'=>array_merge($opcional,['string','max:255']),
+                'actividad_economica_codigo'=>array_merge($opcional,[
+                    'regex:/^[0-9]{6}$/D',
+                    Rule::exists('giros_sii','codigo')->where('activo',1)
+                ]),
+                'tipo_juridico_id'=>array_merge($obligatorio,[
+                    'integer','min:1',
+                    Rule::exists('tipos_juridicos_clientes','id')->where('activo',1)
+                ]),
                 'observaciones' => array_merge($opcional, ['string', 'max:10000']),
                 'lista_precio_id' => ['sometimes','integer','min:1','exists:listas_precios,id'],
             ]);
@@ -114,7 +124,7 @@ final class EntidadesComercialesControlador extends Controller
                 // Los campos opcionales vacíos no se convierten en cadenas sin valor.
                 if ($valor === '' && in_array($clave, [
                     'codigo','rut','correo_electronico','telefono','direccion',
-                    'sector','observaciones','razon_social','nombre_fantasia','giro',
+                    'observaciones','razon_social','nombre_fantasia','giro',
                     'actividad_economica_codigo','direccion_numero','tipo_contribuyente'
                 ],true)
                     && !($recurso === 'bodegas' && $clave === 'codigo')) {
@@ -131,7 +141,8 @@ final class EntidadesComercialesControlador extends Controller
                 'RUT inválido: verifica cuerpo y dígito verificador');
             $datos['rut']=$canonico;
         }
-        if($recurso==='proveedores'&&!empty($datos['actividad_economica_codigo'])){
+        if(in_array($recurso,['clientes','proveedores'],true)
+            && !empty($datos['actividad_economica_codigo'])){
             // La glosa depende del código seleccionado; no aceptar un nombre de giro
             // incoherente con el código oficial SII por manipulación del navegador.
             $actividad=DB::table('giros_sii')

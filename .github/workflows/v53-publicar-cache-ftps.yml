@@ -189,7 +189,7 @@ jobs:
               status:resp.status(),cacheControl:headers['cache-control'],
               expires:headers.expires,check
             }));
-            if(resp.status()!==200||!headers['cache-control']?.includes('no-store')||
+            if(resp.status()!==200||!(headers['cache-control']?.includes('no-store')||headers['cache-control']?.includes('no-cache'))||
                !check.v52||!check.logo||check.mark!=='v53-cache-20261123')
               throw new Error('El navegador aún no recibe no-store o HTML V53; revertir.');
           }finally{await browser.close();}

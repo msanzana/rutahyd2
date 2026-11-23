@@ -91,6 +91,10 @@ jobs:
             'modulos-oficiales.js':'20261123-v51',
             'proveedores-productos.js':'20261122-v49prod',
             'clientes-v50.css':'20261123-v51'}
+          import re
+          print('V52_TAGS_REALES',sorted(set(re.findall(
+            r'(?:assets/js/|assets/css/)[A-Za-z0-9_.-]+[.]\w+[?]v=[A-Za-z0-9_.-]+',
+            html))))
           for name,version in expected.items():
             needle=name+'?v='+version
             assert html.count(needle)==1,'Versión diferente de producción: '+name

@@ -119,7 +119,15 @@ final class EntidadesComercialesControlador extends Controller
         $reglas = $this->reglas($recurso, $nuevo, $id);
         abort_if(array_diff(array_keys($request->all()), array_keys($reglas)) !== [],
             422, 'La solicitud contiene campos no permitidos');
-        $datos = Validator::make($request->all(), $reglas)->validate();
+        $mensajes=$recurso==='clientes' ? [
+            'telefono.regex'=>'El teléfono debe tener formato +56 NNNNNNNNN (nueve dígitos).',
+            'rut.required'=>'El RUT del cliente es obligatorio.',
+            'tipo_juridico_id.required'=>'Selecciona Empresa o Persona natural.',
+            'tipo_juridico_id.exists'=>'El tipo jurídico debe estar vigente.',
+            'tipo_juridico_id.integer'=>'Selecciona un tipo jurídico válido.',
+            'correo_electronico.email'=>'Ingresa un correo electrónico válido.',
+        ] : [];
+        $datos = Validator::make($request->all(), $reglas, $mensajes)->validate();
         abort_if(!$nuevo && $datos === [], 422, 'No hay campos para actualizar');
         foreach ($datos as $clave => $valor) {
             if (is_string($valor)) {

@@ -80,12 +80,12 @@ jobs:
           p=pathlib.Path('/tmp/v52')
           html=(p/'before/index.html').read_text()
           expected={
-            'listados-ui.js':'20261122-v39',
-            'admin-remoto.js':'20261122-copy39',
-            'productos-remotos.js':'20261122-copy39',
+            'listados-ui.js':'20261122-v39prod',
+            'admin-remoto.js':'20261122-v39prod',
+            'productos-remotos.js':'20261122-v39prod',
             'usuarios.js':'20261122-v48prod',
-            'listas-precios.js':'20261122-copy39',
-            'giros-sii-v39.js':'20261122-v39',
+            'listas-precios.js':'20261122-v39prod',
+            'giros-sii-v39.js':'20261122-v41prod',
             'buscador-productos-v39.js':'20261122-v46prod',
             'ubicaciones.js':'20261122-geo38',
             'modulos-oficiales.js':'20261123-v51',
@@ -126,12 +126,12 @@ jobs:
               raise RuntimeError('No coincide el archivo productivo; cancelar sin escribir')
           html=(p/'before/index.html').read_text()
           replacements={
-            'listados-ui.js':'20261122-v39',
-            'admin-remoto.js':'20261122-copy39',
-            'productos-remotos.js':'20261122-copy39',
+            'listados-ui.js':'20261122-v39prod',
+            'admin-remoto.js':'20261122-v39prod',
+            'productos-remotos.js':'20261122-v39prod',
             'usuarios.js':'20261122-v48prod',
-            'listas-precios.js':'20261122-copy39',
-            'giros-sii-v39.js':'20261122-v39',
+            'listas-precios.js':'20261122-v39prod',
+            'giros-sii-v39.js':'20261122-v41prod',
             'buscador-productos-v39.js':'20261122-v46prod',
             'ubicaciones.js':'20261122-geo38',
             'modulos-oficiales.js':'20261123-v51',

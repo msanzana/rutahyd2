@@ -21,6 +21,7 @@ use App\Http\Controllers\UsuariosControlador;
 use App\Http\Controllers\UbicacionesControlador;
 use App\Http\Controllers\GirosSiiControlador;
 use App\Http\Controllers\BuscadorProductosControlador;
+use App\Http\Controllers\OrdenesCompraControlador;
 use App\Http\Controllers\RecuperacionContrasenaControlador;
 
 // El frontend pregunta /api/v1/estado; la ruta antigua /api/estado sigue disponible.
@@ -48,6 +49,27 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
         ->middleware('throttle:90,1');
     Route::get('/productos/buscador',[BuscadorProductosControlador::class,'listar'])
         ->middleware('throttle:120,1');
+    // V55: Orden de compra y catálogo de estados, con permisos Compras existentes.
+    // El estado no se modifica vía PUT: solo cancelación explícita o futura recepción.
+    Route::get('/ordenes-compra/estados',[OrdenesCompraControlador::class,'estados'])
+        ->middleware('permiso.rutahd:compras.gestionar');
+    Route::get('/ordenes-compra',[OrdenesCompraControlador::class,'listar'])
+        ->middleware('permiso.rutahd:compras.gestionar');
+    Route::post('/ordenes-compra',[OrdenesCompraControlador::class,'crear'])
+        ->middleware('permiso.rutahd:compras.gestionar')
+        ->middleware('throttle:10,1');
+    Route::get('/ordenes-compra/{id}',[OrdenesCompraControlador::class,'ver'])
+        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+    Route::put('/ordenes-compra/{id}',[OrdenesCompraControlador::class,'actualizar'])
+        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+    Route::post('/ordenes-compra/{id}/anular',[OrdenesCompraControlador::class,'anular'])
+        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+    Route::post('/ordenes-compra/{id}/reenviar',[OrdenesCompraControlador::class,'reenviar'])
+        ->middleware('permiso.rutahd:compras.gestionar')->middleware('throttle:4,1')
+        ->whereNumber('id');
+    Route::get('/ordenes-compra/{id}/pdf',[OrdenesCompraControlador::class,'pdf'])
+        ->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+
     // Vista Mix de productos por proveedor: contar vínculos únicos desde SQL, sin recepciones.
     Route::get('/proveedores/mix',[ProductosProveedoresControlador::class,'mix'])
         ->middleware('permiso.rutahd:compras.gestionar')

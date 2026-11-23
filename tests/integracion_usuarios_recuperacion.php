@@ -37,9 +37,23 @@ function statusCode(int $want,array $got,string $label): array {
 try{
  assertOk(DB::getDatabaseName()==='rutahyd2_es_local',
     'PROHIBIDO EJECUTAR EN PRODUCCIÓN');
- assertOk(DB::getSchemaBuilder()->hasTable('restablecimientos_contrasena'),'Falta SQL18');
+ assertOk(count(DB::select("SHOW TABLES LIKE 'restablecimientos_contrasena'"))===1,'Falta SQL18');
  $adminRole=(int)DB::table('roles')->where('codigo','administrador')->value('id');
  $role=(int)DB::table('roles')->where('codigo','vendedor')->value('id');
+ $supervisorRole=(int)DB::table('roles')->where('codigo','supervisor')->value('id');
+ assertOk($adminRole>0&&$role>0&&$supervisorRole>0,'Roles de prueba no disponibles');
+ // El fixture se crea solo dentro de la base efímera, con credenciales CI.
+ foreach([
+   ['integracion@ejemplo.invalid',$adminRole,'ClaveCI!soloParaPruebas-2026'],
+   ['lector@ejemplo.invalid',$supervisorRole,'NoUsarEnProduccion-2026']
+ ] as [$correo,$rol,$clave]){
+   if(!DB::table('usuarios')->where('correo_electronico',$correo)->exists()){
+     DB::table('usuarios')->insert([
+       'nombre'=>'Fixture de usuario CI','correo_electronico'=>$correo,
+       'rol_id'=>$rol,'hash_contrasena'=>Hash::make($clave),'activo'=>1
+     ]);
+   }
+ }
  statusCode(401,reqApi('GET','/api/v1/usuarios'),'Anónimo');
  $admin=statusCode(200,reqApi('POST','/api/v1/sesion',[
     'correo_electronico'=>'integracion@ejemplo.invalid',
@@ -58,6 +72,43 @@ try{
  statusCode(503,reqApi('POST','/api/v1/usuarios',[
     'nombre'=>'Prueba','correo_electronico'=>'nuevo@example.invalid','rol_id'=>$role
  ],$admin),'No invitar sin SMTP');
+
+ // Pruebas de creación manual: credencial sintética exclusiva de CI.
+ $manualPassword='PruebaCI-'.str_repeat('X',16);
+ $manualBase=[
+   'nombre'=>'Operador manual CI',
+   'correo_electronico'=>'alta-manual-ci@example.invalid',
+   'rol_id'=>$role,
+ ];
+ statusCode(422,reqApi('POST','/api/v1/usuarios',$manualBase+[
+   'contrasena'=>'muy-corta','contrasena_confirmation'=>'muy-corta'
+ ],$admin),'Rechazar clave corta');
+ statusCode(422,reqApi('POST','/api/v1/usuarios',$manualBase+[
+   'contrasena'=>$manualPassword,'contrasena_confirmation'=>'distinta'
+ ],$admin),'Rechazar confirmación distinta');
+ statusCode(422,reqApi('POST','/api/v1/usuarios',$manualBase+[
+   'contrasena_confirmation'=>$manualPassword
+ ],$admin),'Rechazar confirmación sin contraseña');
+ $nuevo=statusCode(201,reqApi('POST','/api/v1/usuarios',$manualBase+[
+   'contrasena'=>$manualPassword,'contrasena_confirmation'=>$manualPassword
+ ],$admin),'Crear cuenta con contraseña inicial sin SMTP');
+ assertOk(($nuevo['modo']??null)==='contrasena_inicial','Modo de alta manual');
+ assertOk(!isset($nuevo['contrasena'])&&!isset($nuevo['hash_contrasena']),
+   'No devolver secretos por JSON');
+ $manualId=(int)$nuevo['id'];
+ $hash=(string)DB::table('usuarios')->where('id',$manualId)->value('hash_contrasena');
+ assertOk($hash!==$manualPassword&&Hash::check($manualPassword,$hash),
+   'Guardar únicamente hash verificable');
+ assertOk(DB::table('restablecimientos_contrasena')->where('usuario_id',$manualId)->count()===0,
+   'No emitir tokens de invitación con contraseña directa');
+ $manualLogin=statusCode(200,reqApi('POST','/api/v1/sesion',[
+   'correo_electronico'=>$manualBase['correo_electronico'],'contrasena'=>$manualPassword
+ ]),'Acceder con cuenta nueva');
+ assertOk(is_string($manualLogin['token']??null),'JWT de cuenta nueva');
+ $manualList=statusCode(200,reqApi('GET','/api/v1/usuarios',[],$admin),'Lista sin claves');
+ $jsonList=json_encode($manualList,JSON_THROW_ON_ERROR);
+ assertOk(strpos($jsonList,'hash_contrasena')===false&&
+   strpos($jsonList,$manualPassword)===false,'Lista no expone credenciales');
  // Crear operador exclusivamente como fixture CI; ninguna contraseña productiva.
  $id=DB::table('usuarios')->insertGetId([
    'nombre'=>'Operador para CI','correo_electronico'=>'operador-ci@example.invalid',

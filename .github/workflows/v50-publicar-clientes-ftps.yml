@@ -77,9 +77,9 @@ jobs:
           grep -Fq 'rutahd2_api_ready' /tmp/v50/before/gateway
           grep -Fq 'proveedores-productos.js?v=20261122-v49prod' /tmp/v50/before/index.html
           grep -Fq 'usuarios.js?v=20261122-v48prod' /tmp/v50/before/index.html
-          grep -Fq 'catalogos-api.js?v=20261122-v42' /tmp/v50/before/index.html
-          grep -Fq 'modulos-oficiales.js?v=20261122-copy39' /tmp/v50/before/index.html
-          grep -Fq 'app-produccion.js?v=20261122-copy39' /tmp/v50/before/index.html
+          grep -Fq 'catalogos-api.js?v=20261122-v42prod' /tmp/v50/before/index.html
+          grep -Fq 'modulos-oficiales.js?v=20261122-v39prod' /tmp/v50/before/index.html
+          grep -Fq 'app-produccion.js?v=20261122-v39prod' /tmp/v50/before/index.html
           ! grep -Fq 'clientes-v50.css' /tmp/v50/before/index.html
           echo 'V50_FTPS_READ_ONLY_OK: base V48/V49 y guards presentes'
       - name: Aplicar diferencias exactas y comprobar sintaxis
@@ -119,9 +119,9 @@ jobs:
           assert html.count(old)==1 and 'clientsNavGroup' not in html
           html=html.replace(old,nav)
           versions={
-            'assets/js/app-produccion.js?v=20261122-copy39':'assets/js/app-produccion.js?v=20261122-v50',
-            'assets/js/catalogos-api.js?v=20261122-v42':'assets/js/catalogos-api.js?v=20261122-v50',
-            'assets/js/modulos-oficiales.js?v=20261122-copy39':'assets/js/modulos-oficiales.js?v=20261122-v50'}
+            'assets/js/app-produccion.js?v=20261122-v39prod':'assets/js/app-produccion.js?v=20261122-v50',
+            'assets/js/catalogos-api.js?v=20261122-v42prod':'assets/js/catalogos-api.js?v=20261122-v50',
+            'assets/js/modulos-oficiales.js?v=20261122-v39prod':'assets/js/modulos-oficiales.js?v=20261122-v50'}
           for old,new in versions.items():
             assert html.count(old)==1,old
             html=html.replace(old,new)

@@ -1,0 +1,87 @@
+name: V51 - Crear clientes con lista de precios elegida en pivote
+on:
+  push:
+    branches: [hotfix/v51-clientes-formulario-precios-20261123]
+    paths:
+      - app/Http/Controllers/EntidadesComercialesControlador.php
+      - app/Http/Controllers/RecursoControlador.php
+      - app/Models/Cliente.php
+      - routes/api.php
+      - database/espanol/37_clientes_tipos_juridicos_v50_ddl.sql
+      - tests/integracion_clientes_v50.php
+      - .github/workflows/v51-clientes-precios-ci.yml
+permissions:
+  contents: read
+jobs:
+  clientes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: temporal_ci_solamente
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ptemporal_ci_solamente --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, intl, xml, dom, curl, pdo_mysql, openssl, fileinfo
+      - name: Revisar PHP/DDL37 y prohibir metadatos restringidos
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/EntidadesComercialesControlador.php
+          php -l app/Http/Controllers/RecursoControlador.php
+          php -l app/Models/Cliente.php
+          php -l routes/api.php
+          php -l tests/integracion_clientes_v50.php
+          if grep -Eiq 'information_schema|Schema::hasTable|getSchemaBuilder|CREATE TRIGGER' database/espanol/37_clientes_tipos_juridicos_v50_ddl.sql;then
+            echo '::error::DDL37 usa operación restringida';exit 1
+          fi
+          if grep -Eiq 'information_schema|Schema::hasTable|getSchemaBuilder' tests/integracion_clientes_v50.php;then
+            echo '::error::Pruebas usan introspección restringida';exit 1
+          fi
+      - name: Preparar esquema histórico y DDL37 SOLO en MySQL efímero
+        run: |
+          set -euo pipefail
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente < database/espanol/01_esquema_completo_34_tablas_es.sql
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente < database/espanol/05_semillas_es.sql
+          for f in 12_tokens_acceso_opcional.sql 13_catalogos_comerciales_aditivos.sql 14_productos_clasificacion_campos.sql 16_permisos_modulos_producto.sql 18_recuperacion_contrasenas.sql 19_rut_usuarios.sql 20_proveedores_productos_codigos_barras_ddl.sql 21_catalogos_referencia_semillas.sql 23_preferencias_usuarios_permisos_submodulos_ddl.sql 24_listas_precios_sin_triggers.sql 25_productos_fotos_ddl_sin_triggers.sql;do
+            mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < "database/espanol/$f"
+          done
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/29_geografia_5_tablas_ddl.sql
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/33_giros_sii_catalogo_ddl.sql
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/34_semillas_giros_sii_completo_674.sql
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local -e "ALTER TABLE clientes ADD COLUMN ciudad_id BIGINT UNSIGNED NULL AFTER direccion, ADD INDEX ix_hd_clientes_ciudad(ciudad_id), ADD CONSTRAINT fk_hd_clientes_ciudad FOREIGN KEY (ciudad_id) REFERENCES ciudades(id) ON DELETE RESTRICT;"
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < database/espanol/37_clientes_tipos_juridicos_v50_ddl.sql
+          mysql -N -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local -e "SHOW TABLES LIKE 'tipos_juridicos_clientes'" | grep -Fxq tipos_juridicos_clientes
+          mysql -N -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local -e "SHOW COLUMNS FROM clientes LIKE 'tipo_juridico_id'" | grep -Fq tipo_juridico_id
+      - name: Verificar rutas, permisos JWT, clientes y búsqueda avanzada real
+        env:
+          APP_NAME: RutaHD2_CI
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          RUTAHD_JWT_SECRET: 'CI_ONLY_JWT_TEST_SIGNING_KEY_DO_NOT_USE_IN_PRODUCTION_2026'
+          APP_URL: http://127.0.0.1
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_DATABASE: rutahyd2_es_local
+          DB_USERNAME: root
+          DB_PASSWORD: temporal_ci_solamente
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+        run: |
+          set -euo pipefail
+          composer install --no-interaction --prefer-dist --no-progress
+          php artisan route:list --path=api/v1
+          php tests/integracion_catalogos_api.php
+          php tests/integracion_clientes_v50.php
+          echo 'V51: alta con LISTA BASE y especial elegida, única fila de pivote, rechazo de inactivas, CRUD y JWT aprobados.' >> "$GITHUB_STEP_SUMMARY"

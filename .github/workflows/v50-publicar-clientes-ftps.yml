@@ -69,6 +69,9 @@ jobs:
             print('bye',file=f)
           PY
           lftp -f /tmp/v50/read.lftp >/dev/null
+          echo 'V50_GET_OK: archivos descargados por FTPS'
+          echo 'V50_VERSIONES_PUBLICADAS:'
+          grep -oE '(catalogos-api[.]js|modulos-oficiales[.]js|app-produccion[.]js|usuarios[.]js|proveedores-productos[.]js)[?]v=[^"]+' /tmp/v50/before/index.html || true
           grep -Fq 'Require all denied' /tmp/v50/before/guard-private
           grep -Fq 'HTTP_AUTHORIZATION' /tmp/v50/before/guard-api
           grep -Fq 'rutahd2_api_ready' /tmp/v50/before/gateway

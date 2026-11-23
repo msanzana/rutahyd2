@@ -48,6 +48,9 @@ try{
         'contrasena'=>'Segura-Solo-CI-2026'
     ]),'login')['token'];
     expectOC(401,callOC('GET','/api/v1/ordenes-compra'),'Sin JWT');
+    expectOC(401,callOC('POST','/api/v1/ordenes-compra/costos-productos',[
+        'proveedor_id'=>1,'productos'=>[1]
+    ]),'Costos sin JWT');
     expectOC(401,callOC('POST','/api/v1/ordenes-compra/calcular',[
       'proveedor_id'=>1,'solicitada_en'=>'2026-11-23',
       'detalles'=>[['producto_id'=>1,'cantidad'=>'1.000',
@@ -58,7 +61,8 @@ try{
         'rut'=>'12345678-5','activo'=>1
     ]);
     $productId=(int)DB::table('productos')->insertGetId([
-        'sku'=>'SKU-V55-CI','nombre'=>'Producto V55 CI','activo'=>1
+        'sku'=>'SKU-V55-CI','nombre'=>'Producto V55 CI','activo'=>1,
+        'costo_neto'=>'312.4567'
     ]);
     $otherId=(int)DB::table('productos')->insertGetId([
         'sku'=>'SKU-V55-OTRO','nombre'=>'Producto no asociado','activo'=>1
@@ -67,6 +71,25 @@ try{
         'producto_id'=>$productId,'proveedor_id'=>$providerId,
         'activo'=>1,'costo_proveedor'=>'100.0000'
     ]);
+    // Costo almacenado en PRODUCTOS, no en costo_proveedor ni en precio de venta.
+    $beforeCostos=(int)DB::table('ordenes_compra')->count();
+    $costos=expectOC(200,callOC('POST','/api/v1/ordenes-compra/costos-productos',[
+        'proveedor_id'=>$providerId,'productos'=>[$productId]
+    ],$token),'Costo de producto autorizado');
+    checkOC(count($costos['costos'])===1,'Una fila de costo esperada');
+    checkOC((int)$costos['costos'][0]['producto_id']===$productId,
+        'Costo no corresponde al producto solicitado');
+    checkOC(abs((float)$costos['costos'][0]['costo_unitario_neto']-312.4567)<0.00001,
+        'La OC debe usar productos.costo_neto, NO costo_proveedor');
+    checkOC((int)DB::table('ordenes_compra')->count()===$beforeCostos,
+        'Consultar costo no crea orden de compra');
+    expectOC(422,callOC('POST','/api/v1/ordenes-compra/costos-productos',[
+        'proveedor_id'=>$providerId,'productos'=>[$otherId]
+    ],$token),'No consultar costos de productos ajenos al proveedor');
+    expectOC(422,callOC('POST','/api/v1/ordenes-compra/costos-productos',[
+        'proveedor_id'=>$providerId,'productos'=>[$productId,$productId]
+    ],$token),'No permitir productos repetidos');
+
     $suppliers=expectOC(200,callOC('GET','/api/v1/ordenes-compra/proveedores',
         [],$token),'proveedores');
     checkOC($suppliers['total']>=1,'Proveedor no disponible');

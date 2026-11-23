@@ -1,3 +1,5 @@
 Ruta H&D V2 · V50. DDL37 confirmado ejecutado por el titular el 22-11-2026. CI Laravel/MySQL efímero https://github.com/msanzana/rutahyd2/actions/runs/45093638389 aprobado; Chromium aislado https://github.com/msanzana/rutahyd2front/actions/runs/45093605742 aprobado. Solicitar FTPS con nueve archivos estrictos, respaldo, verificación de bytes y rollback. Origen backend 7aec9f2befa1689b16f61853b5aa78de895e6c33; frontend a3cfac116cc8227d318af851d8a4b3a62257313d. Sin DDL/DML de producción ni registros ficticios. Proteger V48/V49; si hay diferencias de fuente, abortar sin sobrescribir.
 
 Reintento de preflight de solo lectura: registrar versiones y abortar si difieren; aún sin publicación V50.
+
+Preflight ajustado a assets de producción: catalogos-api v42prod, modulos-oficiales/app-produccion v39prod. Mantener backup, parches estrictos y no SQL.

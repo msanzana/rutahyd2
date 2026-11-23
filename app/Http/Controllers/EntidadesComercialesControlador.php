@@ -73,6 +73,9 @@ final class EntidadesComercialesControlador extends Controller
         if ($recurso === 'clientes') {
             return array_merge($comunes, [
                 'rut'=>array_merge($obligatorio,['string','max:25']),
+                'telefono'=>array_merge($opcional,[
+                    'string','regex:/^\\+56 [0-9]{9}$/D'
+                ]),
                 'codigo' => array_merge($opcional, ['string', 'max:50',
                     Rule::unique('clientes', 'codigo')->ignore($id)]),
                 'giro'=>array_merge($opcional,['string','max:255']),

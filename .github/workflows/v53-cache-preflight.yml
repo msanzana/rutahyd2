@@ -1,0 +1,88 @@
+name: V53 - Inspeccionar cache HTML FTPS sin escritura
+on:
+  push:
+    branches: [hotfix/v53-cache-html-20261123]
+    paths: [deployment/solicitudes/diagnostico-cache-v53.txt]
+permissions:
+  contents: read
+jobs:
+  examinar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lectura de index y .htaccess por FTPS
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          umask 077
+          mkdir -p /tmp/v53cache
+          python3 - <<'PY'
+          import pathlib,os
+          p=pathlib.Path('/tmp/v53cache')
+          with (p/'read.lftp').open('w') as f:
+            for line in ['set cmd:fail-exit no','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 30','set net:max-retries 2']:print(line,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            print('get /htdocs/.htaccess -o /tmp/v53cache/root.htaccess',file=f)
+            print('get /htdocs/index.html -o /tmp/v53cache/index.html',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v53cache/read.lftp > /tmp/v53cache/lftp.log 2>&1
+          rm -f /tmp/v53cache/read.lftp
+          test -s /tmp/v53cache/index.html
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,re
+          p=Path('/tmp/v53cache')
+          for name in ['root.htaccess','index.html']:
+            f=p/name
+            print('V53_FILE',name,'exists',f.exists(),
+              'bytes',f.stat().st_size if f.exists() else 0,
+              'sha256',hashlib.sha256(f.read_bytes()).hexdigest() if f.exists() else 'none')
+          if (p/'root.htaccess').exists():
+            s=(p/'root.htaccess').read_text(errors='replace')
+            for term in ['Header','Cache-Control','mod_headers','RewriteEngine',
+              'RewriteRule','DirectoryIndex','Options','Require','Expires','FilesMatch']:
+              print('V53_HTACCESS_HAS',term,str(term.lower() in s.lower()))
+          h=(p/'index.html').read_text()
+          print('V53_INDEX_TAG_V52',all(x in h for x in [
+            'modulos-oficiales.js?v=20261123-v52',
+            'giros-sii-v39.js?v=20261123-v52',
+            'clientes-v50.css?v=20261123-v52']))
+          print('V53_HAS_SW',bool(re.search(r'serviceWorker|sw[.]js|navigator[.]serviceWorker',h,re.I)))
+          PY
+      - name: Observar cache de respuesta pública desde navegador limpio
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v53cache/browser
+          cd /tmp/v53cache/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try {
+            const page=await browser.newPage();
+            for(const path of ['?v53diag=1','index.html?v53diag=1']) {
+              try {
+                const response=await page.goto('https://rutahyd2.free.nf/'+path,
+                  {waitUntil:'domcontentloaded',timeout:45000});
+                const headers=response?.headers()||{};
+                console.log('V53_HTTP',JSON.stringify({path,status:response?.status(),
+                  type:headers['content-type'],cache:headers['cache-control'],
+                  expires:headers.expires,etag:headers.etag,
+                  age:headers.age,server:headers.server}));
+              }catch(error){console.log('V53_HTTP_BLOCKED',path,error.message.slice(0,160));}
+            }
+          }finally{await browser.close();}
+          JS

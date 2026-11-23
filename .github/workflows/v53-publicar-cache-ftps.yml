@@ -1,0 +1,222 @@
+name: V53 - Publicar anti-cache HTML por FTPS
+on:
+  push:
+    branches: [hotfix/v53-cache-html-20261123]
+    paths: [deployment/solicitudes/publicar-cache-v53.txt]
+permissions:
+  contents: read
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  cache:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FRONT_PIN: 2b16a9769bf22f6658188b9b6bef2aa61f45c58b
+      HTML_BEFORE_SHA256: 60af2921d9eb221ba148abecc3ff9dfe4fb4d866b3f9e4f2e866996e481f2e65
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar FTPS y fuente cache V53 aprobada
+        run: |
+          set -euo pipefail
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          git clone -q --depth 1 --branch hotfix/v53-cache-html-20261123 \
+            https://github.com/msanzana/rutahyd2front.git /tmp/v53front
+          git -C /tmp/v53front fetch -q --depth=1 origin "$FRONT_PIN"
+          git -C /tmp/v53front checkout -q --detach "$FRONT_PIN"
+          test "$(git -C /tmp/v53front rev-parse HEAD)" = "$FRONT_PIN"
+          mkdir -p /tmp/v53/{before,after,check}
+      - name: Inspeccionar exactitud y respaldar index y guardas sin escritura
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import os,pathlib
+          p=pathlib.Path('/tmp/v53')
+          with (p/'read.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit no','set ftp:ssl-force yes',
+                'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+                'set net:timeout 35','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for filename,remote in [
+              ('index.html','/htdocs/index.html'),
+              ('root.htaccess','/htdocs/.htaccess'),
+              ('api.guard','/htdocs/api/.htaccess'),
+              ('private.guard','/htdocs/api-v2/.htaccess'),
+              ('gateway','/htdocs/api/index.php')]:
+              print('get '+remote+' -o '+str(p/'before'/filename),file=f)
+            print('cls -a1 /htdocs',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v53/read.lftp > /tmp/v53/ftp-listing.log 2>&1
+          python3 - <<'PY'
+          from pathlib import Path
+          import os,hashlib
+          p=Path('/tmp/v53')
+          index=p/'before/index.html'
+          assert index.exists() and index.stat().st_size>1000,'Falta el index productivo'
+          assert hashlib.sha256(index.read_bytes()).hexdigest()==os.environ['HTML_BEFORE_SHA256'],\
+            'El HTML productivo cambió desde la auditoría: abortar sin sobrescribir.'
+          listing=(p/'ftp-listing.log').read_text(errors='replace')
+          assert 'cls:' not in listing,'No se pudo comprobar directorio raíz'
+          assert '.htaccess' not in [line.strip() for line in listing.splitlines()
+            if line.strip()=='.htaccess'],'Raíz ya tiene .htaccess; abortar sin sobrescribir'
+          assert not (p/'before/root.htaccess').exists(),'Existe .htaccess: abortar'
+          assert b'HTTP_AUTHORIZATION' in (p/'before/api.guard').read_bytes()
+          assert b'Require all denied' in (p/'before/private.guard').read_bytes()
+          assert b'rutahd2_api_ready' in (p/'before/gateway').read_bytes()
+          text=index.read_text()
+          for tag in ['modulos-oficiales.js?v=20261123-v52',
+             'giros-sii-v39.js?v=20261123-v52',
+             'clientes-v50.css?v=20261123-v52',
+             'app-produccion.js?v=20261122-v50']:
+            assert tag in text,tag
+          assert 'rutahd-release' not in text
+          print('V53_PRECHECK_OK: root .htaccess ausente; V52 intacta; index sha exacto')
+          PY
+      - name: Añadir exclusivamente control de caché a index productivo
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/v53')
+          ht=Path('/tmp/v53front/.htaccess').read_text()
+          assert 'no-store, no-cache' in ht
+          assert 'RewriteRule' not in ht and 'api-v2/' not in ht
+          (p/'after/root.htaccess').write_text(ht)
+          html=(p/'before/index.html').read_text()
+          src=Path('/tmp/v53front/index.html').read_text()
+          start=src.index('  <meta name="rutahd-release"')
+          stop=src.index('\n  <link rel="stylesheet"',start)
+          addition=src[start:stop]
+          title='  <title>Ruta H&D2 · Gestión Comercial</title>'
+          assert html.count(title)==1
+          assert 'v53-cache-20261123' in addition
+          html=html.replace(title,addition)
+          assert html.count('rutahd-release')==1
+          assert 'modulos-oficiales.js?v=20261123-v52' in html
+          (p/'after/index.html').write_text(html)
+          print('V53_PATCH_OK: HTML mantiene todos los recursos V52; sólo cabeceras y pageshow')
+          PY
+      - name: Guardar respaldo verificable antes de publicar
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v53-respaldo-antes-cache
+          path: /tmp/v53/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar .htaccess y después index HTML
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/v53/upload-started
+          python3 - <<'PY'
+          import os,pathlib
+          p=pathlib.Path('/tmp/v53')
+          with (p/'put.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+                'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+                'set net:timeout 35','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            print('put '+str(p/'after/root.htaccess')+' -o /htdocs/.htaccess',file=f)
+            print('put '+str(p/'after/index.html')+' -o /htdocs/index.html',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v53/put.lftp >/dev/null
+          echo 'V53_UPLOADED: root .htaccess y HTML'
+      - name: Releer y verificar bytes, guardas del backend y HTML
+        run: |
+          set -euo pipefail
+          set +x
+          python3 - <<'PY'
+          import os,pathlib
+          p=pathlib.Path('/tmp/v53')
+          with (p/'verify.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 35','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for filename,remote in [
+              ('index.html','/htdocs/index.html'),('root.htaccess','/htdocs/.htaccess'),
+              ('api.guard','/htdocs/api/.htaccess'),
+              ('private.guard','/htdocs/api-v2/.htaccess'),
+              ('gateway','/htdocs/api/index.php')]:
+              print('get '+remote+' -o '+str(p/'check'/filename),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v53/verify.lftp >/dev/null
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/v53')
+          for n in ['root.htaccess','index.html']:
+            assert (p/'after'/n).read_bytes()==(p/'check'/n).read_bytes(),n
+          for n in ['api.guard','private.guard','gateway']:
+            assert (p/'before'/n).read_bytes()==(p/'check'/n).read_bytes(),n
+          print('V53_BYTES_OK: index, root .htaccess exactos y 3 protecciones idénticas')
+          PY
+      - name: Verificar cabeceras de caché reales en navegador Chromium
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v53/browser
+          cd /tmp/v53/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage();
+            const resp=await page.goto('https://rutahyd2.free.nf/index.html?v53cache=20261123',
+              {waitUntil:'domcontentloaded',timeout:55000});
+            const headers=resp.headers();
+            const check=await page.evaluate(()=>({
+              mark:document.querySelector('meta[name="rutahd-release"]')?.content,
+              v52:!!document.querySelector('script[src*="modulos-oficiales.js?v=20261123-v52"]'),
+              logo:!!document.querySelector('.brand-logo')
+            }));
+            console.log('V53_HTTP_VERIFY',JSON.stringify({
+              status:resp.status(),cacheControl:headers['cache-control'],
+              expires:headers.expires,check
+            }));
+            if(resp.status()!==200||!(headers['cache-control']?.includes('no-store')||headers['cache-control']?.includes('no-cache'))||
+               !check.v52||!check.logo||check.mark!=='v53-cache-20261123')
+              throw new Error('El navegador aún no recibe no-store o HTML V53; revertir.');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar index V52 y retirar regla nueva si falla tras subir
+        if: failure()
+        run: |
+          set +x
+          if [ ! -f /tmp/v53/upload-started ];then
+            echo 'V53_ROLLBACK_NO_APLICA: no se escribió producción'
+            exit 0
+          fi
+          python3 - <<'PY'
+          import os,pathlib
+          p=pathlib.Path('/tmp/v53')
+          with (p/'rollback.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 35','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            print('put '+str(p/'before/index.html')+' -o /htdocs/index.html',file=f)
+            print('rm /htdocs/.htaccess',file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v53/rollback.lftp >/dev/null ||
+            echo '::error::Restauración manual necesaria desde rutahd-v53-respaldo-antes-cache'
+      - name: Eliminar scripts que incluyen acceso FTPS
+        if: always()
+        run: rm -f /tmp/v53/*.lftp

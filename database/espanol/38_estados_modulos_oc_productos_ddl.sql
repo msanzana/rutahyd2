@@ -111,7 +111,7 @@ ALTER TABLE detalles_ordenes_compra
  DROP FOREIGN KEY fk_detalles_ordenes_compra_2,
  DROP COLUMN presentacion_id;
 
--- Controles posteriores permitidos (NO usar information_schema):
+-- Controles posteriores permitidos mediante SHOW y SELECT:
 SHOW COLUMNS FROM estados;
 SHOW COLUMNS FROM modulos;
 SHOW COLUMNS FROM modulos_estados;

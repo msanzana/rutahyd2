@@ -53,6 +53,9 @@ final class OrdenesCompraControlador extends Controller
         $row=$this->base()->where('oc.id',$id)->first();
         abort_unless($row,404,'Orden de compra no encontrada');
         $data=(array)$row;
+        // Una sola identidad corporativa para PDF descargado y adjunto SMTP.
+        // No sustituir los datos reales por los del usuario conectado.
+        $data['emisor']=(array)config('rutahd.oc_emisor',[]);
         $data['detalles']=DB::table('detalles_ordenes_compra as d')
             ->join('productos as p','p.id','=','d.producto_id')
             ->where('d.orden_compra_id',$id)

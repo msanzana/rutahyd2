@@ -1,0 +1,86 @@
+name: V60 - PDF Orden Compra encabezado legible
+on:
+  push:
+    branches: [fix/v60-pdf-oc-encabezado-emisor-20261123]
+    paths:
+      - app/Services/PdfOrdenCompra.php
+      - app/Http/Controllers/OrdenesCompraControlador.php
+      - config/rutahd.php
+      - tests/pdf_orden_compra_v55.php
+      - .github/workflows/v60-pdf-oc-encabezado-ci.yml
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  pdf:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, iconv, fileinfo
+      - name: Preparar render PDF y dependencias de contraste
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq poppler-utils python3-pil >/dev/null
+      - name: Revisar sintaxis y generar PDF de 2 páginas
+        run: |
+          set -euo pipefail
+          php -l app/Services/PdfOrdenCompra.php
+          php -l app/Http/Controllers/OrdenesCompraControlador.php
+          php -l config/rutahd.php
+          php -l tests/pdf_orden_compra_v55.php
+          php tests/pdf_orden_compra_v55.php
+          pdfinfo /tmp/rutahd_v55_oc_test.pdf | grep -F 'Pages:' | grep -Eq '2$'
+          pdftotext -layout /tmp/rutahd_v55_oc_test.pdf /tmp/rutahd_v60_text.txt
+          for v in "EMISOR" "PROVEEDOR" "Emisor de Prueba H&D" \
+            "Proveedor Comercial de Prueba" "11.111.111-1" "12.345.678-5" \
+            "Emisión: 23-11-2026" "Fecha solicitada: 23-11-2026" \
+            "Direccion de muestra 123" "Dirección sintética de prueba";do
+            grep -F "$v" /tmp/rutahd_v60_text.txt ||
+              { echo "Texto ausente del PDF: $v"; exit 1; }
+          done
+          test "$(grep -c 'EMISOR' /tmp/rutahd_v60_text.txt)" = 2
+          test "$(grep -c 'PROVEEDOR' /tmp/rutahd_v60_text.txt)" = 2
+          mkdir -p /tmp/v60render
+          pdftoppm -f 1 -l 2 -r 144 -png /tmp/rutahd_v55_oc_test.pdf /tmp/v60render/oc >/dev/null
+          echo V60_PDF_TEXT_AND_PAGES_OK
+
+      - name: Probar contraste visual sobre el PDF renderizado
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+          files=sorted(Path('/tmp/v60render').glob('oc-*.png'))
+          assert len(files)==2,files
+          for path in files:
+            image=Image.open(path).convert('RGB')
+            assert image.width>1000 and image.height>1600,(image.width,image.height)
+            # Coordenadas de PDF x,y en 72 pt; raster a 144 dpi.
+            # Contrastar zona EMISOR, PROVEEDOR, identificaciones y fechas.
+            blocks={
+              'EMISOR':(100,255,260,300),
+              'PROVEEDOR':(620,255,840,300),
+              'nombre-emisor':(100,300,510,324),
+              'nombre-proveedor':(620,300,1080,324),
+              'fecha':(90,485,570,530)
+            }
+            for name,box in blocks.items():
+              crop=image.crop(box)
+              dark=sum(1 for pixel in crop.getdata() if max(pixel)<130)
+              assert dark>=8,f'Texto no visible en {path.name} {name}: {dark} px'
+              print('V60_CONTRAST_OK',path.name,name,dark)
+          PY
+
+      - name: Imagenes de revisión del PDF ficticio
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v60-pdf-muestra-sintetica
+          path: |
+            /tmp/rutahd_v55_oc_test.pdf
+            /tmp/v60render/oc-*.png
+          retention-days: 15
+          if-no-files-found: error

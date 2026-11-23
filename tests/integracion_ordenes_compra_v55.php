@@ -83,10 +83,46 @@ try{
 
     // SMTP se simula estrictamente en memoria; NUNCA envío externo.
     config(['mail.default'=>'smtp']);
-    Mail::shouldReceive('html')->twice()->andReturnNull();
+    $correoSimulado=new class {
+        public array $entregas=[];
+        public function html(string $html,callable $callback): void
+        {
+            $message=new class {
+                public string $destinatario='';
+                public string $asunto='';
+                public string $archivo='';
+                public string $pdf='';
+                public function to(string $correo): self {
+                    $this->destinatario=$correo;return $this;
+                }
+                public function subject(string $asunto): self {
+                    $this->asunto=$asunto;return $this;
+                }
+                public function attachData(string $pdf,string $nombre,array $opciones=[]): self {
+                    if(($opciones['mime']??'')!=='application/pdf')
+                        throw new RuntimeException('MIME PDF inválido');
+                    $this->archivo=$nombre;$this->pdf=$pdf;return $this;
+                }
+            };
+            $callback($message);
+            $this->entregas[]=[
+                'destino'=>$message->destinatario,
+                'asunto'=>$message->asunto,
+                'archivo'=>$message->archivo,
+                'pdf_valido'=>str_starts_with($message->pdf,'%PDF-1.4'),
+                'html_valido'=>str_contains($html,'ORDEN DE COMPRA GENERADA'),
+            ];
+        }
+    };
+    Mail::swap($correoSimulado);
     $new=expectOC(201,callOC('POST','/api/v1/ordenes-compra',$body,$token),
         'guardar y emitir');
     checkOC(($new['correo_enviado']??false)===true,'Aviso simulado tras confirmar');
+    checkOC(count($correoSimulado->entregas)===1,'Se debe enviar exactamente un correo en alta');
+    checkOC($correoSimulado->entregas[0]['destino']==='no-real@example.invalid',
+        'Destinatario del proveedor');
+    checkOC($correoSimulado->entregas[0]['pdf_valido'] &&
+        $correoSimulado->entregas[0]['html_valido'],'PDF y mensaje corporativo');
     $id=(int)($new['id']??0);
     checkOC($id>0,'Nuevo id requerido');
     $oc=DB::table('ordenes_compra')->where('id',$id)->first();
@@ -104,6 +140,9 @@ try{
     checkOC(str_starts_with((string)$pdf[2]->getContent(),'%PDF-1.4'),'PDF no válido');
     expectOC(200,callOC('POST','/api/v1/ordenes-compra/'.$id.'/reenviar',[],$token),
         'Reenvío solicitado sin crear otra orden');
+    checkOC(count($correoSimulado->entregas)===2,
+        'Reenvío debe crear segundo correo, nunca segunda orden');
+
 
     $modified=$body;$modified['detalles'][0]['cantidad']='1.000';
     expectOC(200,callOC('PUT','/api/v1/ordenes-compra/'.$id,$modified,$token),

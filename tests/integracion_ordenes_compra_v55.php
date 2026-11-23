@@ -48,6 +48,11 @@ try{
         'contrasena'=>'Segura-Solo-CI-2026'
     ]),'login')['token'];
     expectOC(401,callOC('GET','/api/v1/ordenes-compra'),'Sin JWT');
+    expectOC(401,callOC('POST','/api/v1/ordenes-compra/calcular',[
+      'proveedor_id'=>1,'solicitada_en'=>'2026-11-23',
+      'detalles'=>[['producto_id'=>1,'cantidad'=>'1.000',
+        'costo_unitario_neto'=>'100.0000']]
+    ]),'Cotización sin JWT');
     $providerId=(int)DB::table('proveedores')->insertGetId([
         'nombre'=>'Proveedor V55 CI','correo_electronico'=>'no-real@example.invalid',
         'rut'=>'12345678-5','activo'=>1
@@ -75,6 +80,15 @@ try{
         'detalles'=>[['producto_id'=>$productId,'cantidad'=>'2.000',
             'costo_unitario_neto'=>'100.0000']]
     ];
+    // La vista previa usa el cálculo fiscal exacto de MariaDB y no escribe.
+    $beforePreview=(int)DB::table('ordenes_compra')->count();
+    $preview=expectOC(200,callOC('POST','/api/v1/ordenes-compra/calcular',
+        $body,$token),'previsualización autorizada');
+    checkOC((float)$preview['subtotal_neto']===200.00,'Subtotal de previsualización');
+    checkOC((float)$preview['total_impuestos']===38.00,'Impuestos de previsualización');
+    checkOC((float)$preview['total_bruto']===238.00,'Total bruto de previsualización');
+    checkOC((int)DB::table('ordenes_compra')->count()===$beforePreview,
+        'Previsualizar no debe insertar ni modificar OC');
     expectOC(422,callOC('POST','/api/v1/ordenes-compra',
         array_merge($body,['estado_id'=>999]),$token),'estado inmutable');
     $bad=$body;$bad['detalles'][0]['producto_id']=$otherId;
@@ -117,6 +131,9 @@ try{
     Mail::swap($correoSimulado);
     $new=expectOC(201,callOC('POST','/api/v1/ordenes-compra',$body,$token),
         'guardar y emitir');
+    checkOC((float)$new['subtotal_neto']===200.00,'Respuesta subtotal persistido');
+    checkOC((float)$new['total_impuestos']===38.00,'Respuesta impuestos persistidos');
+    checkOC((float)$new['total_bruto']===238.00,'Respuesta total bruto persistido');
     checkOC(($new['correo_enviado']??false)===true,'Aviso simulado tras confirmar');
     checkOC(count($correoSimulado->entregas)===1,'Se debe enviar exactamente un correo en alta');
     checkOC($correoSimulado->entregas[0]['destino']==='no-real@example.invalid',
@@ -145,8 +162,11 @@ try{
 
 
     $modified=$body;$modified['detalles'][0]['cantidad']='1.000';
-    expectOC(200,callOC('PUT','/api/v1/ordenes-compra/'.$id,$modified,$token),
-        'Edición transaccional');
+    $savedUpdate=expectOC(200,callOC('PUT','/api/v1/ordenes-compra/'.$id,
+        $modified,$token),'Edición transaccional');
+    checkOC((float)$savedUpdate['subtotal_neto']===100.00,'Subtotal editado confirmado');
+    checkOC((float)$savedUpdate['total_impuestos']===19.00,'IVA editado confirmado');
+    checkOC((float)$savedUpdate['total_bruto']===119.00,'Bruto editado confirmado');
     checkOC((float)DB::table('ordenes_compra')->where('id',$id)->value('total_bruto')===119.,
         'Total después de editar');
     expectOC(200,callOC('POST','/api/v1/ordenes-compra/'.$id.'/anular',[],$token),

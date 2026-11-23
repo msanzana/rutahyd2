@@ -146,6 +146,19 @@ final class OrdenesCompraControlador extends Controller
         })->validate();
     }
 
+    /** Cotización de impuestos y total sin crear, modificar ni enviar órdenes. */
+    public function calcular(Request $request)
+    {
+        $data=$this->validar($request);
+        $existe=DB::table('proveedores')
+            ->where('id',(int)$data['proveedor_id'])->where('activo',1)->exists();
+        if(!$existe)throw ValidationException::withMessages([
+            'proveedor_id'=>['Selecciona un proveedor activo.']
+        ]);
+        [, $totales]=$this->prepararLineas((int)$data['proveedor_id'],$data['detalles']);
+        return $this->respuesta($totales);
+    }
+
     /** Enteros en centavos; la multiplicación decimal la resuelve MariaDB. */
     private function centavos(string $valor): int
     {
@@ -248,12 +261,23 @@ final class OrdenesCompraControlador extends Controller
                 DB::table('detalles_ordenes_compra')->insert(
                     array_merge(['orden_compra_id'=>$id],$detalle));
             }
+            // Verificación dentro de la misma transacción: un importe ausente o
+            // truncado impide confirmar la OC, evitando errores silenciosos.
+            $persistido=DB::table('ordenes_compra')->where('id',$id)
+                ->first(['subtotal_neto','total_impuestos','total_bruto']);
+            foreach($totales as $campo=>$importe){
+                if((string)$persistido->{$campo}!==$importe)
+                    throw new \RuntimeException('No se pudo persistir '.$campo.' de la orden');
+            }
             return $id;
         },3);
 
         $documento=$this->documento($orderId);
         $response=['id'=>$orderId,'numero'=>$documento['numero'],
             'estado_nombre'=>$documento['estado_nombre'],
+            'subtotal_neto'=>$documento['subtotal_neto'],
+            'total_impuestos'=>$documento['total_impuestos'],
+            'total_bruto'=>$documento['total_bruto'],
             'correo_enviado'=>null,
             'mensaje'=>$new?'Orden de compra creada.':'Orden de compra actualizada.'];
         if($new){

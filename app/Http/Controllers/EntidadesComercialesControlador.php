@@ -176,8 +176,14 @@ final class EntidadesComercialesControlador extends Controller
         $datos = $this->validar($request, $recurso, $nuevo, $id);
         $listaId=$recurso==='clientes' ? ($datos['lista_precio_id']??null) : null;
         unset($datos['lista_precio_id']);
-        abort_if($nuevo && $listaId!==null,422,
-            'Los clientes nuevos reciben la LISTA BASE; cambia la lista al editar');
+        // V51: crear cliente con LISTA BASE por defecto o la lista activa
+        // elegida expresamente en el alta. Se asigna en la misma transacción:
+        // la tabla pivote admite una sola lista vigente por cliente.
+        if($recurso==='clientes' && $listaId!==null){
+            abort_unless(DB::table('listas_precios')->where('id',(int)$listaId)
+                ->where('activo',1)->exists(),422,
+                'Selecciona una lista de precios activa.');
+        }
         try {
             return DB::transaction(function () use ($recurso, $id, $datos, $nuevo, $listaId): array {
                 if ($nuevo) {
@@ -185,6 +191,10 @@ final class EntidadesComercialesControlador extends Controller
                     $id = (int)DB::table($recurso)->insertGetId($datos);
                     if ($recurso === 'clientes') {
                         $this->listasPrecios->asignarListaBaseCliente($id);
+                        // Sustituir la BASE solo si se eligió otra lista:
+                        // updateOrInsert conserva una única fila de pivote.
+                        if($listaId!==null)
+                            $this->listasPrecios->asignarListaCliente($id,(int)$listaId);
                     }
                 } else {
                     $actual = DB::table($recurso)->where('id', $id)->lockForUpdate()->first();

@@ -1,0 +1,294 @@
+name: V57 - Publicar dimensiones OC y proveedor FTPS
+on:
+  push:
+    branches: [deploy/v57-oc-proveedor-dialogos-ftps-20261123]
+    paths: [.github/workflows/v57-publicar-dialogos-ftps.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FRONT_BASE: 8f5df98355a688366e45dedbf23ebe3775d3d767
+      FRONT_PIN: 09d0b66c5206cafcc7e1cd47e29655d04640cad1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar fuente fija y FTP seguro
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$FTP_PASSWORD"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp >/dev/null
+          git clone -q --depth=1 --branch fix/v57-oc-proveedor-dialogos-20261123 https://github.com/msanzana/rutahyd2front.git /tmp/v57front
+          git -C /tmp/v57front fetch -q --depth=1 origin "$FRONT_BASE" "$FRONT_PIN"
+          git -C /tmp/v57front checkout -q --detach "$FRONT_PIN"
+          test "$(git -C /tmp/v57front rev-parse HEAD)" = "$FRONT_PIN"
+          umask 077
+          mkdir -p /tmp/v57deploy/{before,after,check}
+
+      - name: Respaldar archivos originales y controles desde FTPS
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v57deploy')
+          files={
+            'index.html':'/htdocs/index.html',
+            'assets/js/ordenes-compra-v55.js':'/htdocs/assets/js/ordenes-compra-v55.js',
+            'assets/css/ordenes-compra-v55.css':'/htdocs/assets/css/ordenes-compra-v55.css',
+            'root.guard':'/htdocs/.htaccess',
+            'api.guard':'/htdocs/api/.htaccess',
+            'private.guard':'/htdocs/api-v2/.htaccess',
+            'gateway.guard':'/htdocs/api/index.php',
+          }
+          (p/'manifest.txt').write_text(''.join(k+'\t'+v+'\n' for k,v in files.items()))
+          with (p/'read.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:
+              print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name,remote in files.items():
+              target=p/'before'/name
+              target.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+remote+' -o '+str(target),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v57deploy/read.lftp >/dev/null 2>/tmp/v57deploy/read-errors.log
+          rm -f /tmp/v57deploy/read.lftp
+
+      - name: Preflight SHA exacto del estado V56 y guardas API
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          root=Path('/tmp/v57deploy/before')
+          expected={
+            'index.html':'6faeaba8c9105e219d657c07b1e1d087eb49814bb53470bf3164b5a5c4a87e80',
+            'assets/js/ordenes-compra-v55.js':'2a3f373ad00792fa32e59c01f428d408bc6a2f76df0f61dc7d31a271eb6ccf12',
+            'assets/css/ordenes-compra-v55.css':'193dc90b69e26d68632435dd1d617ab32baccc8650fec98a12a55b8a0a7fd098',
+            'root.guard':'a6cbd7462dc5a8492cbdb15e406ad5058557f616375380b813dcf8d24ed47d1e',
+            'api.guard':'ae0248cbcc21787c4595995a9cf76fd8c2edf34bb90cb1051820fc830bde9706',
+            'private.guard':'f19e0a6ec4db41ce29fa249819d1121707608a25e2f697f023d94788f9751a0b',
+            'gateway.guard':'37b5ad7eabd2d7a9ba22c831a3464db8d16fc8cf32950aa6a8a6da811b942687'
+          }
+          for name,hashExpected in expected.items():
+            got=hashlib.sha256((root/name).read_bytes()).hexdigest()
+            assert got==hashExpected,'Cambio inesperado en remoto: '+name
+          html=(root/'index.html').read_text()
+          for v in ['v53-cache-20261123',
+            'clientes-v50.css?v=20261123-v52',
+            'select-buscable-v56.js?v=20261123-v56',
+            'ordenes-compra-v55.js?v=20261123-v56',
+            'ordenes-compra-v55.css?v=20261123-v56']:
+            assert v in html,'HTML no está en V56: '+v
+          assert 'no-store, no-cache' in (root/'root.guard').read_text()
+          assert 'HTTP_AUTHORIZATION' in (root/'api.guard').read_text()
+          assert 'Require all denied' in (root/'private.guard').read_text()
+          assert 'rutahd2_api_ready' in (root/'gateway.guard').read_text()
+          print('V57_PREFLIGHT_SHA_OK: archivos actuales y API protegida')
+          PY
+
+      - name: Aplicar parches sin fuzzy y solo versionar dos etiquetas del HTML
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess,shutil,os
+          p=Path('/tmp/v57deploy')
+          for name in ['assets/js/ordenes-compra-v55.js','assets/css/ordenes-compra-v55.css']:
+            dest=p/'after'/name
+            dest.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copy2(p/'before'/name,dest)
+            patch=subprocess.run(['git','-C','/tmp/v57front','diff','--no-ext-diff',
+              '--binary',os.environ['FRONT_BASE'],os.environ['FRONT_PIN'],'--',name],
+              capture_output=True,check=True).stdout
+            assert patch.count(b'diff --git')==1,name
+            result=subprocess.run(['patch','--batch','--fuzz=0','-p1',
+              '-d',str(p/'after')],input=patch,capture_output=True)
+            if result.returncode:
+              print(result.stdout.decode(errors='replace')[:1200])
+              raise RuntimeError('Conflicto exacto: '+name)
+            print('V57_PATCH_OK',name)
+          html=(p/'before/index.html').read_text()
+          for before,after in [
+            ('ordenes-compra-v55.css?v=20261123-v56','ordenes-compra-v55.css?v=20261123-v57'),
+            ('ordenes-compra-v55.js?v=20261123-v56','ordenes-compra-v55.js?v=20261123-v57')]:
+            assert html.count(before)==1,before
+            html=html.replace(before,after)
+          assert html.count('select-buscable-v56.js?v=20261123-v56')==1
+          assert html.count('app-produccion.js?v=20261123-v55')==1
+          assert html.count('data-nav="compras_ordenes"')==1
+          assert 'v53-cache-20261123' in html
+          (p/'after/index.html').write_text(html)
+          print('V57_HTML_MINIMAL_OK: solo 2 versiones, sin cambio de menú')
+          PY
+          node --check /tmp/v57deploy/after/assets/js/ordenes-compra-v55.js
+
+      - name: Guardar respaldo antes de publicar
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v57-respaldo-antes-dialogos
+          path: /tmp/v57deploy/before/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Subir CSS, JS e index al final
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          touch /tmp/v57deploy/upload-started
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v57deploy')
+          files=['assets/css/ordenes-compra-v55.css',
+            'assets/js/ordenes-compra-v55.js','index.html']
+          remote=dict(line.split('\t',1) for line in (p/'manifest.txt').read_text().splitlines())
+          (p/'uploads.txt').write_text('\n'.join(files)+'\n')
+          with (p/'upload.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              print('put '+str(p/'after'/name)+' -o '+remote[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v57deploy/upload.lftp >/dev/null 2>/tmp/v57deploy/upload-errors.log
+          rm -f /tmp/v57deploy/upload.lftp
+          echo 'V57_PUBLISHED: 3 archivos, HTML último'
+
+      - name: Readback de bytes idénticos y cuatro protecciones intactas
+        run: |
+          set -euo pipefail
+          set +x
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v57deploy')
+          files=(p/'uploads.txt').read_text().splitlines()+[
+            'root.guard','api.guard','private.guard','gateway.guard']
+          remote=dict(line.split('\t',1) for line in (p/'manifest.txt').read_text().splitlines())
+          with (p/'verify.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              dest=p/'check'/name
+              dest.parent.mkdir(parents=True,exist_ok=True)
+              print('get '+remote[name]+' -o '+str(dest),file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v57deploy/verify.lftp >/dev/null 2>/tmp/v57deploy/verify-errors.log
+          rm -f /tmp/v57deploy/verify.lftp
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/v57deploy')
+          for name in (p/'uploads.txt').read_text().splitlines():
+            assert (p/'after'/name).read_bytes()==(p/'check'/name).read_bytes(),name
+          for name in ['root.guard','api.guard','private.guard','gateway.guard']:
+            assert (p/'before'/name).read_bytes()==(p/'check'/name).read_bytes(),name
+          print('V57_BYTES_OK: 3 archivos correctos y 4 protecciones preservadas')
+          PY
+
+      - name: Smoke Chromium público sin sesión ni escrituras
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v57deploy/browser
+          cd /tmp/v57deploy/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({viewport:{width:1600,height:900},locale:'es-CL'});
+            const errors=[];
+            page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/',{
+              waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>Boolean(window.RutaHDProduccion?.navigate)&&
+              Boolean(window.RutaHDOrdenesCompra?.mount),null,{timeout:45000});
+            const info=await page.evaluate(()=>{
+              const style=document.createElement('dialog');
+              style.className='modal hd-oc-modal hd-oc-modal--supplier';
+              style.innerHTML='<section class="hd-oc-modal-body"><div class="hd-oc-modal-heading"><h2>Prueba visual</h2></div><form class="hd-oc-inline-search"><input type="search" aria-label="Buscar proveedor"><button type="button">Buscar</button></form></section>';
+              document.body.append(style);style.showModal();
+              const rect=style.getBoundingClientRect();
+              const input=style.querySelector('input').getBoundingClientRect();
+              const button=style.querySelector('button').getBoundingClientRect();
+              style.close();style.remove();
+              return {
+                release:document.querySelector('meta[name="rutahd-release"]')?.content,
+                js:!!document.querySelector('script[src*="ordenes-compra-v55.js?v=20261123-v57"]'),
+                css:!!document.querySelector('link[href*="ordenes-compra-v55.css?v=20261123-v57"]'),
+                select:!!document.querySelector('script[src*="select-buscable-v56.js?v=20261123-v56"]'),
+                oc:!!document.querySelector('#purchaseSubnav [data-nav="compras_ordenes"]'),
+                clients:!!document.querySelector('#clientSubnav [data-nav="clientes_listado"]'),
+                geometry:{w:rect.width,h:rect.height,inputW:input.width,
+                  aligned:Math.abs(input.top-button.top)<3}
+              };
+            });
+            console.log('V57_PUBLIC_SMOKE',JSON.stringify({
+              status:response?.status(),info,errors
+            }));
+            if(response?.status()!==200||
+              info.release!=='v53-cache-20261123'||!info.js||
+              !info.css||!info.select||!info.oc||!info.clients||
+              info.geometry.w>781||info.geometry.h>640||
+              info.geometry.inputW<300||!info.geometry.aligned||errors.length)
+              throw Error('Validación pública de V57 incorrecta');
+            console.log('V57_PUBLIC_SMOKE_OK');
+          }finally{await browser.close();}
+          JS
+
+      - name: Restaurar todos los originales si falla cualquier fase posterior a subida
+        if: failure()
+        run: |
+          set +x
+          if [ ! -f /tmp/v57deploy/upload-started ];then
+            echo 'V57_ROLLBACK_NO_APLICA: producción no modificada'
+            exit 0
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('/tmp/v57deploy')
+          files=['index.html','assets/js/ordenes-compra-v55.js',
+            'assets/css/ordenes-compra-v55.css']
+          remote=dict(line.split('\t',1) for line in (p/'manifest.txt').read_text().splitlines())
+          with (p/'rollback.lftp').open('w') as f:
+            for cmd in ['set cmd:fail-exit yes','set ftp:ssl-force yes',
+              'set ftp:ssl-protect-data yes','set ssl:verify-certificate yes',
+              'set net:timeout 45','set net:max-retries 3']:print(cmd,file=f)
+            print('open -u "'+os.environ['FTP_USER']+'","'+os.environ['FTP_PASSWORD']+
+              '" ftp://'+os.environ['FTP_HOST'],file=f)
+            for name in files:
+              print('put '+str(p/'before'/name)+' -o '+remote[name],file=f)
+            print('bye',file=f)
+          PY
+          lftp -f /tmp/v57deploy/rollback.lftp >/dev/null 2>/tmp/v57deploy/rollback-errors.log &&
+            echo 'V57_ROLLBACK_ATTEMPTED: archivos originales restaurados' ||
+            echo '::error::Rollback incompleto: restaurar artifact rutahd-v57-respaldo-antes-dialogos'
+
+      - name: Retirar scripts FTP con claves
+        if: always()
+        run: rm -f /tmp/v57deploy/*.lftp

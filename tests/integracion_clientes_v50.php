@@ -82,6 +82,57 @@ try{
   checkCustomer(DB::table('clientes_listas_precios')
     ->where('cliente_id',$id)->where('lista_precio_id',$baseList)
     ->where('activo',1)->exists(),'New customer assigned active base list');
+  // V51: alta con lista especial debe dejar una única fila de la tabla pivote,
+  // dentro de la misma transacción; base se asigna solo si no hay selección.
+  $specialId=(int)DB::table('listas_precios')->insertGetId([
+    'codigo'=>'V51_ESPECIAL_CI',
+    'nombre'=>'LISTA ESPECIAL CI',
+    'es_base'=>0,'activo'=>1,
+    'creado_en'=>now(),'actualizado_en'=>now()
+  ]);
+  checkCustomer($specialId>0,'Special price list fixture missing');
+  $specialInput=array_replace($base,[
+    'nombre'=>'Cliente Lista Especial CI',
+    'rut'=>'11111111-1',
+    'correo_electronico'=>'especial-v51@example.invalid',
+    'lista_precio_id'=>$specialId
+  ]);
+  $specialCreated=customerExpect(201,customerCall('POST','/api/v1/recursos/clientes',
+    $specialInput,$admin),'New customer with selected special price list');
+  $specialCustomerId=(int)($specialCreated['id']??0);
+  checkCustomer($specialCustomerId>0,'New special customer ID not returned');
+  $pivot=DB::table('clientes_listas_precios')
+    ->where('cliente_id',$specialCustomerId)->get();
+  checkCustomer($pivot->count()===1&&
+    (int)$pivot->first()->lista_precio_id===$specialId&&
+    (int)$pivot->first()->activo===1,
+    'Chosen special list must replace BASE in exactly one active pivot row');
+  $specialList=customerExpect(200,customerCall('GET',
+    '/api/v1/clientes/'.$specialCustomerId.'/lista-precio',[],$admin),
+    'Confirm selected special list is active');
+  checkCustomer((int)($specialList['lista']['id']??0)===$specialId,
+    'The listed active price list must be the selected special one');
+  // Inactive lists cannot be assigned; reject before creating a customer.
+  DB::table('listas_precios')->where('id',$specialId)->update(['activo'=>0]);
+  $countBefore=DB::table('clientes')->count();
+  customerExpect(422,customerCall('POST','/api/v1/recursos/clientes',
+    array_replace($specialInput,[
+      'rut'=>'22222222-2',
+      'lista_precio_id'=>$specialId
+    ]),$admin),'Inactive price list must not create customer');
+  checkCustomer(DB::table('clientes')->count()===$countBefore,
+    'Rejected price list must not partially create customer');
+  DB::table('listas_precios')->where('id',$specialId)->update(['activo'=>1]);
+  // Editing may return to BASE without leaving another pivot record.
+  customerExpect(200,customerCall('PUT','/api/v1/recursos/clientes/'.
+    $specialCustomerId,['lista_precio_id'=>(int)$baseList],$admin),
+    'Change active price list on existing customer');
+  $pivot=DB::table('clientes_listas_precios')
+    ->where('cliente_id',$specialCustomerId)->get();
+  checkCustomer($pivot->count()===1&&
+    (int)$pivot->first()->lista_precio_id===(int)$baseList,
+    'Editing list must replace the pivot record, not duplicate it');
+
   $list=customerExpect(200,customerCall('GET','/api/v1/recursos/clientes?'.
     http_build_query(['page'=>1,'por_pagina'=>25,'filtros'=>[
       'tipo_juridico_id'=>(int)$types['EMPRESA'],'activo'=>'1',
@@ -119,7 +170,7 @@ try{
   checkCustomer(($off['activo']??null)===false,'Soft delete state');
   customerExpect(200,customerCall('PUT','/api/v1/recursos/clientes/'.$id,
     ['activo'=>true],$admin),'Reactivate preserving legal type and phone');
-  echo "V50_BACK_OK: phone +56 NNNNNNNNN, RUT, legal types, CRUD, advanced filters, active price list, JWT.\n";
+  echo "V51_BACK_OK: price pivot create/edit, phone +56 NNNNNNNNN, RUT, legal types, CRUD, advanced filters, active price list, JWT.\n";
 }catch(Throwable $e){
   fwrite(STDERR,'V50_BACK_FAIL '.$e->getMessage()."\n");
   exit(1);

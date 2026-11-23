@@ -89,8 +89,7 @@ jobs:
           import os,pathlib,subprocess,shutil
           p=pathlib.Path('/tmp/v50')
           backend=['app/Http/Controllers/EntidadesComercialesControlador.php',
-            'app/Http/Controllers/RecursoControlador.php','app/Models/Cliente.php',
-            'routes/api.php']
+            'app/Http/Controllers/RecursoControlador.php','app/Models/Cliente.php']
           frontend=['assets/js/app-produccion.js','assets/js/catalogos-api.js',
             'assets/js/modulos-oficiales.js']
           for name in (p/'originals').read_text().splitlines():
@@ -108,6 +107,19 @@ jobs:
               print(done.stdout.decode(errors='replace')[:1300])
               raise RuntimeError('Base productiva distinta: cancelar sin escribir')
           (p/'after/assets/css').mkdir(parents=True,exist_ok=True)
+          # La ruta API de producción difiere en contexto histórico;
+          # insertar solo una línea en el ancla conocida y no reescribir rutas.
+          routes=p/'after/routes/api.php'
+          routeText=routes.read_text()
+          anchor="    Route::get('/recursos/{recurso}',[RecursoControlador::class,'listar']);"
+          if routeText.count(anchor)!=1:
+            print('V50_RUTAS_ACTUALES:',[x.strip() for x in routeText.splitlines()
+              if '/recursos/{recurso}' in x][:5])
+            raise RuntimeError('No hay ancla única de rutas: detener sin publicar')
+          assert '/clientes/tipos-juridicos' not in routeText
+          routeText=routeText.replace(anchor,
+            "    Route::get('/clientes/tipos-juridicos',[RecursoControlador::class,'tiposJuridicosClientes']);\n"+anchor)
+          routes.write_text(routeText)
           shutil.copy2('/tmp/v50-front/assets/css/clientes-v50.css',
             p/'after/assets/css/clientes-v50.css')
           html=(p/'after/index.html').read_text()

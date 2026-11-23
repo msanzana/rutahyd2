@@ -13,7 +13,7 @@ final class DetalleOrdenCompra extends Model
 
     protected $fillable = [
         'orden_compra_id',
-        'presentacion_id',
+        'producto_id',
         'cantidad',
         'costo_unitario_neto',
         'subtotal_neto',
@@ -33,8 +33,8 @@ final class DetalleOrdenCompra extends Model
         return $this->belongsTo(OrdenCompra::class, 'orden_compra_id');
     }
 
-    public function presentacion(): BelongsTo
+    public function producto(): BelongsTo
     {
-        return $this->belongsTo(PresentacionProducto::class, 'presentacion_id');
+        return $this->belongsTo(Producto::class, 'producto_id');
     }
 }

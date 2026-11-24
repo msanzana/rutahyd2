@@ -90,12 +90,12 @@ final class TiposDocumentosControlador extends Controller
         $data=Validator::make($request->all(),$rules)->validate();
         if($data['familia']==='INTERNO'){
             $consolidacion=$data['codigo']==='CONSOLIDACION_RECEPCION';
-            $codigoValido=$consolidacion ? (int)$data['codigo_sii']===0 : $data['codigo_sii']===null;
+            $codigoValido=$consolidacion ? ($data['codigo_sii']!==null && (int)$data['codigo_sii']===0) : $data['codigo_sii']===null;
             if(!$codigoValido||(int)$data['documento_electronico']!==0)
                 throw ValidationException::withMessages([
                     'codigo_sii'=>['Los documentos internos no tienen código SII ni son DTE.']
                 ]);
-        }elseif($data['codigo_sii']===null||(int)$data['documento_electronico']!==1){
+        }elseif($data['codigo_sii']===null||(int)$data['codigo_sii']<1||(int)$data['documento_electronico']!==1){
             throw ValidationException::withMessages([
                 'codigo_sii'=>['Los documentos tributarios deben indicar código SII y ser electrónicos.']
             ]);

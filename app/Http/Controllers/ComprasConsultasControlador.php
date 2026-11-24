@@ -10,7 +10,17 @@ final class ComprasConsultasControlador
 {
     public function listar(Request $request, string $modulo)
     {
-        $v=$request->validate(['page'=>'sometimes|integer|min:1','buscar'=>'nullable|string|max:120']);
+        $v=$request->validate(['page'=>'sometimes|integer|min:1','buscar'=>'nullable|string|max:120','producto_id'=>'nullable|integer|min:1','bodega_id'=>'nullable|integer|min:1','estado'=>'nullable|in:ACTIVA,PENDIENTE,RECEPCIONADA,DESCUADRADA,FINALIZADA,CONSOLIDADA','desde'=>'nullable|date_format:Y-m-d','hasta'=>'nullable|date_format:Y-m-d|after_or_equal:desde']);
+        if($modulo==='kardex'){
+            if(!$request->filled('producto_id')){
+                $q=DB::table('productos')->select('id','sku','nombre as producto');
+                if(!empty($v['buscar']))$q->where(fn($w)=>$w->where('sku','like','%'.$v['buscar'].'%')->orWhere('nombre','like','%'.$v['buscar'].'%'));
+                $data=$q->orderBy('nombre')->orderBy('id')->paginate(25)->toArray();
+                $data['bodegas']=DB::table('bodegas')->orderBy('nombre')->get(['id','nombre']);
+                return response()->json($data);
+            }
+            abort_unless(!empty($v['bodega_id']),422,'Seleccione una bodega.');
+        }
         $q=match($modulo){
             'facturas'=>DB::table('compras as c')->join('estados as e','e.id','=','c.estado_id')
                 ->join('proveedores as p','p.id','=','c.proveedor_id')
@@ -32,6 +42,16 @@ final class ComprasConsultasControlador
                 ->select('l.id','l.periodo_tributario','l.folio','l.rut_emisor','l.razon_social_emisor','l.monto_neto','l.monto_exento','l.monto_iva_recuperable','l.monto_total','l.signo_contable','l.estado_rcv'),
             default=>abort(404)
         };
+        if($modulo==='kardex')$q->where('k.producto_id',$v['producto_id'])->where('k.bodega_id',$v['bodega_id']);
+        if(in_array($modulo,['facturas','recepciones','consolidaciones'],true)&&!empty($v['estado']))$q->where('e.codigo',$v['estado']);
+        if($modulo==='facturas'){
+            if(!empty($v['desde']))$q->whereDate('c.fecha_documento','>=',$v['desde']);
+            if(!empty($v['hasta']))$q->whereDate('c.fecha_documento','<=',$v['hasta']);
+        }
+        if($modulo==='kardex'){
+            if(!empty($v['desde']))$q->whereDate('k.fecha_movimiento','>=',$v['desde']);
+            if(!empty($v['hasta']))$q->whereDate('k.fecha_movimiento','<=',$v['hasta']);
+        }
         $alias=match($modulo){'facturas'=>'c','recepciones','consolidaciones'=>'r','stock'=>'s','kardex'=>'k','libro'=>'l'};
         $buscar=trim($v['buscar']??'');
         if($buscar!==''){

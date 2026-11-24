@@ -62,6 +62,13 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
         ->middleware('permiso.rutahd:administracion.documentos.gestionar')->whereNumber('id');
     Route::patch('/tipos-documentos/{id}/estado',[TiposDocumentosControlador::class,'cambiarEstado'])
         ->middleware('permiso.rutahd:administracion.documentos.gestionar')->whereNumber('id');
+    // V66: consultas de compras; sin operaciones de escritura.
+    Route::get('/compras-consultas/{modulo}',[\App\Http\Controllers\ComprasConsultasControlador::class,'listar'])
+        ->where('modulo','facturas|recepciones|consolidaciones|libro')
+        ->middleware('permiso.rutahd:compras.gestionar');
+    Route::get('/inventario-consultas/{modulo}',[\App\Http\Controllers\ComprasConsultasControlador::class,'listar'])
+        ->where('modulo','stock|kardex')
+        ->middleware('permiso.rutahd:inventario.gestionar');
     // V55: Orden de compra y catálogo de estados, con permisos Compras existentes.
     // El estado no se modifica vía PUT: solo cancelación explícita o futura recepción.
     Route::get('/ordenes-compra/proveedores',[OrdenesCompraControlador::class,'proveedores'])

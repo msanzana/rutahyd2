@@ -68,6 +68,7 @@ final class ProductoComercialControlador extends Controller
             'descripcion'=>$producto->descripcion,
             'activo'=>(bool)$producto->activo,
             'costoNeto'=>isset($producto->costo_neto)?(string)$producto->costo_neto:'0',
+            'stockMinimo'=>isset($producto->stock_minimo)?(string)$producto->stock_minimo:null,
             // Se lee del esquema; nunca se modifica desde el CRUD de Productos.
             // NULL indica que aún no se importó el DDL28 en la base consultada.
             'costoPromedioPonderado'=>isset($producto->costo_promedio_ponderado)
@@ -370,6 +371,7 @@ final class ProductoComercialControlador extends Controller
             'presentacion.unidadesPorEnvase'=>[$required,'numeric','min:0.001','max:99999999999'],
             'presentacion.precioNeto'=>[$required,'numeric','min:0','max:99999999999'],
             'costoNeto'=>['sometimes','numeric','min:0','max:99999999999'],
+            'stockMinimo'=>['sometimes','numeric','min:0','max:99999999999.9999','regex:/^\d{1,11}(?:\.\d{1,4})?$/'],
             // El costo promedio no se acepta desde el navegador ni clientes API;
             // su cálculo futuro corresponderá al módulo de recepciones.
             'costoPromedioPonderado'=>['prohibited'],
@@ -423,6 +425,9 @@ final class ProductoComercialControlador extends Controller
             }
             if(array_key_exists('costoNeto',$datos)){
                 $cambios['costo_neto']=$datos['costoNeto'];
+            }
+            if(array_key_exists('stockMinimo',$datos)){
+                $cambios['stock_minimo']=$datos['stockMinimo'];
             }
             if ($nuevo) {
                 $cambios['activo']=$cambios['activo']??1;

@@ -21,7 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone -q --depth=1 --branch feature/v70-formularios-compras-20261124 https://github.com/msanzana/rutahyd2front.git /tmp/front67
-          git -C /tmp/front67 fetch -q --depth=1 origin 7bf6baa41ed91daa2986ffdf50a80d687443b297 9fa48bb103820b2c10073e88bee7752f1918bdd5
+          git -C /tmp/front67 fetch -q --depth=1 origin 7bf6baa41ed91daa2986ffdf50a80d687443b297 16b8966986a46ca071c7e13457e0b7cc2c1cc923
           mkdir -p /tmp/v70
           cat > /tmp/v70/transport.py <<'PY'
           import os,ssl,ftplib,io,pathlib,subprocess,re,sys
@@ -47,7 +47,7 @@ jobs:
                   for n in front:
                       repo=os.environ['GITHUB_WORKSPACE'] if n==back else '/tmp/front67'
                       old='7bf6baa41ed91daa2986ffdf50a80d687443b297'
-                      new='9fa48bb103820b2c10073e88bee7752f1918bdd5'
+                      new='16b8966986a46ca071c7e13457e0b7cc2c1cc923'
                       assert old!=new,'Base y destino idénticos'
                       if read('before',n)==git(repo,old,n):save('after',n,git(repo,new,n))
                       else:
@@ -79,15 +79,7 @@ jobs:
           PY
           python /tmp/v70/transport.py prepare
           node --check /tmp/v70/after/assets/js/compras-consultas-v66.js
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rutahd-v70-respaldo-previo
-          path: /tmp/v70/before/
-          retention-days: 30
-          if-no-files-found: error
-      - name: Publicar y cotejar bytes
-        run: python /tmp/v70/transport.py publish
-      - name: Verificar carga y protección JWT
+      - name: Probar formularios aislados antes de publicar
         run: |
           set -euo pipefail
           mkdir -p /tmp/v70/browser
@@ -99,16 +91,6 @@ jobs:
           import {chromium} from 'playwright';
           const browser=await chromium.launch({headless:true});
           try{
-            const page=await browser.newPage();const errors=[];
-            page.on('pageerror',e=>errors.push(e.message));
-            const response=await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:60000});
-            await page.waitForFunction(()=>!!window.RutaHDComprasConsultas?.mount,null,{timeout:45000});
-            const result=await page.evaluate(async()=>{
-              const version=[...document.scripts].some(s=>s.src.includes('compras-consultas-v66.js?v=20261124-v70'));
-              const status=(await fetch('/api/v1/inventario-consultas/kardex',{headers:{Accept:'application/json'},cache:'no-store'})).status;
-              return {version,status};
-            });
-            if(response?.status()!==200||!result.version||result.status!==401||errors.length)throw Error(JSON.stringify({result,errors}));
             // Contexto independiente: no tocar el login real ni enviar operaciones a producción.
             const ui=await browser.newPage({viewport:{width:1440,height:900}});
             await ui.route('**/*',route=>route.abort());
@@ -139,8 +121,8 @@ jobs:
               const save=dialog.getByRole('button',{name:key==='recepciones'?'Guardar recepción':'Guardar consolidación',exact:true});
               if(!(await save.isVisible())||!(await save.isDisabled()))throw Error('Guardado debe quedar visible y bloqueado');
               if(key==='recepciones'){
-                await dialog.getByLabel('Tipo de documento',{exact:true}).selectOption('1');
-                await dialog.getByLabel('Bodega de recepción',{exact:true}).selectOption('1');
+                await dialog.locator('#hd-recepcion-documento-tipo').selectOption('1',{timeout:10000});
+                await dialog.locator('#hd-recepcion-bodega').selectOption('1',{timeout:10000});
                 await dialog.getByLabel('Folio del documento',{exact:true}).fill('12345');
                 await dialog.getByLabel('Cantidad recibida SKU-PRUEBA').fill('2');
               }
@@ -151,6 +133,35 @@ jobs:
               console.log('V70_UI_OK',key);
             }
             await ui.close();
+            console.log('V70_UI_PREPUBLICACION_OK');
+          }finally{await browser.close();}
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v70-respaldo-previo
+          path: /tmp/v70/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar y cotejar bytes
+        run: python /tmp/v70/transport.py publish
+      - name: Verificar carga y protección JWT
+        run: |
+          set -euo pipefail
+          cd /tmp/v70/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage();const errors=[];
+            page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>!!window.RutaHDComprasConsultas?.mount,null,{timeout:45000});
+            const result=await page.evaluate(async()=>{
+              const version=[...document.scripts].some(s=>s.src.includes('compras-consultas-v66.js?v=20261124-v70'));
+              const status=(await fetch('/api/v1/inventario-consultas/kardex',{headers:{Accept:'application/json'},cache:'no-store'})).status;
+              return {version,status};
+            });
+            if(response?.status()!==200||!result.version||result.status!==401||errors.length)throw Error(JSON.stringify({result,errors}));
             console.log('V70_PUBLIC_OK');
           }finally{await browser.close();}
           JS

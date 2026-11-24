@@ -56,7 +56,7 @@ CREATE TABLE tipo_documentos (
  CONSTRAINT chk_hd_td_familia CHECK (familia IN ('FACTURA','BOLETA','FACTURA_COMPRA',
   'GUIA','NOTA_DEBITO','NOTA_CREDITO','INTERNO')),
  CONSTRAINT chk_hd_td_sii_interno CHECK (
-  (familia='INTERNO' AND codigo_sii IS NULL AND documento_electronico=0)
+  (familia='INTERNO' AND documento_electronico=0 AND (codigo_sii IS NULL OR (codigo='CONSOLIDACION_RECEPCION' AND codigo_sii=0)))
   OR (familia<>'INTERNO' AND codigo_sii IS NOT NULL AND documento_electronico=1))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 SQL);
@@ -74,7 +74,10 @@ SQL);
    'disponible_pos'=>1,'documento_electronico'=>1,'dias_vencimiento'=>0,'activo'=>1,'orden'=>10],
   ['codigo'=>'ORDEN_COMPRA','codigo_sii'=>null,'nombre'=>'Orden de Compra',
    'familia'=>'INTERNO','documento_venta'=>0,'documento_compra'=>0,
-   'disponible_pos'=>0,'documento_electronico'=>0,'dias_vencimiento'=>0,'activo'=>1,'orden'=>90]
+   'disponible_pos'=>0,'documento_electronico'=>0,'dias_vencimiento'=>0,'activo'=>1,'orden'=>90],
+  ['codigo'=>'CONSOLIDACION_RECEPCION','codigo_sii'=>0,'nombre'=>'Consolidación de recepciones',
+   'familia'=>'INTERNO','documento_venta'=>0,'documento_compra'=>1,
+   'disponible_pos'=>0,'documento_electronico'=>0,'dias_vencimiento'=>0,'activo'=>1,'orden'=>95]
  ]);
  $admin=(int)DB::table('roles')->where('codigo','administrador')->value('id');
  assertV63($admin>0,'rol administrador inexistente');
@@ -89,8 +92,22 @@ SQL);
  ]),'sesión')['token'];
  expectV63(401,callV63('GET','/api/v1/tipos-documentos'),'JWT requerido');
  $list=expectV63(200,callV63('GET','/api/v1/tipos-documentos',$jwt),'listado');
- assertV63($list['total']===2,'dos documentos del esquema temporal');
- assertV63(count($list['data'])===2,'paginador general');
+ assertV63($list['total']===3,'tres documentos del esquema temporal');
+ assertV63(count($list['data'])===3,'paginador general');
+ $interno=DB::table('tipo_documentos')->where('codigo','CONSOLIDACION_RECEPCION')->first();
+ assertV63($interno!==null && (int)$interno->codigo_sii===0 && (int)$interno->documento_compra===1,
+   'Consolidación interna con código 0 habilitada');
+ $internalBody=[
+   'codigo'=>$interno->codigo,'codigo_sii'=>0,'nombre'=>$interno->nombre,
+   'familia'=>'INTERNO','documento_venta'=>0,'documento_compra'=>1,
+   'disponible_pos'=>0,'documento_electronico'=>0,'dias_vencimiento'=>0,
+   'activo'=>1,'orden'=>95
+ ];
+ expectV63(200,callV63('PUT','/api/v1/tipos-documentos/'.$interno->id,
+   $jwt,$internalBody),'Permitir editar documento interno con código 0 sin cambiar identidad');
+ $bad=$internalBody;$bad['codigo_sii']=null;
+ expectV63(422,callV63('PUT','/api/v1/tipos-documentos/'.$interno->id,
+   $jwt,$bad),'No convertir código 0 de consolidación en NULL');
  $fixture=DB::table('tipo_documentos')->where('codigo','FACTURA_ELECTRONICA')->first();
  $body=[
   'codigo'=>$fixture->codigo,'codigo_sii'=>33,'nombre'=>$fixture->nombre,
@@ -131,7 +148,7 @@ SQL);
  expectV63(422,callV63('PATCH',
    '/api/v1/tipos-documentos/'.$fixture->id.'/estado',$jwt,['activo'=>0]),
    'bloquear baja de documento usado');
- assertV63(DB::table('tipo_documentos')->count()===3,
+ assertV63(DB::table('tipo_documentos')->count()===4,
    'sin cambios a otras tablas ni documentos base');
  echo "V63_DOCUMENTOS_JWT_MYSQL_OK\n";
 }catch(Throwable $e){fwrite(STDERR,$e->getMessage()."\n".$e->getTraceAsString()."\n");exit(1);}

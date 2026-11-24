@@ -1,0 +1,147 @@
+name: V66 - Publicar consultas fullstack
+on:
+  push:
+    branches: [deploy/v66-fullstack-consultas-20261124]
+    paths: [.github/workflows/v66-publicar-consultas.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      BACK_BASE: d98763fe7b74b469287e755cf687cfd8d7e807ff
+      BACK_PIN: 38548e657a051d8ca2e949d662d779b26a57097e
+      FRONT_BASE: da33af03e7f6d6521cef19b6daceb3777a43bcb7
+      FRONT_PIN: 33b7eb1acb186398aae3d8e4c9be648a6ebaf13c
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar fuentes exactas
+        run: |
+          set -euo pipefail
+          git fetch -q --depth=1 origin "$BACK_BASE" "$BACK_PIN"
+          git clone -q --depth=1 --branch feature/v66-stock-minimo-20261124 https://github.com/msanzana/rutahyd2front.git /tmp/v66front
+          git -C /tmp/v66front fetch -q --depth=1 origin "$FRONT_BASE" "$FRONT_PIN"
+          git -C /tmp/v66front checkout -q --detach "$FRONT_PIN"
+          sudo apt-get update -qq && sudo apt-get install -y -qq php-cli >/dev/null
+          mkdir -p /tmp/v66/{before,after}
+      - name: Preparar cambios y respaldar sin escribir en servidor
+        run: |
+          set -euo pipefail
+          cat > /tmp/v66/transport.py <<'PY'
+          import os,ssl,ftplib,io,pathlib,subprocess,re,sys
+          p=pathlib.Path('/tmp/v66')
+          eb=['app/Http/Controllers/ProductoComercialControlador.php','routes/api.php']
+          nb=['app/Http/Controllers/TiposDocumentosControlador.php','app/Http/Controllers/ComprasConsultasControlador.php','app/Services/CostoPromedioPonderado.php']
+          ef=['assets/js/catalogos-api.js','assets/js/app-produccion.js','assets/js/productos-remotos.js']
+          nf=['assets/css/tipos-documentos-v63.css','assets/js/tipos-documentos-v63.js','assets/js/compras-consultas-v66.js']
+          guards={'root.guard':'/htdocs/.htaccess','api.guard':'/htdocs/api/.htaccess','private.guard':'/htdocs/api-v2/.htaccess','gateway.guard':'/htdocs/api/index.php'}
+          existing=eb+ef+['index.html'];new=nb+nf;order=nb+eb+nf+ef+['index.html']
+          def remote(n):return guards.get(n,('/htdocs/api-v2/' if n.startswith(('app/','routes/')) else '/htdocs/')+n)
+          def get(f,n):
+              b=io.BytesIO();f.retrbinary('RETR '+remote(n),b.write);return b.getvalue()
+          def put(f,n,b):f.storbinary('STOR '+remote(n),io.BytesIO(b))
+          def exists(f,n):
+              parent,name=remote(n).rsplit('/',1)
+              return name in [x.rsplit('/',1)[-1] for x in f.nlst(parent)]
+          def save(area,n,b):
+              d=p/area/n;d.parent.mkdir(parents=True,exist_ok=True);d.write_bytes(b)
+          def exact(html,old,new):
+              assert html.count(old)==1,old[:100]
+              return html.replace(old,new,1)
+          f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=45)
+          f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
+          with f:
+              mode=sys.argv[1]
+              if mode=='prepare':
+                  for n in existing+list(guards):save('before',n,get(f,n))
+                  for n in new:assert not exists(f,n),n
+                  for names,base,pin,repo in [(eb+nb,os.environ['BACK_BASE'],os.environ['BACK_PIN'],os.environ['GITHUB_WORKSPACE']),(ef+nf,os.environ['FRONT_BASE'],os.environ['FRONT_PIN'],'/tmp/v66front')]:
+                      for n in names:
+                          if n in new:save('after',n,subprocess.check_output(['git','-C',repo,'show',pin+':'+n]))
+                          else:
+                              save('after',n,(p/'before'/n).read_bytes())
+                              delta=subprocess.check_output(['git','-C',repo,'diff','--binary',base,pin,'--',n])
+                              assert delta.count(b'diff --git')==1,n
+                              subprocess.run(['patch','--batch','--fuzz=0','-p1','-d',str(p/'after')],input=delta,check=True)
+                  html=(p/'before/index.html').read_text()
+                  assert 'v53-cache-20261123' in html
+                  src=subprocess.check_output(['git','-C','/tmp/v66front','show',os.environ['FRONT_PIN']+':index.html']).decode()
+                  for name in ['catalogos-api','app-produccion','productos-remotos']:
+                      matches=re.findall(r'assets/js/'+name+r'\.js\?v=[^"]+',html);assert len(matches)==1,name
+                      if name!='productos-remotos':assert matches[0].endswith('20261123-v62'),name
+                      html=exact(html,matches[0],'assets/js/'+name+'.js?v=20261124-v66')
+                  for marker in ['administracion_documentos','compras_libro','compras_consolidaciones','compras_recepciones','compras_facturas']:
+                      line=next(x.strip() for x in src.splitlines() if 'data-nav="'+marker+'"' in x)
+                      assert 'data-nav="'+marker+'"' not in html
+                      anchor='data-admin-catalog="tipos_codigos_barras"' if marker.startswith('administracion') else 'data-nav="compras_ordenes"'
+                      pos=html.index(anchor);end=html.index('</button>',pos)+len('</button>')
+                      html=html[:end]+'\n            '+line+html[end:]
+                  old=re.search(r'<button[^>]*data-nav="bodega"[^>]*class="nav-link"[^>]*>.*?</button>',html).group()
+                  html=exact(html,old,next(x.strip() for x in src.splitlines() if 'id="toggleBodegaSubnav"' in x))
+                  css=next(x.strip() for x in src.splitlines() if 'tipos-documentos-v63.css' in x)
+                  html=exact(html,'</head>',css+'\n</head>')
+                  anchor=re.search(r'<script[^>]*src="assets/js/app-produccion.js\?v=20261124-v66"[^>]*></script>',html).group()
+                  scripts=[next(x.strip() for x in src.splitlines() if n in x) for n in ['tipos-documentos-v63.js','compras-consultas-v66.js']]
+                  html=exact(html,anchor,'\n  '.join(scripts+[anchor]))
+                  save('after','index.html',html.encode())
+                  print('V66_PRECHECK_OK')
+              elif mode=='publish':
+                  for n in existing+list(guards):assert get(f,n)==(p/'before'/n).read_bytes(),n
+                  for n in new:assert not exists(f,n),n
+                  (p/'attempted').touch();(p/'started').touch()
+                  for n in order:
+                      with (p/'attempted').open('a') as log:log.write(n+'\n')
+                      put(f,n,(p/'after'/n).read_bytes())
+                  for n in order:assert get(f,n)==(p/'after'/n).read_bytes(),n
+                  for n in guards:assert get(f,n)==(p/'before'/n).read_bytes(),n
+                  print('V66_FTPS_BYTES_OK')
+              elif mode=='rollback':
+                  for n in reversed((p/'attempted').read_text().splitlines()):
+                      if n in existing:put(f,n,(p/'before'/n).read_bytes())
+                      elif exists(f,n):f.delete(remote(n))
+                  for n in existing+list(guards):assert get(f,n)==(p/'before'/n).read_bytes(),n
+                  print('V66_ROLLBACK_OK')
+          PY
+          python /tmp/v66/transport.py prepare
+          while IFS= read -r -d '' file; do php -l "$file"; done < <(find /tmp/v66/after -name '*.php' -print0)
+          while IFS= read -r -d '' file; do node --check "$file"; done < <(find /tmp/v66/after -name '*.js' -print0)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v66-backup-previo
+          path: /tmp/v66/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar y cotejar bytes
+        run: python /tmp/v66/transport.py publish
+      - name: Comprobar HTTP público y JWT sin operaciones comerciales
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v66/browser
+          cd /tmp/v66/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try {
+            const page=await browser.newPage();const errors=[];
+            page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>!!window.RutaHDComprasConsultas?.mount && !!window.RutaHDProduccion?.navigate,null,{timeout:45000});
+            const status=await page.evaluate(async()=> (await fetch('/api/v1/compras-consultas/facturas',{headers:{Accept:'application/json'},cache:'no-store'})).status);
+            if(response?.status()!==200||status!==401||errors.length)throw Error('Smoke V66 no válido: '+JSON.stringify({status,errors}));
+            console.log('V66_PUBLIC_OK');
+          } finally { await browser.close(); }
+          JS
+      - name: Restaurar originales si falla la publicación
+        if: failure()
+        run: |
+          if [ -f /tmp/v66/started ]; then python /tmp/v66/transport.py rollback; fi

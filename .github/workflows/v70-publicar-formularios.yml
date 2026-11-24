@@ -21,7 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone -q --depth=1 --branch feature/v70-formularios-compras-20261124 https://github.com/msanzana/rutahyd2front.git /tmp/front67
-          git -C /tmp/front67 fetch -q --depth=1 origin 9fa48bb103820b2c10073e88bee7752f1918bdd5 9fa48bb103820b2c10073e88bee7752f1918bdd5
+          git -C /tmp/front67 fetch -q --depth=1 origin 7bf6baa41ed91daa2986ffdf50a80d687443b297 9fa48bb103820b2c10073e88bee7752f1918bdd5
           mkdir -p /tmp/v70
           cat > /tmp/v70/transport.py <<'PY'
           import os,ssl,ftplib,io,pathlib,subprocess,re,sys
@@ -46,8 +46,9 @@ jobs:
                   for n in files+list(guards):save('before',n,get(f,n))
                   for n in front:
                       repo=os.environ['GITHUB_WORKSPACE'] if n==back else '/tmp/front67'
-                      old='c9f2c07de170d6d8cc58b317dc50edbe48aeec47' if n==back else '9fa48bb103820b2c10073e88bee7752f1918bdd5'
-                      new='646e28770decd9a7ec3d1740911d1e82cbcc0d00' if n==back else '9fa48bb103820b2c10073e88bee7752f1918bdd5'
+                      old='7bf6baa41ed91daa2986ffdf50a80d687443b297'
+                      new='9fa48bb103820b2c10073e88bee7752f1918bdd5'
+                      assert old!=new,'Base y destino idénticos'
                       if read('before',n)==git(repo,old,n):save('after',n,git(repo,new,n))
                       else:
                           save('after',n,read('before',n))

@@ -20,7 +20,7 @@ final class TiposDocumentosControlador extends Controller
     private const SEMILLAS=['FACTURA_ELECTRONICA','FACTURA_EXENTA',
         'BOLETA_ELECTRONICA','BOLETA_EXENTA','FACTURA_COMPRA_ELECTRONICA',
         'GUIA_DESPACHO_ELECTRONICA','NOTA_DEBITO_ELECTRONICA',
-        'NOTA_CREDITO_ELECTRONICA','ORDEN_COMPRA'];
+        'NOTA_CREDITO_ELECTRONICA','ORDEN_COMPRA','CONSOLIDACION_RECEPCION'];
 
     private function json(mixed $data,int $code=200)
     {
@@ -43,6 +43,8 @@ final class TiposDocumentosControlador extends Controller
                 ->orWhere('codigo_sii','like',$search));
         }
         if(!empty($v['familia']))$q->where('familia',$v['familia']);
+        // Los desactivados se conservan pero no se muestran en el listado habitual.
+        if(!array_key_exists('activo',$v))$q->where('activo',1);
         if(isset($v['activo']) && $v['activo']!=='')$q->where('activo',(int)$v['activo']);
         return $this->json($q->orderBy('orden')->orderBy('id')
             ->paginate(25,['id','codigo','codigo_sii','nombre','familia',
@@ -72,7 +74,7 @@ final class TiposDocumentosControlador extends Controller
         $rules=[
             'codigo'=>['required','string','min:3','max:40',
                 'regex:/^[A-Z][A-Z0-9_]*$/',Rule::unique('tipo_documentos','codigo')->ignore($id)],
-            'codigo_sii'=>['nullable','integer','min:1','max:999',
+            'codigo_sii'=>['nullable','integer','min:0','max:999',
                 Rule::unique('tipo_documentos','codigo_sii')->ignore($id)],
             'nombre'=>['required','string','min:3','max:150',
                 Rule::unique('tipo_documentos','nombre')->ignore($id)],
@@ -87,7 +89,9 @@ final class TiposDocumentosControlador extends Controller
         ];
         $data=Validator::make($request->all(),$rules)->validate();
         if($data['familia']==='INTERNO'){
-            if($data['codigo_sii']!==null||(int)$data['documento_electronico']!==0)
+            $consolidacion=$data['codigo']==='CONSOLIDACION_RECEPCION';
+            $codigoValido=$consolidacion ? (int)$data['codigo_sii']===0 : $data['codigo_sii']===null;
+            if(!$codigoValido||(int)$data['documento_electronico']!==0)
                 throw ValidationException::withMessages([
                     'codigo_sii'=>['Los documentos internos no tienen código SII ni son DTE.']
                 ]);

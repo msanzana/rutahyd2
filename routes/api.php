@@ -22,6 +22,7 @@ use App\Http\Controllers\UbicacionesControlador;
 use App\Http\Controllers\GirosSiiControlador;
 use App\Http\Controllers\BuscadorProductosControlador;
 use App\Http\Controllers\OrdenesCompraControlador;
+use App\Http\Controllers\TiposDocumentosControlador;
 use App\Http\Controllers\RecuperacionContrasenaControlador;
 
 // El frontend pregunta /api/v1/estado; la ruta antigua /api/estado sigue disponible.
@@ -49,6 +50,18 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
         ->middleware('throttle:90,1');
     Route::get('/productos/buscador',[BuscadorProductosControlador::class,'listar'])
         ->middleware('throttle:120,1');
+    // V63: Administración / Documentos (DDL previamente ejecutado por titular).
+    // Solo administrador o permiso específico; no afecta compras ni inventario.
+    Route::get('/tipos-documentos',[TiposDocumentosControlador::class,'listar'])
+        ->middleware('permiso.rutahd:administracion.documentos.ver');
+    Route::post('/tipos-documentos',[TiposDocumentosControlador::class,'crear'])
+        ->middleware('permiso.rutahd:administracion.documentos.gestionar')->middleware('throttle:20,1');
+    Route::get('/tipos-documentos/{id}',[TiposDocumentosControlador::class,'ver'])
+        ->middleware('permiso.rutahd:administracion.documentos.ver')->whereNumber('id');
+    Route::put('/tipos-documentos/{id}',[TiposDocumentosControlador::class,'actualizar'])
+        ->middleware('permiso.rutahd:administracion.documentos.gestionar')->whereNumber('id');
+    Route::patch('/tipos-documentos/{id}/estado',[TiposDocumentosControlador::class,'cambiarEstado'])
+        ->middleware('permiso.rutahd:administracion.documentos.gestionar')->whereNumber('id');
     // V55: Orden de compra y catálogo de estados, con permisos Compras existentes.
     // El estado no se modifica vía PUT: solo cancelación explícita o futura recepción.
     Route::get('/ordenes-compra/proveedores',[OrdenesCompraControlador::class,'proveedores'])

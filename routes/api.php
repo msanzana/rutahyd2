@@ -78,6 +78,7 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::post('/consolidaciones-recepcion/{id}/anular',[\App\Http\Controllers\ConsolidacionesControlador::class,'anular'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
     Route::get('/solicitudes-regularizacion/{id}/pdf',[\App\Http\Controllers\ConsolidacionesControlador::class,'solicitudPdf'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
     Route::post('/notificaciones-regularizacion/{id}/reenviar',[\App\Http\Controllers\ConsolidacionesControlador::class,'reenviarSolicitud'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+    Route::get('/documentos-recepcion/{tipo}/{id}/pdf',[\App\Http\Controllers\ComprasConsultasControlador::class,'pdf'])->middleware('permiso.rutahd:compras.gestionar')->where('tipo','recepcion|consolidacion')->whereNumber('id');
     // V66: consultas de compras; sin operaciones de escritura.
     Route::get('/compras-consultas/{modulo}',[\App\Http\Controllers\ComprasConsultasControlador::class,'listar'])
         ->where('modulo','facturas|recepciones|consolidaciones|libro')

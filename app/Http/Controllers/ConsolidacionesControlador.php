@@ -225,6 +225,8 @@ final class ConsolidacionesControlador
                 DB::table('productos')->where('id',$pid)->update(['costo_neto'=>$newCost,'costo_promedio_ponderado'=>$newCpp]);
                 $verified[]=['producto_id'=>$pid,'fuente_valor_anterior'=>$source,'calculo'=>$calc,'ultimo_costo'=>$newCost];
             }
+            // Recupera documentos confirmados antes de V80 al consolidarlos, sin reescribir snapshots.
+            foreach($receipts as $rec)(new \App\Services\LibroComprasInterno())->registrar((int)$rec['compra_id'],$rec['numero_interno']);
             $notificaciones=$review['requiere_aceptacion']?(new RegularizacionRecepcion())->generar($c,$review,$u,$motivo):[];
             DB::table('recepciones_consolidadas')->where('id',$id)->update(['estado_id'=>$target,'fecha_consolidacion'=>now(),'token_confirmacion'=>$token,'consolidado_por'=>$u]);
             DB::table('ordenes_compra')->where('id',$o->id)->update(['estado_id'=>$ocTarget,'estado'=>'recepcionada','recibida_en'=>now()]);

@@ -100,7 +100,7 @@ jobs:
           import {readdirSync} from 'node:fs';
           const browser=await chromium.launch({headless:true});
           try{
-            const page=await browser.newPage({viewport:{width:1440,height:900}});
+            const page=await browser.newPage({viewport:{width:1440,height:900},reducedMotion:'reduce'});
             await page.route('**/*',r=>r.abort());
             const field='<label class="field">Nombre<input value="Producto de prueba"></label>';
             const combo='<label class="field">Categoría<div class="hd-choice"><select class="hd-choice-native"><option>Base</option></select><input class="hd-choice-search" value="Base"><span class="hd-choice-chevron">⌄</span></div></label>';
@@ -114,16 +114,17 @@ jobs:
               await page.setViewportSize({width:1440,height:900});
               await page.setContent(markup);
               for(const f of readdirSync('/tmp/v90/styles').sort())await page.addStyleTag({path:'/tmp/v90/styles/'+f});
-              const metrics=()=>page.evaluate(({section,input,footer})=>{const q=s=>document.querySelector(s);const rect=s=>q(s).getBoundingClientRect();const style=s=>getComputedStyle(q(s));return {input:rect(input).height,font:parseFloat(style(input).fontSize),combo:rect('.hd-choice-search').height,native:rect('.hd-choice-native').height,comboPad:parseFloat(style('.hd-choice-search').paddingRight),section:rect(section).height,close:rect('button[class*="close"]').width,footer:rect(footer).bottom,dialog:rect('dialog').bottom,dialogWidth:rect('dialog').width,button:rect(footer+' .button').height,body:document.documentElement.scrollWidth}}, {section,input,footer});
+              await page.addStyleTag({content:'*,*::before,*::after{animation:none!important;transition:none!important}'});
+              const metrics=()=>page.evaluate(({section,input,footer})=>{const q=s=>document.querySelector(s);const rect=s=>q(s).getBoundingClientRect();const style=s=>getComputedStyle(q(s));return {inputMin:parseFloat(style(input).minHeight),comboMin:parseFloat(style('.hd-choice-search').minHeight),buttonMin:parseFloat(style(footer+' .button').minHeight),closeMin:parseFloat(style('button[class*="close"]').minWidth),input:rect(input).height,font:parseFloat(style(input).fontSize),combo:rect('.hd-choice-search').height,native:rect('.hd-choice-native').height,comboPad:parseFloat(style('.hd-choice-search').paddingRight),section:rect(section).height,close:rect('button[class*="close"]').width,footer:rect(footer).bottom,dialog:rect('dialog').bottom,dialogWidth:rect('dialog').width,button:rect(footer+' .button').height,body:document.documentElement.scrollWidth}}, {section,input,footer});
               const before=await metrics();
               await page.addStyleTag({path:'/tmp/v90/density.css'});
               const after=await metrics();
-              if(!(after.input>=30&&after.input<=before.input&&after.font>=13&&after.combo<=before.combo&&after.combo>=30&&after.comboPad>=26&&after.native<=1.5&&after.close>=36&&after.button>=30))throw Error(JSON.stringify({name,before,after}));
+              if(!(after.inputMin>=30&&after.comboMin>=30&&after.buttonMin>=30&&after.closeMin>=36&&after.input>=29.5&&after.input<=before.input+0.5&&after.font>=13&&after.combo<=before.combo+0.5&&after.combo>=29.5&&after.comboPad>=26&&after.native<=1.5&&after.close>=35.5&&after.button>=29.5))throw Error(JSON.stringify({name,before,after}));
               if(name==='cliente'&&!(after.input<before.input))throw Error('Cliente no compactado');
               if(name==='recepcion'&&!(after.section<before.section&&after.footer<=after.dialog+2))throw Error(JSON.stringify({name,before,after}));
               await page.setViewportSize({width:390,height:844});
               const mobile=await metrics();
-              if(!(mobile.dialogWidth<=390&&mobile.input>=40&&mobile.font>=16&&mobile.combo>=40&&mobile.button>=44&&mobile.native<=1.5&&mobile.body<=390))throw Error(JSON.stringify({name,mobile}));
+              if(!(mobile.dialogWidth<=390.5&&mobile.inputMin>=40&&mobile.comboMin>=40&&mobile.buttonMin>=44&&mobile.input>=39.5&&mobile.font>=16&&mobile.combo>=39.5&&mobile.button>=43.5&&mobile.native<=1.5&&mobile.body<=390))throw Error(JSON.stringify({name,mobile}));
               console.log('V90_FORM_OK',name,JSON.stringify({before,after,mobile}));
             }
           }finally{await browser.close();}

@@ -53,13 +53,16 @@ jobs:
           set -euo pipefail
           php -l routes/api.php
           php -l app/Http/Controllers/ConsolidacionesControlador.php
+          php -l app/Services/CostoPromedioPonderado.php
+          php -l app/Services/RegularizacionRecepcion.php
           php -l app/Services/LibroComprasInterno.php
           php -l app/Services/PdfRecepcionCompra.php
           php -l app/Http/Controllers/RecepcionesBorradorControlador.php
           php -l app/Http/Controllers/ComprasConsultasControlador.php
           composer install --no-interaction --prefer-dist --no-progress
           php artisan route:list --path=api/v1/consolidaciones-recepcion
-          php tests/libro_pdf_v81.php
+          php tests/libro_pdf_v81.php | tee /tmp/v81-test.log
+          grep -Fx 'V81_LIBRO_PDF_OK' /tmp/v81-test.log
           command -v pdfinfo >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils)
           pdfinfo /tmp/v81-recepcion.pdf
           pdfinfo /tmp/v81-consolidacion.pdf
@@ -76,7 +79,7 @@ jobs:
           import os,ssl,ftplib,io,pathlib,subprocess,re,sys
           p=pathlib.Path('/tmp/v81')
           newfiles=['app/Services/LibroComprasInterno.php','app/Services/PdfRecepcionCompra.php']
-          back=['routes/api.php','app/Http/Controllers/RecepcionesBorradorControlador.php','app/Http/Controllers/ConsolidacionesControlador.php','app/Http/Controllers/ComprasConsultasControlador.php']+newfiles
+          back=['routes/api.php','app/Http/Controllers/RecepcionesBorradorControlador.php','app/Http/Controllers/ConsolidacionesControlador.php','app/Http/Controllers/ComprasConsultasControlador.php','app/Services/CostoPromedioPonderado.php','app/Services/RegularizacionRecepcion.php']+newfiles
           front=['assets/js/catalogos-api.js','assets/js/compras-consultas-v66.js']
           files=back+front+['index.html']
           guards={'root.guard':'/htdocs/.htaccess','api.guard':'/htdocs/api/.htaccess','private.guard':'/htdocs/api-v2/.htaccess','gateway.guard':'/htdocs/api/index.php'}
@@ -109,7 +112,7 @@ jobs:
                   for n in back+front:
                       repo=os.environ['GITHUB_WORKSPACE'] if n in back else '/tmp/front67'
                       old='61e90ebe5997b3451f10cf30d498c1e2ebaece45' if n in back else '864f9526af4880eb01bf036f6fe514c0f26f96ad'
-                      new='41c0f424c6bd996ae2fb9e4623ab1218588598e5' if n in back else '001f09b14d10cc34c246cf75e5f22b95c126cbe3'
+                      new='c26b084d196a997b4a29398245639c56615f935a' if n in back else '001f09b14d10cc34c246cf75e5f22b95c126cbe3'
                       if n in newfiles or read('before',n)==git(repo,old,n):save('after',n,git(repo,new,n))
                       else:
                           save('after',n,read('before',n))
@@ -127,7 +130,7 @@ jobs:
               elif mode=='publish':
                   for n in files+list(guards):verify_before(f,n)
                   (p/'attempted').touch()
-                  for n in newfiles+[back[1],back[2],back[3],back[0]]+front+['index.html']:
+                  for n in newfiles+back[1:6]+[back[0]]+front+['index.html']:
                       with (p/'attempted').open('a') as log:log.write(n+'\n')
                       put(f,n,read('after',n))
                   for n in files:assert get(f,n)==read('after',n),n
@@ -144,6 +147,8 @@ jobs:
           python /tmp/v81/transport.py prepare
           php -l /tmp/v81/after/routes/api.php
           php -l /tmp/v81/after/app/Http/Controllers/ConsolidacionesControlador.php
+          php -l /tmp/v81/after/app/Services/CostoPromedioPonderado.php
+          php -l /tmp/v81/after/app/Services/RegularizacionRecepcion.php
           php -l /tmp/v81/after/app/Services/LibroComprasInterno.php
           php -l /tmp/v81/after/app/Services/PdfRecepcionCompra.php
           php -l /tmp/v81/after/app/Http/Controllers/RecepcionesBorradorControlador.php

@@ -131,7 +131,7 @@ final class RecepcionesBorradorControlador
     private function saldo(BigDecimal $n): string
     {
         abort_if($n->isNegative()||$n->isGreaterThan('99999999999999999999.99999999'),409,'Saldo de inventario fuera de rango.');
-        return (string)$n->toScale(8,RoundingMode::UNNECESSARY);
+        return (string)$n->toScale(8);
     }
 
     /** Confirmación atómica: acepta conteo físico en tránsito, sin valorizar dos veces.

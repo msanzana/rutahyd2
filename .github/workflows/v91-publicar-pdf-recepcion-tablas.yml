@@ -14,7 +14,7 @@ jobs:
     env:
       FTP_HOST: ftpupload.net
       FTP_USER: if0_43460400
-      FTP_PASSWORD: {{ secrets.INFINITYFREE_FTP_PASSWORD }}
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
         with:

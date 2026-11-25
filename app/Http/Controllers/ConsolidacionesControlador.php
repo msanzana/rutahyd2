@@ -233,7 +233,9 @@ final class ConsolidacionesControlador
         },3);
         $result['correos']=[];
         // Un primer intento fuera de la transacción. La cola persiste aunque falle SMTP.
-        foreach($result['notificaciones']??[] as $nid){try{$result['correos'][]=['id'=>$nid,'estado'=>(new RegularizacionRecepcion())->enviar($nid)];}catch(\Throwable $e){$result['correos'][]=['id'=>$nid,'estado'=>'PENDIENTE_VERIFICACION'];}}
+        foreach(array_slice($result['notificaciones']??[],0,3) as $nid){try{$result['correos'][]=['id'=>$nid,'estado'=>(new RegularizacionRecepcion())->enviar($nid)];}catch(\Throwable $e){$result['correos'][]=['id'=>$nid,'estado'=>'PENDIENTE_VERIFICACION'];}}
+        $result['correos_pendientes']=max(0,count($result['notificaciones']??[])-count($result['correos']));
+        if(!empty($result['notificaciones']))$result['mensaje'].=' Revise las solicitudes y el estado de sus correos.';
         return response()->json($result);
     }
 }

@@ -42,6 +42,9 @@ final class RegularizacionRecepcion
         $prov=DB::table('proveedores')->where('id',$c->proveedor_id)->first();abort_unless($prov,409,'Proveedor inexistente.');
         $email=trim((string)$prov->correo_electronico);$valid=filter_var($email,FILTER_VALIDATE_EMAIL)!==false;
         $ids=[];
+        // Los saldos pendientes de OC son contexto comercial, no importes tributarios.
+        $saldoResumen=$review['saldos_oc']?' Saldo de OC aceptado al cierre: '.count($review['saldos_oc']).' línea(s) con diferencia. No constituye ajuste fiscal.':'';
+        $motivo.=$saldoResumen;
         foreach($groups as $items){
             $r=$items[0]['r'];$type=$items[0]['type'];$docid=null;
             if($type!=='AVISO_COMERCIAL'){
@@ -101,7 +104,8 @@ final class RegularizacionRecepcion
         [$n,$email,$token,$s]=$claim;
         try{
             $pdf=$this->pdf((int)$s->id);
-            Mail::html($n->cuerpo_html,static function($m)use($n,$email,$pdf,$s){$m->to($email)->subject($n->asunto)->attachData($pdf,$s->numero_interno.'.pdf',['mime'=>'application/pdf']);});
+            $sent=Mail::html($n->cuerpo_html,static function($m)use($n,$email,$pdf,$s){$m->to($email)->subject($n->asunto)->attachData($pdf,$s->numero_interno.'.pdf',['mime'=>'application/pdf']);});
+            if(!$sent)throw new \RuntimeException('No se confirmó el transporte.');
         }catch(\Throwable $e){
             // No almacenar credenciales, contenido SMTP ni datos sensibles del error.
             DB::table('cola_notificaciones_correo')->where('id',$id)->where('token_procesamiento',$token)->update(['estado'=>'ERROR','ultimo_error'=>'No se confirmó el envío. Verifique el buzón antes de reintentar.','token_procesamiento'=>null]);

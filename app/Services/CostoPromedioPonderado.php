@@ -42,13 +42,13 @@ final class CostoPromedioPonderado
                 throw new DomainException('Se requiere saldo monetario anterior verificado.');
             }
             $anterior = $historico;
-            if (!$c->isZero() && !$anterior->dividedBy($s, 8, RoundingMode::HALF_UP)->isEqualTo($c)) {
+            if (!$c->isZero() && !$anterior->dividedBy($s, 8, (defined(RoundingMode::class.'::HalfUp')?constant(RoundingMode::class.'::HalfUp'):constant(RoundingMode::class.'::HALF_UP')))->isEqualTo($c)) {
                 throw new DomainException('CPP y saldo histórico no coinciden; regularizar antes de confirmar.');
             }
         }
         $saldo = $s->plus($q);
         $total = $anterior->plus($v);
-        $cpp = $total->dividedBy($saldo, 8, RoundingMode::HALF_UP);
+        $cpp = $total->dividedBy($saldo, 8, (defined(RoundingMode::class.'::HalfUp')?constant(RoundingMode::class.'::HalfUp'):constant(RoundingMode::class.'::HALF_UP')));
         if ($cpp->isGreaterThan('99999999999999999999.99999999')) {
             throw new DomainException('CPP excede DECIMAL(28,8).');
         }

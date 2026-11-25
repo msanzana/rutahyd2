@@ -12,7 +12,7 @@ use Illuminate\Support\Str;
 final class RegularizacionRecepcion
 {
     private function n($v): BigDecimal {return BigDecimal::of((string)($v??0));}
-    private function money(BigDecimal $v): string {return (string)$v->toScale(8,RoundingMode::HALF_UP);}
+    private function money(BigDecimal $v): string {return (string)$v->toScale(8,(defined(RoundingMode::class.'::HalfUp')?constant(RoundingMode::class.'::HalfUp'):constant(RoundingMode::class.'::HALF_UP')));}
     public function generar(object $c,array $review,int $user,string $motivo): array
     {
         $receipts=collect($review['recepciones'])->keyBy('id');
@@ -27,10 +27,10 @@ final class RegularizacionRecepcion
                 $delta=$this->n($line->cantidad_documentada)->minus((string)$line->cantidad_recibida);
                 if(!$delta->isZero()&&$qty->isEqualTo($delta->abs())&&$cost->isPositive()){
                     $type=$delta->isPositive()?'NC':'ND';$seen[$line->id]=true;
-                    $amount=$qty->multipliedBy($cost)->toScale(0,RoundingMode::HALF_UP);
+                    $amount=$qty->multipliedBy($cost)->toScale(0,(defined(RoundingMode::class.'::HalfUp')?constant(RoundingMode::class.'::HalfUp'):constant(RoundingMode::class.'::HALF_UP')));
                     if($amount->isZero())$type='AVISO_COMERCIAL';
                     elseif((int)$line->es_exento===1)$ex=$amount;
-                    elseif($this->n($line->tasa_iva)->isEqualTo('19')){$net=$amount;$iva=$net->multipliedBy('0.19')->toScale(0,RoundingMode::HALF_UP);}
+                    elseif($this->n($line->tasa_iva)->isEqualTo('19')){$net=$amount;$iva=$net->multipliedBy('0.19')->toScale(0,(defined(RoundingMode::class.'::HalfUp')?constant(RoundingMode::class.'::HalfUp'):constant(RoundingMode::class.'::HALF_UP')));}
                     else $type='AVISO_COMERCIAL';
                 }
             }

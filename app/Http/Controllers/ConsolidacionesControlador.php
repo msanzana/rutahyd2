@@ -17,7 +17,7 @@ final class ConsolidacionesControlador
     private function decimal($v): BigDecimal {return BigDecimal::of((string)$v);}
     private function saldo(BigDecimal $v,int $scale=8): string {
         abort_if($v->isNegative()||$v->isGreaterThan($scale===4?'99999999999.9999':'99999999999999999999.99999999'),409,'Importe o saldo fuera de rango.');
-        return (string)$v->toScale($scale,RoundingMode::HALF_UP);
+        return (string)$v->toScale($scale,(defined(RoundingMode::class.'::HalfUp')?constant(RoundingMode::class.'::HalfUp'):constant(RoundingMode::class.'::HALF_UP')));
     }
     private function estado(string $m,string $e): int {
         $id=DB::table('modulos_estados as me')->join('modulos as m','m.id','=','me.modulo_id')->join('estados as e','e.id','=','me.estado_id')
@@ -63,7 +63,7 @@ final class ConsolidacionesControlador
         }
         ksort($groups,SORT_NATURAL);$out=[];
         foreach($groups as $g){
-            $g['costo_unitario_neto_ponderado']=$g['cantidad_aceptada']->isZero()?'0.00000000':$this->saldo($g['valor']->dividedBy($g['cantidad_aceptada'],8,RoundingMode::HALF_UP));
+            $g['costo_unitario_neto_ponderado']=$g['cantidad_aceptada']->isZero()?'0.00000000':$this->saldo($g['valor']->dividedBy($g['cantidad_aceptada'],8,(defined(RoundingMode::class.'::HalfUp')?constant(RoundingMode::class.'::HalfUp'):constant(RoundingMode::class.'::HALF_UP'))));
             foreach($keys as $f)$g[$f]=$this->saldo($g[$f]);
             $g['valor']=$this->saldo($g['valor']);$out[]=$g;
         }return $out;
@@ -196,7 +196,7 @@ final class ConsolidacionesControlador
                 foreach($bals as $s){$a=$this->decimal($s->disponible);$t=$this->decimal($s->transito);$m=$this->decimal($s->comprometido);$f=$this->decimal($s->cantidad_fisica);
                     abort_unless(!$a->isNegative()&&!$t->isNegative()&&!$m->isNegative()&&$f->isEqualTo($a->plus($t)->plus($m)),409,'Stock inconsistente.');
                     $oldQty=$oldQty->plus($a)->plus($m);if((int)$s->bodega_id===(int)$c->bodega_id)$stock=$s;}
-                $q=$byProduct[$pid]['q'];$value=$byProduct[$pid]['v']->toScale(16,RoundingMode::UNNECESSARY);
+                $q=$byProduct[$pid]['q'];$value=$byProduct[$pid]['v']->toScale(16);
                 abort_unless($stock&&$this->decimal($stock->transito)->isGreaterThanOrEqualTo($q),409,'Tránsito insuficiente.');
                 $oldCpp=$this->decimal($p->costo_promedio_ponderado);$base=$oldCpp;$source='CPP_VIGENTE';
                 if($oldQty->isZero()){$base=BigDecimal::zero();$source='SIN_STOCK_VALORIZADO';}
@@ -205,9 +205,9 @@ final class ConsolidacionesControlador
                     if($last){$base=$this->decimal($last->cpp_actual);$source='CPP_ULTIMA_ENTRADA_KARDEX';}
                     else{$base=$this->decimal($p->costo_neto);$source='COSTO_NETO_INICIAL';abort_unless($base->isPositive(),409,'CPP cero con stock previo sin costo comprobable. Regularice antes de cerrar.');}
                 }
-                $prior=$oldQty->multipliedBy($base)->toScale(16,RoundingMode::UNNECESSARY);
+                $prior=$oldQty->multipliedBy($base)->toScale(16);
                 $calc=(new CostoPromedioPonderado())->calcular($this->saldo($oldQty),(string)$oldCpp,$this->saldo($q),(string)$value,(string)$prior);
-                $newCpp=$calc['cpp_posterior'];$newCost=$this->saldo($value->dividedBy($q,4,RoundingMode::HALF_UP),4);
+                $newCpp=$calc['cpp_posterior'];$newCost=$this->saldo($value->dividedBy($q,4,(defined(RoundingMode::class.'::HalfUp')?constant(RoundingMode::class.'::HalfUp'):constant(RoundingMode::class.'::HALF_UP'))),4);
                 $a=$this->decimal($stock->disponible);$t=$this->decimal($stock->transito);$m=$this->decimal($stock->comprometido);$f=$this->decimal($stock->cantidad_fisica);
                 // Una entrada por línea consolidada; CPP final global, no promedio de promedios.
                 $first=true;foreach($details->where('producto_id',$pid) as $l){

@@ -1110,3 +1110,5 @@ El titular pidió reemplazar los triggers propuestos por **funciones de backend 
 ### V84 · Normalización de controles cerrar — 2026-11-25
 - Patrón de CRUD 36 × 36 px y radio 11 px: cabeceras de documentos, compras, recepciones, consolidaciones, Kardex, OC y modal clásico; mantiene contraste de CRUD oscuro, borde visible, hover, foco y deshabilitado. No cambia acciones de pie, avisos, acciones por fila ni backend. Nombres accesibles en tipos de documentos, compras, OC, listas de precios y ubicaciones; no habilitar cierre de login bloqueado.
 - Frontend d41169df28f1b7520de51d3cecc0e502f4264b03; deploy ff576cb050ffa9380bfe5ebd82ed42c793e3ca24; ejecución https://github.com/msanzana/rutahyd2/actions/runs/45557162021 EN CURSO al registrar. Prueba aislada de cabeceras a 1440 y 390 px, respaldo FTPS, cotejo de bytes, cache-busting y JWT; no DDL ni datos de prueba en producción.
+
+- V84 resultado terminal SUCCESS, 2026-11-25T05:59:28Z, ejecución 45557162021. Pruebas de cierre 1440/390 px, respaldo FTPS, cotejo, cache-busting y JWT aprobados; rollback omitido. Referencia productiva ff576cb050ffa9380bfe5ebd82ed42c793e3ca24. Sin cambios backend ni base de datos.

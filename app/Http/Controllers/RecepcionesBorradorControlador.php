@@ -71,7 +71,12 @@ final class RecepcionesBorradorControlador
         $details=DB::table('recepcion_detalle')->where('recepcion_id',$id)->orderBy('numero_linea')->get();
         $diff=DB::table('recepcion_diferencias')->where('recepcion_id',$id)->orderBy('id')->get();
         $eligible=$r->estado==='RECEPCIONADA'&&$r->stock_aplicado&&$r->token_confirmacion&&$diff->isEmpty()&&$this->directa($r,$details,'cantidad_aceptada');
-        return response()->json(['recepcion'=>$r,'detalles'=>$details,'diferencias'=>$diff,'completar_cierre_directo'=>(bool)$eligible,'orden_cerrada'=>DB::table('ordenes_compra as o')->join('estados as e','e.id','=','o.estado_id')->where('o.id',$r->orden_compra_id)->where('e.codigo','RECEPCIONADA')->exists()]);
+        $solicitudes=DB::table('solicitudes_regularizacion as s')
+          ->leftJoin('cola_notificaciones_correo as n',function($join){$join->on('n.solicitud_id','=','s.id')->where('n.origen_tipo','SOLICITUD_REGULARIZACION')->where('n.estado','<>','NULA');})
+          ->where('s.recepcion_id',$id)->where('s.estado','<>','NULA')->orderBy('s.id')
+          ->get(['s.id','s.numero_interno','s.tipo_solicitud','s.estado','s.monto_total','n.id as notificacion_id','n.estado as estado_correo','n.ultimo_error','n.intentos','n.maximo_intentos','n.enviada_en']);
+        $consolidacionEstado=$r->recepcion_consolidada_id===null?null:DB::table('recepciones_consolidadas as c')->join('estados as e','e.id','=','c.estado_id')->where('c.id',$r->recepcion_consolidada_id)->value('e.codigo');
+        return response()->json(['recepcion'=>$r,'detalles'=>$details,'diferencias'=>$diff,'solicitudes'=>$solicitudes,'estado_consolidacion'=>$consolidacionEstado,'completar_cierre_directo'=>(bool)$eligible,'orden_cerrada'=>DB::table('ordenes_compra as o')->join('estados as e','e.id','=','o.estado_id')->where('o.id',$r->orden_compra_id)->where('e.codigo','RECEPCIONADA')->exists()]);
     }
 
     /** V74A: revisión de cierre, exclusivamente de lectura. No confirma existencias. */

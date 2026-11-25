@@ -69,6 +69,13 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::get('/recepciones-borrador/{id}/revision',[\App\Http\Controllers\RecepcionesBorradorControlador::class,'revisar'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
     Route::post('/recepciones-borrador/{id}/anular',[\App\Http\Controllers\RecepcionesBorradorControlador::class,'anular'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
     Route::post('/recepciones-borrador/{id}/confirmar',[\App\Http\Controllers\RecepcionesBorradorControlador::class,'confirmar'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+    // V76/V77: consolidación y CPP, con permiso de Compras.
+    Route::get('/consolidaciones-recepcion/candidatas/{oc}',[\App\Http\Controllers\ConsolidacionesControlador::class,'candidatas'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('oc');
+    Route::post('/consolidaciones-recepcion',[\App\Http\Controllers\ConsolidacionesControlador::class,'crear'])->middleware('permiso.rutahd:compras.gestionar');
+    Route::get('/consolidaciones-recepcion/{id}',[\App\Http\Controllers\ConsolidacionesControlador::class,'ver'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+    Route::put('/consolidaciones-recepcion/{id}',[\App\Http\Controllers\ConsolidacionesControlador::class,'actualizar'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+    Route::post('/consolidaciones-recepcion/{id}/confirmar',[\App\Http\Controllers\ConsolidacionesControlador::class,'confirmar'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+    Route::post('/consolidaciones-recepcion/{id}/anular',[\App\Http\Controllers\ConsolidacionesControlador::class,'anular'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
     // V66: consultas de compras; sin operaciones de escritura.
     Route::get('/compras-consultas/{modulo}',[\App\Http\Controllers\ComprasConsultasControlador::class,'listar'])
         ->where('modulo','facturas|recepciones|consolidaciones|libro')

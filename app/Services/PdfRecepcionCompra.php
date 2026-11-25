@@ -115,8 +115,8 @@ final class PdfRecepcionCompra
     private function ancho(string $s,float $size,bool $bold=false): float {
         // Métricas de Helvetica, unidades de 1/1000 em. Para glifos no listados
         // se usa una cota conservadora; nunca se corta ni se omite el texto.
-        $groups=[278=>" !'.,:;iIl",333=>"frt()[]",556=>"0123456789abdeghnopqu$¢",500=>"cksvxyzJ",611=>"FTZ",667=>"ABEKPSVXY",722=>"CDGHNRU",778=>"OQ",833=>"Mm",944=>"W",889=>"w",222=>"j",469=>"-",584=>"+=<>",1000=>"@%"];
-        $map=[];foreach($groups as $w=>$chars)foreach(str_split($chars) as $ch)$map[$ch]=$w;
+        $groups=[278=>" !'.,:;iIl",333=>"frt()[]",556=>'0123456789abdeghnopqu$¢',500=>"cksvxyzJ",611=>"FTZ",667=>"ABEKPSVXY",722=>"CDGHNRU",778=>"OQ",833=>"Mm",944=>"W",889=>"w",222=>"j",469=>"-",584=>"+=<>",1000=>"@%"];
+        $map=[];foreach($groups as $w=>$chars)foreach(preg_split('//u',$chars,-1,PREG_SPLIT_NO_EMPTY) as $ch)$map[$ch]=$w;
         $width=0;foreach(preg_split('//u',$s,-1,PREG_SPLIT_NO_EMPTY)?:[] as $ch){
             if(isset($map[$ch])){$width+=$map[$ch];continue;}
             $plain=iconv('UTF-8','ASCII//TRANSLIT//IGNORE',$ch);

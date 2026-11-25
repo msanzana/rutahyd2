@@ -78,6 +78,7 @@ final class RecepcionesBorradorControlador
           ->join('compras as c','c.id','=','r.compra_id')->where('r.id',$id)->where('e.codigo','<>','NULA')
           ->select('r.*','e.codigo as estado','c.folio','c.total_informado','c.iva_recuperable','c.subtotal_neto as compra_neto','c.total_exento as compra_exento','c.total as compra_total')->first();
         abort_unless($r,404,'Recepción no encontrada.');
+        abort_unless(in_array($r->estado,['ACTIVA','PENDIENTE'],true),409,'La revisión preliminar solo está disponible para recepciones activas.');
         $lines=DB::table('recepcion_detalle as d')->join('productos as p','p.id','=','d.producto_id')
           ->leftJoin('compras_detalle as cd','cd.id','=','d.compra_detalle_id')
           ->leftJoin('detalles_ordenes_compra as oc','oc.id','=','d.detalle_orden_compra_id')
@@ -138,7 +139,7 @@ final class RecepcionesBorradorControlador
             abort_unless(in_array($codigo,['ACTIVA','PENDIENTE'],true)&&!$r->stock_aplicado&&!$r->recepcion_consolidada_id&&!$r->token_confirmacion,409,'Solo se anulan recepciones activas sin movimientos.');
             abort_unless((int)$r->version_borrador===(int)$v['version_borrador'],409,'La recepción cambió. Actualice el listado.');
             $c=DB::table('compras')->where('id',$r->compra_id)->lockForUpdate()->first();
-            abort_unless($c&&in_array(DB::table('estados')->where('id',$c->estado_id)->value('codigo'),['PENDIENTE','ACTIVA'],true),409,'El documento de compra ya no es anulable.');
+            abort_unless($c&&(int)$c->proveedor_id===(int)$r->proveedor_id&&(string)$c->orden_compra_id===(string)$r->orden_compra_id&&in_array(DB::table('estados')->where('id',$c->estado_id)->value('codigo'),['PENDIENTE','ACTIVA'],true),409,'El documento de compra ya no es anulable.');
             abort_if(DB::table('recepciones')->where('compra_id',$r->compra_id)->where('id','<>',$id)->exists(),409,'El documento está asociado a otra recepción.');
             abort_if(DB::table('libro_compras')->where('compra_id',$r->compra_id)->exists(),409,'El documento ya está registrado en el libro de compras.');
             abort_if(DB::table('kardex')->where('origen_tipo','RECEPCION')->whereIn('origen_detalle_id',DB::table('recepcion_detalle')->where('recepcion_id',$id)->select('id'))->exists(),409,'La recepción tiene movimientos de inventario.');

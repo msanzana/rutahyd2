@@ -1,0 +1,47 @@
+name: V87 - Diagnostico recepcion solo lectura
+on:
+  push:
+    branches: [diagnostico/v87-recepcion-20261125]
+    paths: [.github/workflows/v87-diagnostico-recepcion.yml]
+permissions:
+  contents: read
+jobs:
+  diagnostico:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - name: Identificar excepcion sin exponer datos
+        run: |
+          python - <<'PY'
+          import ftplib,ssl,os,re,collections
+          f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=40)
+          f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
+          with f:
+              try:
+                  paths=[p for p in f.nlst('/htdocs/api-v2/storage/logs') if re.search(r'(?:^|/)laravel(?:-\d{4}-\d{2}-\d{2})?\.log$',p)]
+              except ftplib.error_perm:
+                  paths=[]
+              if not paths: paths=['/htdocs/api-v2/storage/logs/laravel.log']
+              found=0
+              for p in sorted(paths)[-3:]:
+                  if not p.startswith('/'):p='/htdocs/api-v2/storage/logs/'+p.rsplit('/',1)[-1]
+                  chunks=collections.deque(maxlen=256)
+                  try:f.retrbinary('RETR '+p,chunks.append,blocksize=8192)
+                  except ftplib.error_perm:continue
+                  s=b''.join(chunks).decode('utf-8','replace')
+                  records=re.split(r'(?=^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\])',s,flags=re.M)
+                  for r in [r for r in records if 'RecepcionesBorradorControlador' in r][-8:]:
+                      found+=1
+                      date=re.match(r'\[([\d :\-]+)\]',r)
+                      print('INCIDENTE',date.group(1) if date else 'sin fecha')
+                      for pattern,label in [(r'SQLSTATE\[([A-Z0-9]+)\]','SQLSTATE'),(r"Unknown column '([A-Za-z0-9_.]+)'",'COLUMNA_DESCONOCIDA'),(r"Field '([A-Za-z0-9_]+)' doesn't have a default value",'CAMPO_SIN_DEFAULT'),(r"Column '([A-Za-z0-9_]+)' cannot be null",'CAMPO_NULO'),(r"CONSTRAINT [\x60']([A-Za-z0-9_]+)[\x60']",'RESTRICCION'),(r'Undefined (?:constant|method|property) ([A-Za-z0-9_:\\>$-]+)','SIMBOLO'),(r"Table '[A-Za-z0-9_]+\.([A-Za-z0-9_]+)' doesn't exist",'TABLA_FALTANTE'),(r'insert into \x60([A-Za-z0-9_]+)\x60','TABLA_INSERT')]:
+                          for m in list(dict.fromkeys(re.findall(pattern,r,re.I)))[:4]: print(label,m)
+                      for frame in list(dict.fromkeys(re.findall(r'(?:app/Http/Controllers/RecepcionesBorradorControlador\.php|app/Services/[A-Za-z0-9_]+\.php)\(\d+\)',r)))[:8]:print('MARCO',frame)
+                      for kind in ['TypeError','QueryException','PDOException','ErrorException','LogicException','ValidationException']:
+                          if kind in r:print('TIPO',kind)
+              print('INCIDENTES_ENCONTRADOS',found)
+          PY

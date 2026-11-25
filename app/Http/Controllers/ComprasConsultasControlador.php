@@ -47,6 +47,7 @@ final class ComprasConsultasControlador
                 ->select('l.id','l.periodo_tributario','l.folio','l.fecha_documento','oc.numero as orden_compra','td.nombre as documento','l.rut_emisor','l.razon_social_emisor','l.monto_neto','l.monto_exento','l.monto_iva_recuperable','l.monto_iva_no_recuperable','l.monto_iva_uso_comun','l.monto_impuestos_adicionales','l.monto_retenciones','l.monto_total','l.signo_contable','l.estado_rcv'),
             default=>abort(404)
         };
+        if($modulo==='recepciones')$q->selectSub(DB::table('solicitudes_regularizacion')->whereColumn('recepcion_id','r.id')->where('estado','<>','NULA')->selectRaw('COUNT(*)'),'solicitudes_count');
         if($modulo==='consolidaciones')$q->selectSub(DB::table('solicitudes_regularizacion')->whereColumn('recepcion_consolidada_id','r.id')->where('estado','<>','NULA')->selectRaw('COUNT(*)'),'solicitudes_count');
         if($modulo==='kardex')$q->where('k.producto_id',$v['producto_id'])->where('k.bodega_id',$v['bodega_id']);
         if(in_array($modulo,['facturas','recepciones','consolidaciones'],true)&&!empty($v['estado']))$q->where('e.codigo',$v['estado']);

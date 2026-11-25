@@ -46,8 +46,8 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/v97/{before,after,browser,styles}
           git clone -q --depth=1 --branch feature/v97-solicitudes-recepcion-20261125 https://github.com/msanzana/rutahyd2front.git /tmp/v97/front
-          git -C /tmp/v97/front fetch -q --depth=1 origin dcfe5493851196313b5411c14f9f7d86ad06151f
-          git -C /tmp/v97/front show dcfe5493851196313b5411c14f9f7d86ad06151f:assets/js/compras-consultas-v66.js > /tmp/v97/new.js
+          git -C /tmp/v97/front fetch -q --depth=1 origin 03ef772810bf5eb5f4c6e52163ee2c2e9fcc1a7c
+          git -C /tmp/v97/front show 03ef772810bf5eb5f4c6e52163ee2c2e9fcc1a7c:assets/js/compras-consultas-v66.js > /tmp/v97/new.js
           git -C /tmp/v97/front fetch -q --depth=1 origin b82375047ab38bd3a03adb1133e4a7b8678f72a6
           git -C /tmp/v97/front show b82375047ab38bd3a03adb1133e4a7b8678f72a6:assets/js/compras-consultas-v66.js > /tmp/v97/old.js
           node --check /tmp/v97/new.js

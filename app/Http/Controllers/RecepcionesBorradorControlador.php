@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
 use Illuminate\Database\QueryException;
 use Illuminate\Validation\ValidationException;
 
-/** V73: borradores de recepción con OC. No cierra, mueve stock ni emite correos. */
+/** Recepción con OC: borrador, revisión y confirmación física a tránsito. */
 final class RecepcionesBorradorControlador
 {
     private function estado(string $modulo,string $codigo='PENDIENTE'): int
@@ -68,7 +68,7 @@ final class RecepcionesBorradorControlador
           ->join('compras as c','c.id','=','r.compra_id')->where('r.id',$id)->where('e.codigo','<>','NULA')
           ->select('r.*','e.codigo as estado','c.documento_id','c.folio','c.fecha_documento','c.total_informado')->first();
         abort_unless($r,404,'Recepción no encontrada.');
-        return response()->json(['recepcion'=>$r,'detalles'=>DB::table('recepcion_detalle')->where('recepcion_id',$id)->orderBy('numero_linea')->get()]);
+        return response()->json(['recepcion'=>$r,'detalles'=>DB::table('recepcion_detalle')->where('recepcion_id',$id)->orderBy('numero_linea')->get(),'diferencias'=>DB::table('recepcion_diferencias')->where('recepcion_id',$id)->orderBy('id')->get()]);
     }
 
     /** V74A: revisión de cierre, exclusivamente de lectura. No confirma existencias. */
@@ -120,7 +120,121 @@ final class RecepcionesBorradorControlador
         $pendientes=[];foreach($remaining as $lineId=>$qty){if($qty->isPositive())$pendientes[]=['detalle_orden_compra_id'=>$lineId,'cantidad_pendiente'=>(string)$qty];}
         return response()->json(['id'=>$id,'numero_interno'=>$r->numero_interno,'estado'=>$r->estado,'version_borrador'=>(int)$r->version_borrador,
           'resultado_previsto'=>$dif?'DESCUADRADA':'RECEPCIONADA','diferencias'=>$dif,'saldos_oc'=>$pendientes,'lineas'=>$lines,
-          'cierre_habilitado'=>false,'mensaje'=>'Revisión preliminar. La confirmación y el inventario se habilitarán juntos.']);
+          'cierre_habilitado'=>!$lines->isEmpty(),'huella_revision'=>$this->huella($r,$lines,$dif,$pendientes),'mensaje'=>'Revise las diferencias antes de confirmar. Las unidades contadas ingresarán a tránsito.']);
+    }
+
+
+    private function huella(object $r,$lines,array $dif,array $pendientes): string
+    {
+        return hash('sha256',json_encode([$r->id,$r->version_borrador,$r->compra_total,$r->total_informado,$lines,$dif,$pendientes],JSON_THROW_ON_ERROR));
+    }
+    private function saldo(BigDecimal $n): string
+    {
+        abort_if($n->isNegative()||$n->isGreaterThan('99999999999999999999.99999999'),409,'Saldo de inventario fuera de rango.');
+        return (string)$n->toScale(8,RoundingMode::UNNECESSARY);
+    }
+
+    /** Confirmación atómica: acepta conteo físico en tránsito, sin valorizar dos veces.
+     * La OC permanece activa hasta consolidación. No emite documentos ni correo. */
+    public function confirmar(Request $request,int $id)
+    {
+        $v=$request->validate([
+          'version_borrador'=>'required|integer|min:0|max:4294967294',
+          'huella_revision'=>['required','regex:/^[a-f0-9]{64}$/D'],
+          'token_confirmacion'=>'required|uuid',
+          'aceptar_diferencias'=>'required|boolean',
+          'motivo'=>'nullable|string|max:1000',
+        ]);
+        $user=(int)($request->user()?->id??0);abort_unless($user>0,401);
+        $token=strtolower($v['token_confirmacion']);
+        // Obtener la OC antes de la transacción: el primer snapshot de lectura
+        // debe establecerse DESPUÉS de bloquear la OC, no antes.
+        $hint=DB::table('recepciones')->where('id',$id)->first(['orden_compra_id']);
+        abort_unless($hint&&$hint->orden_compra_id,404,'Recepción con orden de compra no encontrada.');
+        return response()->json(DB::transaction(function()use($id,$v,$user,$token,$hint){
+            $oc=DB::table('ordenes_compra')->where('id',$hint->orden_compra_id)->lockForUpdate()->first();
+            $r=DB::table('recepciones')->where('id',$id)->lockForUpdate()->first();
+            abort_unless($oc&&$r&&(int)$r->orden_compra_id===(int)$oc->id,409,'La orden de la recepción cambió.');
+            $estado=DB::table('estados')->where('id',$r->estado_id)->value('codigo');
+            if($r->token_confirmacion===$token&&$r->stock_aplicado&&in_array($estado,['RECEPCIONADA','DESCUADRADA','FINALIZADA'],true)){
+                return ['id'=>$id,'estado'=>$estado,'repetida'=>true,'mensaje'=>'Recepción ya confirmada. No se repitió el inventario.'];
+            }
+            abort_unless(in_array($estado,['ACTIVA','PENDIENTE'],true)&&!$r->stock_aplicado&&!$r->token_confirmacion&&!$r->recepcion_consolidada_id,409,'La recepción ya no puede confirmarse.');
+            abort_unless((int)$r->version_borrador===(int)$v['version_borrador'],409,'El borrador cambió. Revise nuevamente.');
+            abort_unless(DB::table('estados')->where('id',$oc->estado_id)->where('codigo','ACTIVA')->exists(),409,'La orden ya no está activa.');
+            abort_unless((int)$oc->proveedor_id===(int)$r->proveedor_id&&(int)$r->recepcion_tipo===1,409,'Proveedor u origen de recepción inconsistente.');
+            $c=DB::table('compras')->where('id',$r->compra_id)->lockForUpdate()->first();
+            abort_unless($c&&(int)$c->proveedor_id===(int)$r->proveedor_id&&(int)$c->orden_compra_id===(int)$oc->id&&in_array(DB::table('estados')->where('id',$c->estado_id)->value('codigo'),['ACTIVA','PENDIENTE'],true),409,'Documento de compra no confirmable.');
+            abort_if(DB::table('recepciones')->where('compra_id',$c->id)->where('id','<>',$id)->exists(),409,'El documento tiene otra recepción.');
+            abort_if(DB::table('recepciones')->where('token_confirmacion',$token)->where('id','<>',$id)->exists(),409,'Confirmación utilizada por otro documento.');
+            abort_unless(DB::table('bodegas')->where('id',$r->bodega_id)->where('activo',1)->lockForUpdate()->first(),409,'Bodega no activa.');
+            $doc=DB::table('tipo_documentos')->where('id',$c->documento_id)->where('activo',1)->where('documento_compra',1)->first();
+            abort_unless($doc&&in_array($doc->familia,['FACTURA','FACTURA_COMPRA','BOLETA','GUIA'],true),409,'Tipo de documento no confirmable.');
+            // Revisión nuevamente en servidor bajo bloqueo de OC. Ningún importe
+            // ni diferencia proviene del cliente.
+            $review=$this->revisar($id)->getData(true);
+            abort_unless(hash_equals($review['huella_revision'],$v['huella_revision']),409,'Cambió la revisión. Abra nuevamente las diferencias.');
+            $dif=$review['diferencias'];$lines=$review['lineas'];
+            abort_unless(count($lines)>0,422,'La recepción requiere líneas.');
+            $motivo=trim((string)($v['motivo']??''));
+            if($dif&&(!(bool)$v['aceptar_diferencias']||mb_strlen($motivo)<3))$this->error('motivo','Confirme los descuadres e indique el motivo.');
+            $target=$dif?'DESCUADRADA':'RECEPCIONADA';
+            $targetId=$this->estado('RECEPCION',$target);$compraEstado=$this->estado('FACTURA_COMPRA','RECEPCIONADA');
+            abort_if(DB::table('recepcion_diferencias')->where('recepcion_id',$id)->exists(),409,'Ya existen diferencias persistidas. Revise el historial.');
+            abort_if(DB::table('kardex')->where('origen_tipo','RECEPCION')->whereIn('origen_detalle_id',array_column($lines,'id'))->exists(),409,'Ya existen movimientos de esta recepción.');
+            $ids=array_values(array_unique(array_map('intval',array_column($lines,'producto_id'))));sort($ids,SORT_NUMERIC);
+            // Orden de bloqueo estable, también para crear saldos nuevos.
+            $products=DB::table('productos')->whereIn('id',$ids)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+            abort_unless($products->count()===count($ids),409,'Producto inexistente.');
+            // Inventario legado por presentación: no crear un segundo saldo para
+            // un SKU con saldo anterior sin migración/reconciliación explícita.
+            abort_if(DB::table('saldos_inventario as si')->join('presentaciones_productos as pp','pp.id','=','si.presentacion_id')->whereIn('pp.producto_id',$ids)->where('si.cantidad','<>',0)->exists(),409,'Hay existencias en el inventario anterior. Se requiere conciliación antes de confirmar.');
+            $movimientos=0;
+            foreach($lines as $d){
+                $p=$products->get($d['producto_id']);
+                abort_unless($p->activo,409,'Hay productos inactivos.');
+                abort_unless($d['presentacion_id']===null&&BigDecimal::of((string)$d['unidades_por_presentacion_snapshot'])->isEqualTo('1'),409,'La recepción requiere conversión de presentación; revise las unidades.');
+                $ocLine=DB::table('detalles_ordenes_compra')->where('id',$d['detalle_orden_compra_id'])->where('orden_compra_id',$oc->id)->where('producto_id',$d['producto_id'])->first();
+                $cd=DB::table('compras_detalle')->where('id',$d['compra_detalle_id'])->where('compra_id',$c->id)->where('producto_id',$d['producto_id'])->first();
+                abort_unless($ocLine&&$cd,409,'Una línea no corresponde a su orden o documento.');
+                $q=BigDecimal::of((string)$d['cantidad_recibida']);$cost=BigDecimal::of((string)$d['costo_unitario_neto']);
+                abort_if($q->isNegative()||$cost->isNegative(),409,'Cantidad o costo negativo.');
+                DB::table('recepcion_detalle')->where('id',$d['id'])->update(['cantidad_aceptada'=>$this->saldo($q),'cantidad_rechazada'=>0]);
+                if($q->isZero())continue;
+                $stock=DB::table('stock')->where('producto_id',$p->id)->where('bodega_id',$r->bodega_id)->lockForUpdate()->first();
+                if(!$stock){
+                    $sid=DB::table('stock')->insertGetId(['producto_id'=>$p->id,'bodega_id'=>$r->bodega_id,'disponible'=>0,'transito'=>0,'comprometido'=>0,'cantidad_fisica'=>0]);
+                    $stock=DB::table('stock')->where('id',$sid)->lockForUpdate()->first();
+                }
+                $a=BigDecimal::of((string)$stock->disponible);$t=BigDecimal::of((string)$stock->transito);$m=BigDecimal::of((string)$stock->comprometido);$f=BigDecimal::of((string)$stock->cantidad_fisica);
+                abort_unless(!$a->isNegative()&&!$t->isNegative()&&!$m->isNegative()&&$f->isEqualTo($a->plus($t)->plus($m)),409,'Stock previo inconsistente. Regularice antes de confirmar.');
+                $nt=$t->plus($q);$nf=$f->plus($q);
+                DB::table('stock')->where('id',$stock->id)->update(['transito'=>$this->saldo($nt),'cantidad_fisica'=>$this->saldo($nf)]);
+                DB::table('kardex')->insert(['producto_id'=>$p->id,'bodega_id'=>$r->bodega_id,'tipo_documento_id'=>$doc->id,
+                  'folio_documento'=>$c->folio,'tipo_movimiento'=>3,'cantidad_anterior'=>$this->saldo($a),'cantidad_documento'=>$this->saldo($q),
+                  'cantidad_actual'=>$this->saldo($a),'transito_anterior'=>$this->saldo($t),'transito_actual'=>$this->saldo($nt),
+                  'comprometido_anterior'=>$this->saldo($m),'comprometido_actual'=>$this->saldo($m),'fisico_anterior'=>$this->saldo($f),'fisico_actual'=>$this->saldo($nf),
+                  'costo_unitario_neto'=>(string)$cost,'ultimo_costo_anterior'=>$p->costo_neto,'ultimo_costo_actual'=>$p->costo_neto,
+                  'cpp_anterior'=>$p->costo_promedio_ponderado,'cpp_actual'=>$p->costo_promedio_ponderado,
+                  'origen_tipo'=>'RECEPCION','origen_detalle_id'=>$d['id'],'operacion_codigo'=>'ENTRADA_TRANSITO','token_idempotencia'=>(string)Str::uuid(),
+                  'registrado_por'=>$user,'observaciones'=>'Entrada física pendiente de consolidación; sin cambio de CPP.']);
+                $movimientos++;
+            }
+            foreach($dif as $d)DB::table('recepcion_diferencias')->insert([
+              'recepcion_id'=>$id,'recepcion_detalle_id'=>$d['recepcion_detalle_id'],'producto_id'=>$d['producto_id'],
+              'tipo_diferencia'=>$d['tipo'],'cantidad_documentada'=>$d['cantidad_documentada'],
+              'cantidad_oc_pendiente'=>$d['cantidad_oc_pendiente'],'cantidad_contada'=>$d['cantidad_contada'],
+              'cantidad_diferencia'=>$d['cantidad_diferencia'],'estado_resolucion'=>'ABIERTA',
+              'motivo'=>$d['motivo']]);
+            DB::table('compras')->where('id',$c->id)->update(['estado_id'=>$compraEstado]);
+            DB::table('recepciones')->where('id',$id)->update(['estado_id'=>$targetId,'stock_aplicado'=>1,'stock_aplicado_en'=>now(),
+              'token_confirmacion'=>$token,'version_borrador'=>(int)$r->version_borrador+1,'finalizado_por'=>$user]);
+            DB::table('registros_auditoria')->insert(['usuario_id'=>$user,'accion'=>'CONFIRMAR_RECEPCION','tipo_entidad'=>'recepciones','entidad_id'=>$id,
+              'valores_anteriores'=>json_encode(['estado'=>$estado,'version_borrador'=>$r->version_borrador],JSON_THROW_ON_ERROR),
+              'valores_nuevos'=>json_encode(['estado'=>$target,'diferencias'=>count($dif),'movimientos'=>$movimientos,'motivo'=>$motivo,'token'=>$token],JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE)]);
+            return ['id'=>$id,'estado'=>$target,'diferencias'=>count($dif),'movimientos'=>$movimientos,'repetida'=>false,
+              'mensaje'=>'Recepción confirmada como '.$target.'. Unidades contadas en tránsito; orden abierta para consolidación.'];
+        },3));
     }
 
     /** Anulación lógica exclusiva de documentos sin movimientos ni consolidación. */

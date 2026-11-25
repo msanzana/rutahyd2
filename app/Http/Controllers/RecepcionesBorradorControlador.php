@@ -2,6 +2,8 @@
 declare(strict_types=1);
 namespace App\Http\Controllers;
 
+use Brick\Math\BigDecimal;
+use Brick\Math\RoundingMode;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -11,12 +13,12 @@ use Illuminate\Validation\ValidationException;
 /** V73: borradores de recepción con OC. No cierra, mueve stock ni emite correos. */
 final class RecepcionesBorradorControlador
 {
-    private function estado(string $modulo): int
+    private function estado(string $modulo,string $codigo='PENDIENTE'): int
     {
         $id=DB::table('modulos_estados as me')->join('modulos as m','m.id','=','me.modulo_id')
           ->join('estados as e','e.id','=','me.estado_id')->where('m.codigo',$modulo)
-          ->where('m.activo',1)->where('me.activo',1)->where('e.activo',1)->where('e.codigo','PENDIENTE')->value('e.id');
-        abort_unless($id,409,'Estado pendiente no configurado.');
+          ->where('m.activo',1)->where('me.activo',1)->where('e.activo',1)->where('e.codigo',$codigo)->value('e.id');
+        abort_unless($id,409,'Estado '.$codigo.' no configurado.');
         return (int)$id;
     }
     private function error(string $key,string $message): never
@@ -68,6 +70,88 @@ final class RecepcionesBorradorControlador
         abort_unless($r,404,'Recepción no encontrada.');
         return response()->json(['recepcion'=>$r,'detalles'=>DB::table('recepcion_detalle')->where('recepcion_id',$id)->orderBy('numero_linea')->get()]);
     }
+
+    /** V74A: revisión de cierre, exclusivamente de lectura. No confirma existencias. */
+    public function revisar(int $id)
+    {
+        $r=DB::table('recepciones as r')->join('estados as e','e.id','=','r.estado_id')
+          ->join('compras as c','c.id','=','r.compra_id')->where('r.id',$id)->where('e.codigo','<>','NULA')
+          ->select('r.*','e.codigo as estado','c.folio','c.total_informado','c.iva_recuperable','c.subtotal_neto as compra_neto','c.total_exento as compra_exento','c.total as compra_total')->first();
+        abort_unless($r,404,'Recepción no encontrada.');
+        $lines=DB::table('recepcion_detalle as d')->join('productos as p','p.id','=','d.producto_id')
+          ->leftJoin('compras_detalle as cd','cd.id','=','d.compra_detalle_id')
+          ->leftJoin('detalles_ordenes_compra as oc','oc.id','=','d.detalle_orden_compra_id')
+          ->where('d.recepcion_id',$id)->orderBy('d.numero_linea')
+          ->get(['d.*','p.sku','p.nombre','oc.cantidad as cantidad_oc','oc.costo_unitario_neto as costo_oc','cd.monto_neto as neto_documentado','cd.monto_exento as exento_documentado']);
+        $dif=[];$net=BigDecimal::zero();$ex=BigDecimal::zero();
+        $ocLines=DB::table('detalles_ordenes_compra')->where('orden_compra_id',$r->orden_compra_id)->get()->keyBy('id');
+        // Sólo recepciones físicas definitivas: no contar otros borradores ni anuladas.
+        $prev=DB::table('recepcion_detalle as d')->join('recepciones as rr','rr.id','=','d.recepcion_id')
+          ->join('estados as e','e.id','=','rr.estado_id')->where('rr.orden_compra_id',$r->orden_compra_id)
+          ->where('rr.id','<>',$id)->whereIn('e.codigo',['RECEPCIONADA','DESCUADRADA','FINALIZADA'])
+          ->selectRaw('d.detalle_orden_compra_id, SUM(d.cantidad_aceptada) as cantidad')->groupBy('d.detalle_orden_compra_id')
+          ->get()->keyBy('detalle_orden_compra_id');
+        $remaining=[];foreach($ocLines as $o){$remaining[(int)$o->id]=BigDecimal::of((string)$o->cantidad)->minus((string)($prev->get($o->id)->cantidad??'0'));}
+        foreach($lines as $d){
+            $qd=BigDecimal::of((string)$d->cantidad_documentada);$qr=BigDecimal::of((string)$d->cantidad_recibida);
+            $delta=$qr->minus($qd);
+            $ocPending=$remaining[(int)$d->detalle_orden_compra_id]??null;
+            $base=['recepcion_detalle_id'=>$d->id,'producto_id'=>$d->producto_id,'sku'=>$d->sku,'producto'=>$d->nombre,
+                'cantidad_documentada'=>(string)$qd,'cantidad_contada'=>(string)$qr,'cantidad_oc_pendiente'=>$ocPending===null?null:(string)$ocPending];
+            if(!$delta->isZero())$dif[]=$base+['tipo'=>$delta->isNegative()?'FALTANTE':'EXCEDENTE','cantidad_diferencia'=>(string)$delta->abs(),'motivo'=>'Cantidad física distinta del documento.'];
+            if($ocPending===null)$dif[]=$base+['tipo'=>'PRODUCTO_ERRONEO','cantidad_diferencia'=>(string)$qr,'motivo'=>'Línea sin correspondencia en la orden.'];
+            else {
+                $exceso=$qr->minus($ocPending->isNegative()?'0':$ocPending);
+                if($exceso->isPositive())$dif[]=$base+['tipo'=>'EXCEDENTE','cantidad_diferencia'=>(string)$exceso,'motivo'=>'Cantidad superior al saldo pendiente de la orden.'];
+                $remaining[(int)$d->detalle_orden_compra_id]=$ocPending->minus($qr);
+            }
+            if($d->costo_oc!==null&&!BigDecimal::of((string)$d->costo_oc)->isEqualTo((string)$d->costo_unitario_neto))
+                $dif[]=$base+['tipo'=>'DOCUMENTAL','cantidad_diferencia'=>'0','motivo'=>'Costo unitario del documento diferente al de la orden.'];
+            $net=$net->plus((string)($d->neto_documentado??'0'));$ex=$ex->plus((string)($d->exento_documentado??'0'));
+        }
+        $money=[['Neto del documento versus líneas',$r->compra_neto,$net],['Exento del documento versus líneas',$r->compra_exento,$ex],['Total informado versus calculado',$r->total_informado,BigDecimal::of((string)$r->compra_total)]];
+        foreach($money as [$label,$entered,$expected]){
+            if($entered===null||!BigDecimal::of((string)$entered)->isEqualTo($expected)){
+                $dif[]=['tipo'=>'DOCUMENTAL','recepcion_detalle_id'=>null,'producto_id'=>null,'sku'=>null,'producto'=>null,'cantidad_documentada'=>null,'cantidad_contada'=>null,'cantidad_oc_pendiente'=>null,'cantidad_diferencia'=>'0','motivo'=>$label.': informado '.($entered??'no registrado').', calculado '.$expected.'.'];
+            }
+        }
+        if($lines->isEmpty())$dif[]=['tipo'=>'DOCUMENTAL','recepcion_detalle_id'=>null,'producto_id'=>null,'sku'=>null,'producto'=>null,'cantidad_documentada'=>null,'cantidad_contada'=>null,'cantidad_oc_pendiente'=>null,'cantidad_diferencia'=>'0','motivo'=>'La recepción no tiene líneas.'];
+        $pendientes=[];foreach($remaining as $lineId=>$qty){if($qty->isPositive())$pendientes[]=['detalle_orden_compra_id'=>$lineId,'cantidad_pendiente'=>(string)$qty];}
+        return response()->json(['id'=>$id,'numero_interno'=>$r->numero_interno,'estado'=>$r->estado,'version_borrador'=>(int)$r->version_borrador,
+          'resultado_previsto'=>$dif?'DESCUADRADA':'RECEPCIONADA','diferencias'=>$dif,'saldos_oc'=>$pendientes,'lineas'=>$lines,
+          'cierre_habilitado'=>false,'mensaje'=>'Revisión preliminar. La confirmación y el inventario se habilitarán juntos.']);
+    }
+
+    /** Anulación lógica exclusiva de documentos sin movimientos ni consolidación. */
+    public function anular(Request $request,int $id)
+    {
+        $v=$request->validate(['version_borrador'=>'required|integer|min:0|max:4294967294','motivo'=>'required|string|min:3|max:1000']);
+        $motivo=trim($v['motivo']);if(mb_strlen($motivo)<3)$this->error('motivo','Ingrese el motivo de anulación.');
+        $user=(int)($request->user()?->id??0);abort_unless($user>0,401);
+        return response()->json(DB::transaction(function()use($id,$v,$motivo,$user){
+            $hint=DB::table('recepciones')->where('id',$id)->first(['orden_compra_id']);
+            abort_unless($hint,404,'Recepción no encontrada.');
+            if($hint->orden_compra_id!==null)DB::table('ordenes_compra')->where('id',$hint->orden_compra_id)->lockForUpdate()->first();
+            $r=DB::table('recepciones')->where('id',$id)->lockForUpdate()->first();
+            abort_unless($r,404,'Recepción no encontrada.');
+            $codigo=DB::table('estados')->where('id',$r->estado_id)->value('codigo');
+            abort_unless(in_array($codigo,['ACTIVA','PENDIENTE'],true)&&!$r->stock_aplicado&&!$r->recepcion_consolidada_id&&!$r->token_confirmacion,409,'Solo se anulan recepciones activas sin movimientos.');
+            abort_unless((int)$r->version_borrador===(int)$v['version_borrador'],409,'La recepción cambió. Actualice el listado.');
+            $c=DB::table('compras')->where('id',$r->compra_id)->lockForUpdate()->first();
+            abort_unless($c&&in_array(DB::table('estados')->where('id',$c->estado_id)->value('codigo'),['PENDIENTE','ACTIVA'],true),409,'El documento de compra ya no es anulable.');
+            abort_if(DB::table('recepciones')->where('compra_id',$r->compra_id)->where('id','<>',$id)->exists(),409,'El documento está asociado a otra recepción.');
+            abort_if(DB::table('libro_compras')->where('compra_id',$r->compra_id)->exists(),409,'El documento ya está registrado en el libro de compras.');
+            abort_if(DB::table('kardex')->where('origen_tipo','RECEPCION')->whereIn('origen_detalle_id',DB::table('recepcion_detalle')->where('recepcion_id',$id)->select('id'))->exists(),409,'La recepción tiene movimientos de inventario.');
+            $nula=$this->estado('RECEPCION','NULA');$compNula=$this->estado('FACTURA_COMPRA','NULA');
+            DB::table('recepciones')->where('id',$id)->update(['estado_id'=>$nula,'version_borrador'=>(int)$r->version_borrador+1]);
+            DB::table('compras')->where('id',$c->id)->update(['estado_id'=>$compNula]);
+            DB::table('registros_auditoria')->insert(['usuario_id'=>$user,'accion'=>'ANULAR_RECEPCION','tipo_entidad'=>'recepciones','entidad_id'=>$id,
+                'valores_anteriores'=>json_encode(['estado'=>$codigo,'estado_compra_id'=>$c->estado_id,'version_borrador'=>$r->version_borrador],JSON_THROW_ON_ERROR),
+                'valores_nuevos'=>json_encode(['estado'=>'NULA','compra_id'=>$c->id,'motivo'=>$motivo],JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE)]);
+            return ['id'=>$id,'estado'=>'NULA','mensaje'=>'Recepción y documento anulados. Se conservó su historial; no se modificó inventario.'];
+        },3));
+    }
+
     public function crear(Request $request) { return $this->guardar($request,null); }
     public function actualizar(Request $request,int $id) { return $this->guardar($request,$id); }
     private function guardar(Request $request,?int $id)

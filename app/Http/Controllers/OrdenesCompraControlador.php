@@ -283,6 +283,7 @@ final class OrdenesCompraControlador extends Controller
                 abort_unless($actual,404,'Orden no encontrada');
                 abort_unless((int)$actual->estado_id===$this->estado('ACTIVA'),409,
                     'Solo se permite editar órdenes activas');
+                abort_if(DB::table('recepciones')->where('orden_compra_id',$id)->exists(),409,'La orden tiene historial de recepción; no se pueden sustituir sus líneas.');
             }
             [$detalles,$totales]=$this->prepararLineas((int)$data['proveedor_id'],$data['detalles']);
             $base=array_merge([
@@ -390,7 +391,8 @@ final class OrdenesCompraControlador extends Controller
             $row=DB::table('ordenes_compra')->where('id',$id)->lockForUpdate()->first();
             abort_unless($row,404,'Orden de compra no encontrada');
             abort_unless((int)$row->estado_id===$this->estado('ACTIVA'),409,
-                'Solo pueden anularse órdenes activas; Recepciones se controlará aparte');
+                'Solo pueden anularse órdenes activas');
+            abort_if(DB::table('recepciones as r')->join('estados as e','e.id','=','r.estado_id')->where('r.orden_compra_id',$id)->where('e.codigo','<>','NULA')->exists(),409,'La orden tiene recepciones vigentes. Revise sus recepciones antes de anular.');
             DB::table('ordenes_compra')->where('id',$id)->update([
                 'estado_id'=>$this->estado('NULA'),'estado'=>'nula'
             ]);

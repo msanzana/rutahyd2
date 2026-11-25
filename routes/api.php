@@ -66,6 +66,8 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::post('/recepciones-borrador',[\App\Http\Controllers\RecepcionesBorradorControlador::class,'crear'])->middleware('permiso.rutahd:compras.gestionar');
     Route::get('/recepciones-borrador/{id}',[\App\Http\Controllers\RecepcionesBorradorControlador::class,'ver'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
     Route::put('/recepciones-borrador/{id}',[\App\Http\Controllers\RecepcionesBorradorControlador::class,'actualizar'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+    Route::get('/recepciones-borrador/{id}/revision',[\App\Http\Controllers\RecepcionesBorradorControlador::class,'revisar'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
+    Route::post('/recepciones-borrador/{id}/anular',[\App\Http\Controllers\RecepcionesBorradorControlador::class,'anular'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
     // V66: consultas de compras; sin operaciones de escritura.
     Route::get('/compras-consultas/{modulo}',[\App\Http\Controllers\ComprasConsultasControlador::class,'listar'])
         ->where('modulo','facturas|recepciones|consolidaciones|libro')

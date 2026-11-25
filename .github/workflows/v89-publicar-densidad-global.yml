@@ -1,0 +1,146 @@
+name: V89 - Densidad visual global
+on:
+  push:
+    branches: [deploy/v89-densidad-global-20261125]
+    paths: [.github/workflows/v89-publicar-densidad-global.yml]
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar respaldo y delta exclusivo de interfaz
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v89/{before,after,browser,styles}
+          git clone -q --depth=1 --branch feature/v89-densidad-global-20261125 https://github.com/msanzana/rutahyd2front.git /tmp/v89/front
+          git -C /tmp/v89/front fetch -q --depth=1 origin 83ce4e646652c9f29080040168df55156aab6144
+          git -C /tmp/v89/front show 83ce4e646652c9f29080040168df55156aab6144:assets/css/densidad-global-v89.css > /tmp/v89/density.css
+          cat >/tmp/v89/transport.py <<'PY'
+          import os,ssl,ftplib,io,pathlib,re,sys,html
+          from html.parser import HTMLParser
+          p=pathlib.Path('/tmp/v89')
+          css='assets/css/densidad-global-v89.css'
+          index='index.html'
+          guards={'root.guard':'/htdocs/.htaccess','api.guard':'/htdocs/api/.htaccess','private.guard':'/htdocs/api-v2/.htaccess','gateway.guard':'/htdocs/api/index.php'}
+          def remote(n):return guards.get(n,'/htdocs/'+n)
+          def get(f,n):
+              b=io.BytesIO();f.retrbinary('RETR '+remote(n),b.write);return b.getvalue()
+          def absent(f,n):
+              try:get(f,n);return False
+              except ftplib.error_perm as e:
+                  if str(e).startswith('550'):return True
+                  raise
+          def put(f,n,b):f.storbinary('STOR '+remote(n),io.BytesIO(b))
+          def save(area,n,b):
+              d=p/area/n;d.parent.mkdir(parents=True,exist_ok=True);d.write_bytes(b)
+          def read(area,n):return (p/area/n).read_bytes()
+          def verify_before(f):
+              assert absent(f,css),'El CSS nuevo ya existe; detener'
+              for n in [index,*guards]:assert get(f,n)==read('before',n),n
+          class Links(HTMLParser):
+              def __init__(self):super().__init__();self.links=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='link' and a.get('rel')=='stylesheet':
+                      href=a.get('href','').split('?')[0].lstrip('/')
+                      if re.fullmatch(r'assets/css/[A-Za-z0-9_.-]+\.css',href):self.links.append(href)
+          f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=45)
+          f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
+          with f:
+              mode=sys.argv[1]
+              if mode=='prepare':
+                  assert absent(f,css),'Archivo nuevo ya existe'
+                  save('before','absent-density.txt',css.encode())
+                  for n in [index,*guards]:save('before',n,get(f,n))
+                  src=read('before',index).decode()
+                  assert src.count('</head>')==1 and css not in src and 'compras-consultas-v66.js?v=20261125-v86' in src
+                  tag='  <link rel="stylesheet" href="'+css+'?v=20261125-v89">\n'
+                  save('after',index,src.replace('</head>',tag+'</head>',1).encode())
+                  save('after',css,(p/'density.css').read_bytes())
+                  parser=Links();parser.feed(src)
+                  assert 'assets/css/app.css' in parser.links and 'assets/css/tipos-documentos-v63.css' in parser.links
+                  for i,n in enumerate(parser.links):save('styles',f'{i:03d}.css',get(f,n))
+                  print('V89_PRECHECK_OK',len(parser.links))
+              elif mode=='publish':
+                  verify_before(f)
+                  (p/'attempted').touch()
+                  for n in [css,index]:
+                      with (p/'attempted').open('a') as log:log.write(n+'\n')
+                      put(f,n,read('after',n))
+                  for n in [css,index]:assert get(f,n)==read('after',n),n
+                  for n in guards:assert get(f,n)==read('before',n),n
+                  print('V89_FTPS_BYTES_OK')
+              elif mode=='rollback':
+                  for n in reversed((p/'attempted').read_text().splitlines()):
+                      if n==css:
+                          if not absent(f,n):f.delete(remote(n))
+                      else:put(f,n,read('before',n))
+                  verify_before(f)
+                  print('V89_ROLLBACK_OK')
+          PY
+          python /tmp/v89/transport.py prepare
+      - name: Validar exclusivamente densidad y responsive
+        run: |
+          set -euo pipefail
+          cd /tmp/v89/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import {readdirSync} from 'node:fs';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({viewport:{width:1440,height:900}});
+            await page.route('**/*',r=>r.abort());
+            await page.setContent('<div class="app-shell"><aside class="sidebar"><nav class="nav"><button class="nav-link">Compras</button></nav></aside><main class="main-area"><header class="topbar">Ruta H&D</header><div class="page"><div class="workspace-header"><h1>Recepciones</h1></div><div id="workspaceContent"><section class="surface-panel hd-documents hd-v67"><div class="hd-doc-filter"><input type="search" aria-label="Buscar"><button class="button">Buscar</button></div><table class="hd-doc-table"><tbody>'+Array.from({length:25},(_,i)=>'<tr><td>Recepción '+i+'</td><td>Proveedor</td></tr>').join('')+'</tbody></table></section></div></div></main></div><dialog class="hd-doc-modal hd-v67" open><form class="hd-doc-form"><header class="hd-doc-modal-head"><h2>Recepción</h2><button class="hd-doc-close" aria-label="Cerrar" type="button">×</button></header><div class="hd-doc-modal-scroll"><div class="hd-doc-grid"><label class="hd-doc-field">Folio<input value="123"></label><label class="hd-doc-field">Bodega<select><option>Principal</option></select></label></div></div><footer class="hd-doc-modal-footer"><button class="button" type="button">Terminar Recepción</button></footer></form></dialog>');
+            for(const f of readdirSync('/tmp/v89/styles').sort())await page.addStyleTag({path:'/tmp/v89/styles/'+f});
+            const metrics=()=>page.evaluate(()=>{const rect=s=>document.querySelector(s).getBoundingClientRect();const style=s=>getComputedStyle(document.querySelector(s));return{top:rect('.topbar').height,nav:rect('.nav-link').height,row:rect('.hd-doc-table td').height,input:rect('.hd-doc-field input').height,close:rect('.hd-doc-close').width,footer:rect('.hd-doc-modal-footer').bottom,dialog:rect('dialog').bottom,dialogWidth:rect('dialog').width,font:parseFloat(style('.hd-doc-table td').fontSize),body:document.documentElement.scrollWidth,viewport:innerWidth,filter:rect('.hd-doc-filter input').height}});
+            const before=await metrics();
+            await page.addStyleTag({path:'/tmp/v89/density.css'});
+            const after=await metrics();
+            if(!(after.top<before.top&&after.row<before.row&&after.input<=before.input&&after.font>=12&&after.close>=36&&after.footer<=after.dialog+2&&after.filter>=30))throw Error(JSON.stringify({before,after}));
+            await page.setViewportSize({width:390,height:844});
+            const mobile=await metrics();
+            if(!(mobile.dialogWidth<=390&&mobile.input>=40&&mobile.close>=36&&mobile.footer<=mobile.dialog+2&&mobile.body<=390))throw Error(JSON.stringify(mobile));
+            console.log('V89_DENSIDAD_OK',JSON.stringify({before,after,mobile}));
+          }finally{await browser.close();}
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v89-respaldo-previo
+          path: /tmp/v89/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar y cotejar bytes
+        run: python /tmp/v89/transport.py publish
+      - name: Verificar carga del CSS nuevo en el sitio
+        run: |
+          set -euo pipefail
+          cd /tmp/v89/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage();
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>[...document.styleSheets].some(s=>s.href?.includes('densidad-global-v89.css?v=20261125-v89')&&s.cssRules.length>20),null,{timeout:45000});
+            const result=await page.evaluate(()=>({density:getComputedStyle(document.documentElement).getPropertyValue('--hd-dense-control').trim(),v86:[...document.scripts].some(s=>s.src.includes('compras-consultas-v66.js?v=20261125-v86'))}));
+            if(response?.status()!==200||result.density!=='32px'||!result.v86||errors.length)throw Error(JSON.stringify({result,errors}));
+            console.log('V89_PUBLIC_OK');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar originales si falla la publicación
+        if: failure()
+        run: |
+          if [ -f /tmp/v89/attempted ]; then python /tmp/v89/transport.py rollback; fi

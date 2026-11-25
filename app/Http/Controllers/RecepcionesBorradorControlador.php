@@ -226,6 +226,7 @@ final class RecepcionesBorradorControlador
               'cantidad_oc_pendiente'=>$d['cantidad_oc_pendiente'],'cantidad_contada'=>$d['cantidad_contada'],
               'cantidad_diferencia'=>$d['cantidad_diferencia'],'estado_resolucion'=>'ABIERTA',
               'motivo'=>$d['motivo']]);
+            (new \App\Services\LibroComprasInterno())->registrar((int)$c->id,$r->numero_interno);
             DB::table('compras')->where('id',$c->id)->update(['estado_id'=>$compraEstado]);
             DB::table('recepciones')->where('id',$id)->update(['estado_id'=>$targetId,'stock_aplicado'=>1,'stock_aplicado_en'=>now(),
               'token_confirmacion'=>$token,'version_borrador'=>(int)$r->version_borrador+1,'finalizado_por'=>$user]);

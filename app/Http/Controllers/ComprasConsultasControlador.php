@@ -8,6 +8,11 @@ use Illuminate\Support\Facades\DB;
 /** Consultas operativas sin escrituras ni duplicación de importes. */
 final class ComprasConsultasControlador
 {
+    public function pdf(string $tipo,int $id)
+    {
+        $pdf=(new \App\Services\PdfRecepcionCompra())->generar($tipo,$id);
+        return response($pdf,200,['Content-Type'=>'application/pdf','Content-Disposition'=>'inline; filename="'.$tipo.'-'.$id.'.pdf"','Cache-Control'=>'private, no-store']);
+    }
     public function listar(Request $request, string $modulo)
     {
         $v=$request->validate(['page'=>'sometimes|integer|min:1','exportar'=>'nullable|in:1','buscar'=>'nullable|string|max:120','producto_id'=>'nullable|integer|min:1','bodega_id'=>'nullable|integer|min:1','estado'=>'nullable|in:ACTIVA,PENDIENTE,RECEPCIONADA,DESCUADRADA,FINALIZADA,CONSOLIDADA','proveedor'=>'nullable|string|max:120','orden_compra'=>'nullable|string|max:80','desde'=>'nullable|date_format:Y-m-d','hasta'=>'nullable|date_format:Y-m-d|after_or_equal:desde']);

@@ -62,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone -q --depth=1 --branch feature/v78-v79-regularizacion-20261125 https://github.com/msanzana/rutahyd2front.git /tmp/front67
-          git -C /tmp/front67 fetch -q --depth=1 origin d15381ad8dc853e0d95a07e0c2c331063358fe81 6ed07aea542e2d8322af56ce4c1f455f3be56796
+          git -C /tmp/front67 fetch -q --depth=1 origin d15381ad8dc853e0d95a07e0c2c331063358fe81 864f9526af4880eb01bf036f6fe514c0f26f96ad
           mkdir -p /tmp/v79
           cat > /tmp/v79/transport.py <<'PY'
           import os,ssl,ftplib,io,pathlib,subprocess,re,sys
@@ -101,7 +101,7 @@ jobs:
                   for n in back+front:
                       repo=os.environ['GITHUB_WORKSPACE'] if n in back else '/tmp/front67'
                       old='f265dcf84526a9c22eccb63dcf2c4fba1ef16b53' if n in back else 'd15381ad8dc853e0d95a07e0c2c331063358fe81'
-                      new='2c1064a6f774c5bcdec3173e9ccdc3d6d80daa42' if n in back else '6ed07aea542e2d8322af56ce4c1f455f3be56796'
+                      new='2c1064a6f774c5bcdec3173e9ccdc3d6d80daa42' if n in back else '864f9526af4880eb01bf036f6fe514c0f26f96ad'
                       if n==newfile or read('before',n)==git(repo,old,n):save('after',n,git(repo,new,n))
                       else:
                           save('after',n,read('before',n))
@@ -171,6 +171,9 @@ jobs:
             });
             await ui.addScriptTag({path:'/tmp/v79/after/assets/js/compras-consultas-v66.js'});
             await ui.evaluate(()=>window.RutaHDComprasConsultas.mount(document.getElementById('test-root'),'consolidaciones'));
+            ui.on('pageerror',error=>console.error('PAGE_ERROR',error.message));
+            await ui.getByRole('button',{name:'Modificar consolidación 22'}).waitFor();
+            if(await ui.getByRole('button',{name:'Solicitudes 22'}).count())throw Error('Icono visible sin solicitudes');
             await ui.getByRole('button',{name:'Modificar consolidación 22'}).click();
             const d=ui.locator('dialog');
             await d.getByText('Productos consolidados',{exact:true}).waitFor();
@@ -181,6 +184,7 @@ jobs:
             await d.getByRole('button',{name:'Confirmar consolidación',exact:true}).click();
             await d.waitFor({state:'detached'});
             await ui.waitForFunction(()=>window.v79Closed===true);
+            await ui.getByRole('button',{name:'Solicitudes 22'}).waitFor({timeout:10000});
             await ui.getByRole('button',{name:'Solicitudes 22'}).click();
             await d.getByText('SOL-9 · Nota de crédito',{exact:true}).waitFor();
             await d.getByRole('button',{name:'Ver PDF 9'}).click();

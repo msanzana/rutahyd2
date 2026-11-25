@@ -1,0 +1,196 @@
+name: V98 - Stock por bodega en ficha de producto
+on:
+  push:
+    branches: [deploy/v98-stock-ficha-producto-20261125]
+    paths: [.github/workflows/v98-publicar-stock-ficha-producto.yml]
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, pdo_sqlite, iconv
+      - name: Validar saldos por bodega aislados
+        env:
+          APP_ENV: testing
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          MAIL_MAILER: log
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/ProductoComercialControlador.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/stock_ficha_v98.php | tee /tmp/v98-test.log
+          grep -Fx V98_STOCK_OK /tmp/v98-test.log
+      - name: Preparar respaldo y delta exclusivo de interfaz
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v98/{before,after,browser,styles}
+          git clone -q --depth=1 --branch feature/v98-stock-ficha-producto-20261125 https://github.com/msanzana/rutahyd2front.git /tmp/v98/front
+          git -C /tmp/v98/front fetch -q --depth=1 origin f5bf4388024e98267eb54542510ba9efd2d02191
+          git -C /tmp/v98/front show f5bf4388024e98267eb54542510ba9efd2d02191:assets/js/productos-remotos.js > /tmp/v98/new.js
+          git -C /tmp/v98/front fetch -q --depth=1 origin 03ef772810bf5eb5f4c6e52163ee2c2e9fcc1a7c
+          git -C /tmp/v98/front show 03ef772810bf5eb5f4c6e52163ee2c2e9fcc1a7c:assets/js/productos-remotos.js > /tmp/v98/old.js
+          git -C /tmp/v98/front show f5bf4388024e98267eb54542510ba9efd2d02191:assets/css/stock-ficha-v98.css > /tmp/v98/new.css
+          node --check /tmp/v98/new.js
+          cat >/tmp/v98/transport.py <<'PY'
+          import os,ssl,ftplib,io,pathlib,re,sys,html
+          from html.parser import HTMLParser
+          p=pathlib.Path('/tmp/v98')
+          index='index.html'
+          js='assets/js/productos-remotos.js'
+          back='app/Http/Controllers/ProductoComercialControlador.php'
+          css='assets/css/stock-ficha-v98.css'
+          guards={'recepcion.guard':'/htdocs/api-v2/app/Http/Controllers/RecepcionesBorradorControlador.php','consulta.guard':'/htdocs/api-v2/app/Http/Controllers/ComprasConsultasControlador.php','compras-js.guard':'/htdocs/assets/js/compras-consultas-v66.js','pdf.guard':'/htdocs/api-v2/app/Services/PdfRecepcionCompra.php','root.guard':'/htdocs/.htaccess','api.guard':'/htdocs/api/.htaccess','private.guard':'/htdocs/api-v2/.htaccess','gateway.guard':'/htdocs/api/index.php'}
+          def remote(n):return guards.get(n,('/htdocs/api-v2/' if n==back else '/htdocs/')+n)
+          def get(f,n):
+              b=io.BytesIO();f.retrbinary('RETR '+remote(n),b.write);return b.getvalue()
+          def absent(f,n):
+              try:get(f,n);return False
+              except ftplib.error_perm as e:
+                  if str(e).startswith('550'):return True
+                  raise
+          def put(f,n,b):f.storbinary('STOR '+remote(n),io.BytesIO(b))
+          def save(area,n,b):
+              d=p/area/n;d.parent.mkdir(parents=True,exist_ok=True);d.write_bytes(b)
+          def read(area,n):return (p/area/n).read_bytes()
+          def verify_before(f):
+              assert absent(f,css),'CSS V98 ya existente'
+              for n in [index,js,back,*guards]:assert get(f,n)==read('before',n),n
+          class Links(HTMLParser):
+              def __init__(self):super().__init__();self.links=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='link' and a.get('rel')=='stylesheet':
+                      href=a.get('href','').split('?')[0].lstrip('/')
+                      if re.fullmatch(r'assets/css/[A-Za-z0-9_.-]+\.css',href):self.links.append(href)
+          f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=45)
+          f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
+          with f:
+              mode=sys.argv[1]
+              if mode=='prepare':
+                  for n in [index,js,back,*guards]:save('before',n,get(f,n))
+                  src=read('before',index).decode()
+                  assert src.count('</head>')==1 and 'paginadores-v96.css?v=20261125-v96' in src and 'compras-consultas-v66.js?v=20261125-v97' in src and 'productos-remotos.js?v=20261124-v66' in src
+                  assert read('before',js)==(p/'old.js').read_bytes(),'JS productivo diferente a la base auditada'
+                  save('after',js,(p/'new.js').read_bytes())
+                  import subprocess
+                  assert read('before',back)==subprocess.check_output(['git','show','363e988c7ec05f52ee28df05a9940fd926f0843e:'+back]),'Backend productivo distinto de base auditada'
+                  save('after',back,pathlib.Path(back).read_bytes())
+                  assert absent(f,css),'CSS V98 ya existente'
+                  save('after','absent-css.txt',css.encode())
+                  save('after',css,(p/'new.css').read_bytes())
+                  src=src.replace('productos-remotos.js?v=20261124-v66','productos-remotos.js?v=20261125-v98',1)
+                  src=src.replace('</head>','  <link rel="stylesheet" href="assets/css/stock-ficha-v98.css?v=20261125-v98">\n</head>',1)
+                  save('after',index,src.encode())
+                  parser=Links();parser.feed(src)
+                  assert 'assets/css/app.css' in parser.links and 'assets/css/tipos-documentos-v63.css' in parser.links
+                  for i,n in enumerate(parser.links):save('styles',f'{i:03d}.css',get(f,n))
+                  print('V98_PRECHECK_OK',len(parser.links))
+              elif mode=='publish':
+                  verify_before(f)
+                  (p/'attempted').touch()
+                  for n in [back,css,js,index]:
+                      with (p/'attempted').open('a') as log:log.write(n+'\n')
+                      put(f,n,read('after',n))
+                  for n in [back,css,js,index]:assert get(f,n)==read('after',n),n
+                  for n in guards:assert get(f,n)==read('before',n),n
+                  print('V98_FTPS_BYTES_OK')
+              elif mode=='rollback':
+                  for n in reversed((p/'attempted').read_text().splitlines()):
+                      if n==css:
+                          if not absent(f,n):f.delete(remote(n))
+                      else:put(f,n,read('before',n))
+                  verify_before(f)
+                  print('V98_ROLLBACK_OK')
+          PY
+          python /tmp/v98/transport.py prepare
+      - name: Validar ficha real con stock por bodega
+        run: |
+          set -euo pipefail
+          cd /tmp/v98/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import {readdirSync} from 'node:fs';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({viewport:{width:1440,height:900},reducedMotion:'reduce'});
+            await page.route('**/*',r=>r.abort());
+            await page.setContent('<main id="root"></main>');
+            for(const f of readdirSync('/tmp/v98/styles').sort())await page.addStyleTag({path:'/tmp/v98/styles/'+f});
+            await page.addScriptTag({path:'/tmp/v98/new.js'});
+            await page.addStyleTag({path:'/tmp/v98/new.css'});
+            await page.evaluate(()=>{
+              window.RutaHDAccesos={authenticated:()=>true,has:()=>true};
+              const p={id:7,sku:'CI-07',nombre:'Producto CI',activo:true,clasificacion:{},stock:'100',existencias:{bodegas:[{bodega_id:1,bodega:'Central',activo:true,disponible:'12.125',transito:'2',comprometido:'1',cantidad_fisica:'15.125'},{bodega_id:2,bodega:'Sucursal',activo:true,disponible:'3',transito:'4',comprometido:'0',cantidad_fisica:'7'},{bodega_id:3,bodega:'Sin stock',activo:true,disponible:'0',transito:'0',comprometido:'0',cantidad_fisica:'0'},{bodega_id:4,bodega:'Histórica',activo:false,disponible:'1',transito:'0',comprometido:'0',cantidad_fisica:'1'}],totales:{disponible:'16.125',transito:'6',comprometido:'1',cantidad_fisica:'23.125'}}};
+              window.RutaHDApiCatalogos={products:async()=>({data:[p],last_page:1,total:1}),getProduct:async()=>p};
+              window.RutaHDProductosRemotos.mount(document.getElementById('root'));
+            });
+            await page.getByRole('button',{name:'Ver',exact:true}).click();
+            const d=page.locator('dialog[open]'), table=d.locator('.hd98-stock-table');
+            await table.getByText('Central',{exact:true}).waitFor();
+            await table.getByText('Sucursal',{exact:true}).waitFor();
+            await table.getByText('Sin stock',{exact:true}).waitFor();
+            await table.getByText('Inactiva',{exact:true}).waitFor();
+            const total=await table.locator('tfoot td').allTextContents();
+            if(JSON.stringify(total)!==JSON.stringify(['16,125','6','1','23,125']))throw Error(JSON.stringify(total));
+            if(await d.locator('.hd98-stock input').count())throw Error('Stock editable');
+            await d.getByText('Inventario anterior de la presentación principal: 100.',{exact:false}).waitFor();
+            for(const width of [1440,390]){
+              await page.setViewportSize({width,height:844});
+              const result=await d.evaluate(e=>({width:e.getBoundingClientRect().width,viewport:innerWidth,scroll:e.querySelector('.hd98-stock .product-detail-table-scroll').clientWidth,table:e.querySelector('.hd98-stock-table').clientWidth}));
+              if(result.width>result.viewport+1||result.scroll>result.viewport)throw Error(JSON.stringify(result));
+            }
+            console.log('V98_UI_OK');
+          }finally{await browser.close();}
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v98-respaldo-previo
+          path: /tmp/v98/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar y cotejar bytes
+        run: python /tmp/v98/transport.py publish
+      - name: Verificar carga V98 y protección de ficha
+        run: |
+          set -euo pipefail
+          cd /tmp/v98/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage();
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>[...document.styleSheets].some(s=>s.href?.includes('stock-ficha-v98.css?v=20261125-v98')&&s.cssRules.length>=10),null,{timeout:45000});
+            const result=await page.evaluate(async()=>({auth:(await fetch('/api/v1/productos/1',{headers:{Accept:'application/json'}})).status,density:getComputedStyle(document.documentElement).getPropertyValue('--hd-form-control').trim(),v86:[...document.scripts].some(s=>s.src.includes('productos-remotos.js?v=20261125-v98'))}));
+            if(response?.status()!==200||result.density!=='30px'||!result.v86||result.auth!==401||errors.length)throw Error(JSON.stringify({result,errors}));
+            console.log('V98_PUBLIC_OK');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar originales si falla la publicación
+        if: failure()
+        run: |
+          if [ -f /tmp/v98/attempted ]; then python /tmp/v98/transport.py rollback; fi

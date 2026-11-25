@@ -67,3 +67,9 @@ Origen: instrucción expresa del titular del proyecto.
 - Solo declarar «publicado y verificado técnicamente» cuando el workflow concluya SUCCESS y exista evidencia de las comprobaciones previstas. Separar siempre verificación técnica de aceptación funcional autenticada y de funcionalidades todavía pendientes.
 - Si el workflow continúa en cola o ejecución al alcanzarse el límite operativo de la sesión, informar su estado exacto, enlace e hitos pendientes; nunca afirmar éxito, prometer seguimiento en segundo plano sin automatización autorizada ni iniciar otra publicación mientras exista una ejecución activa. Retomar la misma ejecución por su ID en la siguiente revisión.
 - Incorporar al diario de continuidad el resultado final comprobado, enlace de la ejecución, alcance real, respaldo/rollback y pendientes, de modo que la siguiente sesión no repita trabajo terminado.
+
+## Regla obligatoria de recepción directa e inventario — V95 (2026-11-25)
+- Confirmación expresa del titular: una recepción directa (única, completa, cuadrada y sin consolidación) ingresa inmediatamente al stock disponible y aumenta la existencia física una sola vez. No genera entrada ni transferencia a tránsito, ni exige consolidación.
+- En la misma transacción se actualiza CPP según V77, costo de entrada, Kardex de ENTRADA_DIRECTA con tipo documental y folio original, libro de compras y estado RECEPCIONADA de la OC.
+- Recepciones parciales, múltiples vigentes o descuadradas mantienen tránsito hasta consolidación; ésta libera tránsito a disponible sin incrementar nuevamente el físico. Reservas de venta corresponden a comprometido, no a tránsito.
+- La opción de completar cierre directo histórico sólo regulariza recepciones anteriores acreditadas en tránsito; nunca es un paso de una recepción directa nueva. No duplicar stock ni movimientos. Mantener esta regla en cambios futuros y pruebas focalizadas.

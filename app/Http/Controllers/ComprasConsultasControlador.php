@@ -40,8 +40,8 @@ final class ComprasConsultasControlador
                 ->join('bodegas as b','b.id','=','s.bodega_id')
                 ->select('s.id','p.sku','p.nombre as producto','b.nombre as bodega','s.disponible','s.transito','s.comprometido','s.cantidad_fisica'),
             'kardex'=>DB::table('kardex as k')->join('productos as p','p.id','=','k.producto_id')
-                ->join('bodegas as b','b.id','=','k.bodega_id')
-                ->select('k.id','p.sku','p.nombre as producto','b.nombre as bodega','k.fecha_movimiento','k.operacion_codigo','k.cantidad_documento','k.fisico_anterior','k.fisico_actual','k.costo_unitario_neto'),
+                ->join('bodegas as b','b.id','=','k.bodega_id')->leftJoin('tipo_documentos as td','td.id','=','k.tipo_documento_id')
+                ->select('k.id','p.sku','p.nombre as producto','b.nombre as bodega','k.fecha_movimiento','k.operacion_codigo','k.tipo_documento_id','td.nombre as tipo_documento','k.folio_documento','k.cantidad_documento','k.fisico_anterior','k.fisico_actual','k.costo_unitario_neto'),
             'libro'=>DB::table('libro_compras as l')->join('compras as c','c.id','=','l.compra_id')
                 ->join('estados as e','e.id','=','c.estado_id')->leftJoin('ordenes_compra as oc','oc.id','=','c.orden_compra_id')->join('tipo_documentos as td','td.id','=','l.documento_id')->where('e.codigo','<>','NULA')
                 ->select('l.id','l.periodo_tributario','l.folio','l.fecha_documento','oc.numero as orden_compra','td.nombre as documento','l.rut_emisor','l.razon_social_emisor','l.monto_neto','l.monto_exento','l.monto_iva_recuperable','l.monto_iva_no_recuperable','l.monto_iva_uso_comun','l.monto_impuestos_adicionales','l.monto_retenciones','l.monto_total','l.signo_contable','l.estado_rcv'),

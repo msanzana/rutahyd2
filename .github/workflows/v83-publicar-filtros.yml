@@ -1,0 +1,216 @@
+name: V83 - Publicar filtros avanzados de compras e inventario
+on:
+  push:
+    branches: [deploy/v83-filtros-consultas-20261125]
+    paths: [.github/workflows/v83-publicar-filtros.yml]
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Obtener fuentes fijadas y validar sintaxis
+        run: |
+          set -euo pipefail
+          git clone -q --depth=1 --branch feature/v83-filtros-consultas-20261125 https://github.com/msanzana/rutahyd2front.git /tmp/front67
+          git -C /tmp/front67 fetch -q --depth=1 origin 77ec298dcc3796af2118112c8f6a32de331ac155 2a68f12e4180c81ecd6283f0014b60805f469782
+          mkdir -p /tmp/v83
+          cat > /tmp/v83/transport.py <<'PY'
+          import os,ssl,ftplib,io,pathlib,subprocess,re,sys
+          p=pathlib.Path('/tmp/v83')
+          back='app/Http/Controllers/ComprasConsultasControlador.php'
+          front=['assets/js/compras-consultas-v66.js']
+          files=[back]+front+['index.html']
+          guards={'root.guard':'/htdocs/.htaccess','api.guard':'/htdocs/api/.htaccess','private.guard':'/htdocs/api-v2/.htaccess','gateway.guard':'/htdocs/api/index.php'}
+          def remote(n):return guards.get(n,('/htdocs/api-v2/' if n==back else '/htdocs/')+n)
+          def get(f,n):
+              b=io.BytesIO();f.retrbinary('RETR '+remote(n),b.write);return b.getvalue()
+          def put(f,n,b):f.storbinary('STOR '+remote(n),io.BytesIO(b))
+          def save(area,n,b):
+              d=p/area/n;d.parent.mkdir(parents=True,exist_ok=True);d.write_bytes(b)
+          def read(area,n):return (p/area/n).read_bytes()
+          def git(repo,ref,n):return subprocess.check_output(['git','-C',repo,'show',ref+':'+n])
+          f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=45)
+          f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
+          with f:
+              mode=sys.argv[1]
+              if mode=='prepare':
+                  for n in files+list(guards):save('before',n,get(f,n))
+                  for n in [back]+front:
+                      repo=os.environ['GITHUB_WORKSPACE'] if n==back else '/tmp/front67'
+                      old='7c01ffe85b56ac55053b35009432b6b5e15eb9c6' if n==back else '77ec298dcc3796af2118112c8f6a32de331ac155'
+                      new='31e260847c6ba6b681944e1f6adcf1fd3aaa2bb3' if n==back else '2a68f12e4180c81ecd6283f0014b60805f469782'
+                      assert old!=new,'Base y destino idénticos'
+                      if read('before',n)==git(repo,old,n):save('after',n,git(repo,new,n))
+                      else:
+                          save('after',n,read('before',n))
+                          delta=subprocess.check_output(['git','-C',repo,'diff','--binary',old,new,'--',n])
+                          assert delta.count(b'diff --git')==1,n
+                          subprocess.run(['patch','--batch','--fuzz=0','-p1','-d',str(p/'after')],input=delta,check=True)
+                  html=read('before','index.html').decode()
+                  for n in front:
+                      pattern=re.escape(n)+r'\?v=[^"\s]+'
+                      matches=re.findall(pattern,html)
+                      assert len(matches)==1,(n,matches)
+                      html=html.replace(matches[0],n+'?v=20261125-v83',1)
+                  save('after','index.html',html.encode())
+                  print('V83_PRECHECK_OK')
+              elif mode=='publish':
+                  for n in files+list(guards):assert get(f,n)==read('before',n),n
+                  (p/'attempted').touch()
+                  for n in files:
+                      with (p/'attempted').open('a') as log:log.write(n+'\n')
+                      put(f,n,read('after',n))
+                  for n in files:assert get(f,n)==read('after',n),n
+                  for n in guards:assert get(f,n)==read('before',n),n
+                  print('V83_FTPS_BYTES_OK')
+              elif mode=='rollback':
+                  for n in reversed((p/'attempted').read_text().splitlines()):put(f,n,read('before',n))
+                  for n in files+list(guards):assert get(f,n)==read('before',n),n
+                  print('V83_ROLLBACK_OK')
+          PY
+          python /tmp/v83/transport.py prepare
+          node --check /tmp/v83/after/assets/js/compras-consultas-v66.js
+          php -l /tmp/v83/after/app/Http/Controllers/ComprasConsultasControlador.php
+      - name: Probar formularios aislados antes de publicar
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v83/browser
+          cd /tmp/v83/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            // Contexto independiente: no tocar el login real ni enviar operaciones a producción.
+            const ui=await browser.newPage({viewport:{width:1440,height:900}});
+            await ui.route('**/*',route=>route.abort());
+            await ui.setContent('<main id="v83-test-root"></main>');
+            await ui.addStyleTag({path:'/tmp/front67/assets/css/tipos-documentos-v63.css'});
+            await ui.evaluate(()=>{
+              window.RutaHDApiCatalogos=Object.freeze({
+                purchaseConsultation:async(key,page,buscar,filters)=>{window.lastFilters={key,page,buscar,filters};return {total:0,last_page:1,data:[],bodegas:[{id:1,nombre:'Bodega central'}]};},
+                documentTypes:async()=>({last_page:1,data:[{id:1,nombre:'Factura electrónica',documento_compra:1,familia:'FACTURA',codigo_sii:33},{id:2,nombre:'Factura exenta',documento_compra:1,familia:'FACTURA',codigo_sii:34}]}),
+                resources:async()=>({last_page:1,data:[{id:1,nombre:'Bodega central',activo:1}]}),
+                orderStates:async()=>({items:[{id:1,codigo:'ACTIVA'}]}),
+                purchaseOrders:async({estadoId})=>{if(estadoId!==1)throw Error('Estado activo no aplicado');return {total:1,last_page:1,data:[{id:123,numero:'OC-PRUEBA',estado_codigo:'ACTIVA',proveedor_nombre:'Proveedor simulado'}]};},
+                getPurchaseOrder:async(id)=>{if(id!==123)throw Error('OC incorrecta');return {id:123,numero:'OC-PRUEBA',estado_codigo:'ACTIVA',proveedor_nombre:'Proveedor simulado',detalles:[{sku:'SKU-PRUEBA',nombre:'Producto simulado',cantidad:2,costo_unitario_neto:100,subtotal_neto:200}]};}
+              });
+            });
+            await ui.addScriptTag({path:'/tmp/v83/after/assets/js/compras-consultas-v66.js'});
+            for(const key of ['recepciones','consolidaciones']){
+              await ui.evaluate(key=>window.RutaHDComprasConsultas.mount(document.getElementById('v83-test-root'),key),key);
+              const root=ui.locator('#v83-test-root');
+              await root.getByLabel('Proveedor',{exact:true}).fill('Proveedor prueba');
+              await root.getByLabel('Orden de compra',{exact:true}).fill('OC-123');
+              await root.getByLabel('Bodega',{exact:true}).selectOption('1');
+              await root.getByLabel('Desde',{exact:true}).fill('2026-11-01');
+              await root.getByLabel('Hasta',{exact:true}).fill('2026-11-30');
+              await root.getByRole('button',{name:'Buscar',exact:true}).click();
+              await ui.waitForFunction(()=>window.lastFilters?.filters?.proveedor==='Proveedor prueba');
+              const filters=await ui.evaluate(()=>window.lastFilters.filters);
+              if(filters.orden_compra!=='OC-123'||filters.bodega_id!=='1'||filters.desde!=='2026-11-01'||filters.hasta!=='2026-11-30')throw Error('Filtros incompletos');
+              await root.getByRole('button',{name:'Limpiar',exact:true}).click();
+              await ui.waitForFunction(()=>Object.keys(window.lastFilters.filters).length===0);
+              console.log('V83_FILTROS_OK',key);
+              const button=ui.locator('#v83-test-root [data-action="nuevo-documento"]');
+              if(await button.count()!==1)throw Error('No existe botón '+key);
+              await button.click({timeout:10000});
+              const dialog=ui.locator('dialog.hd-doc-modal');
+              await dialog.waitFor({state:'visible',timeout:10000});
+              if(!(await dialog.locator('h2').textContent()).includes(key==='recepciones'?'Nueva recepción':'Nueva consolidación'))throw Error('Título incorrecto');
+              await dialog.getByRole('button',{name:'Seleccionar orden OC-PRUEBA'}).click({timeout:10000});
+              if(await dialog.getByRole('radio').count())throw Error('Radio no eliminado');
+              await dialog.getByText('SKU-PRUEBA',{exact:true}).waitFor({state:'visible',timeout:10000});
+              const save=dialog.getByRole('button',{name:key==='recepciones'?'Guardar recepción':'Guardar consolidación',exact:true});
+              if(!(await save.isVisible())||!(await save.isDisabled()))throw Error('Guardado debe quedar visible y bloqueado');
+              if(key==='recepciones'){
+                await dialog.locator('#hd-recepcion-documento-tipo').selectOption('1',{timeout:10000});
+                await dialog.locator('#hd-recepcion-bodega').selectOption('1',{timeout:10000});
+                await dialog.getByLabel('Folio del documento',{exact:true}).fill('12345');
+                await dialog.getByLabel('Cantidad recibida SKU-PRUEBA').fill('2');
+                const cost=dialog.getByLabel('Costo documento SKU-PRUEBA',{exact:true});
+                if(await dialog.locator('#hd-recepcion-subtotal-recibido').inputValue()!=='')throw Error('Costo ausente no detectado');
+                await cost.fill('120.1234');
+                if(await dialog.locator('#hd-recepcion-subtotal-recibido').inputValue()!=='240')throw Error('Subtotal costo real incorrecto');
+                await cost.fill('-1');
+                if(await cost.evaluate(e=>e.checkValidity()))throw Error('Costo negativo aceptado');
+                await cost.fill('12.12345');
+                if(await cost.evaluate(e=>e.checkValidity()))throw Error('Precisión inválida aceptada');
+                await cost.fill('0');
+                if(await cost.evaluate(e=>e.checkValidity()))throw Error('Cero sin confirmación aceptado');
+                await dialog.getByLabel('Confirmar costo cero SKU-PRUEBA',{exact:true}).check();
+                if(await dialog.locator('#hd-recepcion-subtotal-recibido').inputValue()!=='0')throw Error('Costo cero confirmado incorrecto');
+                await cost.fill('100');
+                console.log('V83_COSTOS_OK');
+                await dialog.locator('#hd-recepcion-neto').fill('100000');
+                await dialog.locator('#hd-recepcion-exento').fill('20000');
+                await dialog.locator('#hd-recepcion-otros').fill('3000');
+                await dialog.locator('#hd-recepcion-total-documento').fill('142100');
+                for(const [id,expected] of Object.entries({iva:'19000',total:'142000',diferencia:'100','subtotal-recibido':'200'})){
+                  const actual=await dialog.locator('#hd-recepcion-'+id).inputValue();
+                  if(actual!==expected)throw Error(id+' esperado '+expected+' obtenido '+actual);
+                }
+                await dialog.locator('#hd-recepcion-documento-tipo').selectOption('2');
+                if(await dialog.locator('#hd-recepcion-iva').inputValue()!=='0')throw Error('IVA en documento exento');
+                if(await dialog.locator('#hd-recepcion-total').inputValue()!=='123000')throw Error('Total exento incorrecto');
+                await dialog.locator('#hd-recepcion-documento-tipo').selectOption('1');
+                await dialog.locator('#hd-recepcion-total-documento').fill('142000');
+                if(await dialog.locator('#hd-recepcion-diferencia').inputValue()!=='0')throw Error('Diferencia no recalculada');
+                console.log('V83_TOTALES_OK');
+              }
+              const aligned=await ui.evaluate(()=>{const b=document.querySelector('[data-action="nuevo-documento"]'),s=b.closest('form').querySelector('button[type=submit]');return Math.abs(b.getBoundingClientRect().bottom-s.getBoundingClientRect().bottom)<2;});
+              if(!aligned)throw Error('Botones fuera de alineación');
+              await dialog.getByRole('button',{name:'Cerrar',exact:true}).last().click({timeout:10000});
+              await dialog.waitFor({state:'detached',timeout:10000});
+              console.log('V83_UI_OK',key);
+            }
+            await ui.close();
+            console.log('V83_UI_PREPUBLICACION_OK');
+          }finally{await browser.close();}
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v83-respaldo-previo
+          path: /tmp/v83/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar y cotejar bytes
+        run: python /tmp/v83/transport.py publish
+      - name: Verificar carga y protección JWT
+        run: |
+          set -euo pipefail
+          cd /tmp/v83/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage();const errors=[];
+            page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>!!window.RutaHDComprasConsultas?.mount,null,{timeout:45000});
+            const result=await page.evaluate(async()=>{
+              const version=[...document.scripts].some(s=>s.src.includes('compras-consultas-v66.js?v=20261125-v83'));
+              const status=(await fetch('/api/v1/inventario-consultas/kardex',{headers:{Accept:'application/json'},cache:'no-store'})).status;
+              return {version,status};
+            });
+            if(response?.status()!==200||!result.version||result.status!==401||errors.length)throw Error(JSON.stringify({result,errors}));
+            console.log('V83_PUBLIC_OK');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar originales si falla la publicación
+        if: failure()
+        run: |
+          if [ -f /tmp/v83/attempted ]; then python /tmp/v83/transport.py rollback; fi

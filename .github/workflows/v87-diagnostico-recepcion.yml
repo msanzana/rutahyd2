@@ -1,4 +1,4 @@
-name: V87 - Diagnostico recepcion solo lectura
+name: V88 - Diagnostico nuevo error recepcion solo lectura
 on:
   push:
     branches: [diagnostico/v87-recepcion-20261125]
@@ -17,10 +17,15 @@ jobs:
       - name: Identificar excepcion sin exponer datos
         run: |
           python - <<'PY'
-          import ftplib,ssl,os,re,collections
+          import ftplib,ssl,os,re,collections,hashlib,io
           f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=40)
           f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
           with f:
+              b=io.BytesIO()
+              f.retrbinary('RETR /htdocs/api-v2/app/Http/Controllers/RecepcionesBorradorControlador.php',b.write)
+              data=b.getvalue()
+              blob=hashlib.sha1(('blob '+str(len(data))+'\x00').encode()+data).hexdigest()
+              print('CONTROLADOR_COINCIDE_V87',blob=='0c734171c0143e28f4e67ef70371c04b2e995525')
               try:
                   paths=[p for p in f.nlst('/htdocs/api-v2/storage/logs') if re.search(r'(?:^|/)laravel(?:-\d{4}-\d{2}-\d{2})?\.log$',p)]
               except ftplib.error_perm:
@@ -29,12 +34,12 @@ jobs:
               found=0
               for p in sorted(paths)[-3:]:
                   if not p.startswith('/'):p='/htdocs/api-v2/storage/logs/'+p.rsplit('/',1)[-1]
-                  chunks=collections.deque(maxlen=256)
+                  chunks=collections.deque(maxlen=512)
                   try:f.retrbinary('RETR '+p,chunks.append,blocksize=8192)
                   except ftplib.error_perm:continue
                   s=b''.join(chunks).decode('utf-8','replace')
                   records=re.split(r'(?=^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\])',s,flags=re.M)
-                  for r in [r for r in records if 'RecepcionesBorradorControlador' in r][-8:]:
+                  for r in [r for r in records if 'RecepcionesBorradorControlador' in r][-12:]:
                       found+=1
                       date=re.match(r'\[([\d :\-]+)\]',r)
                       print('INCIDENTE',date.group(1) if date else 'sin fecha')

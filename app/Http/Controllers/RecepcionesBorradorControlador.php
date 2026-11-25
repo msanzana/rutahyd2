@@ -71,7 +71,7 @@ final class RecepcionesBorradorControlador
         $details=DB::table('recepcion_detalle')->where('recepcion_id',$id)->orderBy('numero_linea')->get();
         $diff=DB::table('recepcion_diferencias')->where('recepcion_id',$id)->orderBy('id')->get();
         $eligible=$r->estado==='RECEPCIONADA'&&$r->stock_aplicado&&$r->token_confirmacion&&$diff->isEmpty()&&$this->directa($r,$details,'cantidad_aceptada');
-        return response()->json(['recepcion'=>$r,'detalles'=>$details,'diferencias'=>$diff,'completar_cierre_directo'=>(bool)$eligible]);
+        return response()->json(['recepcion'=>$r,'detalles'=>$details,'diferencias'=>$diff,'completar_cierre_directo'=>(bool)$eligible,'orden_cerrada'=>DB::table('ordenes_compra as o')->join('estados as e','e.id','=','o.estado_id')->where('o.id',$r->orden_compra_id)->where('e.codigo','RECEPCIONADA')->exists()]);
     }
 
     /** V74A: revisión de cierre, exclusivamente de lectura. No confirma existencias. */

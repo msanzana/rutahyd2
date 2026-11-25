@@ -10,7 +10,7 @@ final class ComprasConsultasControlador
 {
     public function listar(Request $request, string $modulo)
     {
-        $v=$request->validate(['page'=>'sometimes|integer|min:1','buscar'=>'nullable|string|max:120','producto_id'=>'nullable|integer|min:1','bodega_id'=>'nullable|integer|min:1','estado'=>'nullable|in:ACTIVA,PENDIENTE,RECEPCIONADA,DESCUADRADA,FINALIZADA,CONSOLIDADA','proveedor'=>'nullable|string|max:120','orden_compra'=>'nullable|string|max:80','desde'=>'nullable|date_format:Y-m-d','hasta'=>'nullable|date_format:Y-m-d|after_or_equal:desde']);
+        $v=$request->validate(['page'=>'sometimes|integer|min:1','exportar'=>'nullable|in:1','buscar'=>'nullable|string|max:120','producto_id'=>'nullable|integer|min:1','bodega_id'=>'nullable|integer|min:1','estado'=>'nullable|in:ACTIVA,PENDIENTE,RECEPCIONADA,DESCUADRADA,FINALIZADA,CONSOLIDADA','proveedor'=>'nullable|string|max:120','orden_compra'=>'nullable|string|max:80','desde'=>'nullable|date_format:Y-m-d','hasta'=>'nullable|date_format:Y-m-d|after_or_equal:desde']);
         if($modulo==='kardex'){
             if(!$request->filled('producto_id')){
                 $q=DB::table('productos')->select('id','sku','nombre as producto');
@@ -38,8 +38,8 @@ final class ComprasConsultasControlador
                 ->join('bodegas as b','b.id','=','k.bodega_id')
                 ->select('k.id','p.sku','p.nombre as producto','b.nombre as bodega','k.fecha_movimiento','k.operacion_codigo','k.cantidad_documento','k.fisico_anterior','k.fisico_actual','k.costo_unitario_neto'),
             'libro'=>DB::table('libro_compras as l')->join('compras as c','c.id','=','l.compra_id')
-                ->join('estados as e','e.id','=','c.estado_id')->leftJoin('ordenes_compra as oc','oc.id','=','c.orden_compra_id')->where('e.codigo','<>','NULA')
-                ->select('l.id','l.periodo_tributario','l.folio','l.fecha_documento','oc.numero as orden_compra','l.rut_emisor','l.razon_social_emisor','l.monto_neto','l.monto_exento','l.monto_iva_recuperable','l.monto_total','l.signo_contable','l.estado_rcv'),
+                ->join('estados as e','e.id','=','c.estado_id')->leftJoin('ordenes_compra as oc','oc.id','=','c.orden_compra_id')->join('tipo_documentos as td','td.id','=','l.documento_id')->where('e.codigo','<>','NULA')
+                ->select('l.id','l.periodo_tributario','l.folio','l.fecha_documento','oc.numero as orden_compra','td.nombre as documento','l.rut_emisor','l.razon_social_emisor','l.monto_neto','l.monto_exento','l.monto_iva_recuperable','l.monto_iva_no_recuperable','l.monto_iva_uso_comun','l.monto_impuestos_adicionales','l.monto_retenciones','l.monto_total','l.signo_contable','l.estado_rcv'),
             default=>abort(404)
         };
         if($modulo==='kardex')$q->where('k.producto_id',$v['producto_id'])->where('k.bodega_id',$v['bodega_id']);
@@ -74,6 +74,12 @@ final class ComprasConsultasControlador
                 if($modulo==='libro')$w->orWhere('l.folio','like','%'.$buscar.'%')->orWhere('l.razon_social_emisor','like','%'.$buscar.'%');
                 if(in_array($modulo,['recepciones','consolidaciones'],true))$w->orWhere('e.codigo','like','%'.$buscar.'%')->orWhere('r.numero_interno','like','%'.$buscar.'%')->orWhere('p.nombre','like','%'.$buscar.'%')->orWhere('oc.numero','like','%'.$buscar.'%');
             });
+        }
+        if($request->filled('exportar')){
+            abort_unless($modulo==='libro',422,'La exportación solo corresponde al Libro de compras.');
+            $rows=$q->orderByDesc($alias.'.id')->limit(5001)->get();
+            abort_if($rows->count()>5000,422,'La exportación supera 5.000 registros. Acote las fechas o el proveedor.');
+            return response()->json(['data'=>$rows,'total'=>$rows->count()])->header('Cache-Control','private, no-store');
         }
         $data=$q->orderByDesc($alias.'.id')->paginate(25)->toArray();
         if(in_array($modulo,['recepciones','consolidaciones','stock'],true))$data['bodegas']=DB::table('bodegas')->where('activo',1)->orderBy('nombre')->get(['id','nombre']);

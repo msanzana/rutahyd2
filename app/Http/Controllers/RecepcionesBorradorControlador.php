@@ -352,7 +352,8 @@ final class RecepcionesBorradorControlador
                     $taxRec=$exLine?0:$this->iva($recMoney);
                     $rd=['recepcion_id'=>$rid,'numero_linea'=>$num,'producto_id'=>$o->producto_id,'compra_detalle_id'=>$cdId,
                       'detalle_orden_compra_id'=>$lineId,'cantidad_documentada'=>$qd,'cantidad_recibida'=>$qr,
-                      'cantidad_aceptada'=>0,'cantidad_rechazada'=>0,'costo_unitario_neto'=>$cost,
+                      // Distribución provisional del conteo: no implica cierre ni aplicación de stock.
+                      'cantidad_aceptada'=>$qr,'cantidad_rechazada'=>0,'costo_unitario_neto'=>$cost,
                       'monto_neto'=>$exLine?0:$recMoney,'monto_exento'=>$exLine?$recMoney:0,'monto_iva'=>$taxRec,'total'=>$recMoney+$taxRec];
                     if($prev)DB::table('recepcion_detalle')->where('id',$prev->id)->update($rd);
                     else DB::table('recepcion_detalle')->insert($rd);

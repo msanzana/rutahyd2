@@ -160,6 +160,7 @@ final class ConsolidacionesControlador
             $review=$this->current($id);
             abort_unless(hash_equals($review['huella'],$v['huella']),409,'Cambió la consolidación. Revise nuevamente.');
             abort_unless($review['cierre_habilitado'],409,implode(' ',$review['bloqueos']));
+            abort_unless(DB::table('bodegas')->where('id',$c->bodega_id)->where('activo',1)->lockForUpdate()->first(),409,'Bodega no activa.');
             $doc=DB::table('tipo_documentos')->where('codigo','CONSOLIDACION_RECEPCION')->where('codigo_sii',0)->where('activo',1)->where('documento_compra',1)->where('familia','INTERNO')->first();
             abort_unless($doc,409,'Documento interno de consolidación no configurado.');
             $target=$this->estado('CONSOLIDACION_RECEPCION','CONSOLIDADA');$ocTarget=$this->estado('ORDEN_COMPRA','RECEPCIONADA');
@@ -189,7 +190,7 @@ final class ConsolidacionesControlador
                 foreach($bals as $s){$a=$this->decimal($s->disponible);$t=$this->decimal($s->transito);$m=$this->decimal($s->comprometido);$f=$this->decimal($s->cantidad_fisica);
                     abort_unless(!$a->isNegative()&&!$t->isNegative()&&!$m->isNegative()&&$f->isEqualTo($a->plus($t)->plus($m)),409,'Stock inconsistente.');
                     $oldQty=$oldQty->plus($a)->plus($m);if((int)$s->bodega_id===(int)$c->bodega_id)$stock=$s;}
-                $q=$byProduct[$pid]['q'];$value=$byProduct[$pid]['v']->toScale(8,RoundingMode::HALF_UP);
+                $q=$byProduct[$pid]['q'];$value=$byProduct[$pid]['v']->toScale(16,RoundingMode::UNNECESSARY);
                 abort_unless($stock&&$this->decimal($stock->transito)->isGreaterThanOrEqualTo($q),409,'Tránsito insuficiente.');
                 $oldCpp=$this->decimal($p->costo_promedio_ponderado);$base=$oldCpp;$source='CPP_VIGENTE';
                 if($oldQty->isZero()){$base=BigDecimal::zero();$source='SIN_STOCK_VALORIZADO';}
@@ -198,8 +199,8 @@ final class ConsolidacionesControlador
                     if($last){$base=$this->decimal($last->cpp_actual);$source='CPP_ULTIMA_ENTRADA_KARDEX';}
                     else{$base=$this->decimal($p->costo_neto);$source='COSTO_NETO_INICIAL';abort_unless($base->isPositive(),409,'CPP cero con stock previo sin costo comprobable. Regularice antes de cerrar.');}
                 }
-                $prior=$oldQty->multipliedBy($base)->toScale(8,RoundingMode::HALF_UP);
-                $calc=(new CostoPromedioPonderado())->calcular($this->saldo($oldQty),(string)$oldCpp,$this->saldo($q),$this->saldo($value),$this->saldo($prior));
+                $prior=$oldQty->multipliedBy($base)->toScale(16,RoundingMode::UNNECESSARY);
+                $calc=(new CostoPromedioPonderado())->calcular($this->saldo($oldQty),(string)$oldCpp,$this->saldo($q),(string)$value,(string)$prior);
                 $newCpp=$calc['cpp_posterior'];$newCost=$this->saldo($value->dividedBy($q,4,RoundingMode::HALF_UP),4);
                 $a=$this->decimal($stock->disponible);$t=$this->decimal($stock->transito);$m=$this->decimal($stock->comprometido);$f=$this->decimal($stock->cantidad_fisica);
                 // Una entrada por línea consolidada; CPP final global, no promedio de promedios.

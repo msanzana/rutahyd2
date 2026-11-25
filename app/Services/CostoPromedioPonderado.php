@@ -24,9 +24,9 @@ final class CostoPromedioPonderado
         $s = $this->decimal($stockAnterior);
         $c = $this->decimal($cppAnterior);
         $q = $this->decimal($cantidadEntrada);
-        $v = $this->decimal($valorEntrada);
+        $v = $this->decimal($valorEntrada, true);
         $historico = $valorAnteriorVerificado === null
-            ? null : $this->decimal($valorAnteriorVerificado);
+            ? null : $this->decimal($valorAnteriorVerificado, true);
         if ($q->isZero()) {
             throw new DomainException('La entrada valorizada debe tener cantidad positiva.');
         }
@@ -64,9 +64,9 @@ final class CostoPromedioPonderado
         ];
     }
 
-    private function decimal(string $valor): BigDecimal
+    private function decimal(string $valor, bool $monetario=false): BigDecimal
     {
-        if (!preg_match('/\A[0-9]{1,20}(?:\.[0-9]{1,8})?\z/', $valor)) {
+        if (!preg_match($monetario ? '/\A[0-9]{1,40}(?:\.[0-9]{1,16})?\z/' : '/\A[0-9]{1,20}(?:\.[0-9]{1,8})?\z/', $valor)) {
             throw new DomainException('Valor decimal no válido.');
         }
         return BigDecimal::of($valor);

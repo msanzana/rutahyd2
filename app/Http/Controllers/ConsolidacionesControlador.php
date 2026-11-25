@@ -3,6 +3,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Services\CostoPromedioPonderado;
+use App\Services\RegularizacionRecepcion;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use Illuminate\Http\Request;
@@ -78,11 +79,11 @@ final class ConsolidacionesControlador
         $block=[];
         if(!$ids||!$lines)$block[]='Seleccione recepciones confirmadas.';
         if($others)$block[]='Hay otras recepciones vigentes de la orden. Inclúyalas o resuelva sus borradores antes de cerrar.';
-        if($remaining)$block[]='La cantidad aceptada no coincide con la orden completa.';
-        if($diff->isNotEmpty()||array_filter($selected,fn($r)=>$r['estado']==='DESCUADRADA'))$block[]='La regularización de diferencias se habilitará antes de permitir este cierre.';
+        if($remaining&&$diff->isEmpty())$block[]='La orden incompleta no tiene diferencias registradas que justifiquen su cierre.';
+        if($diff->isEmpty()&&array_filter($selected,fn($r)=>$r['estado']==='DESCUADRADA'))$block[]='Hay recepciones descuadradas sin diferencias registradas.';
         if($this->codigo($o->estado_id)!=='ACTIVA')$block[]='La orden ya no está activa.';
         $hash=hash('sha256',json_encode([$o->id,$o->estado_id,$c?->id,$c?->observaciones,$all,$selected,$lines,$diff,$remaining],JSON_THROW_ON_ERROR));
-        return ['orden'=>$o,'consolidacion'=>$c,'recepciones'=>$selected,'otras_recepciones'=>$others,'productos'=>$agg,'diferencias'=>$diff,'saldos_oc'=>$remaining,'bloqueos'=>$block,'cierre_habilitado'=>!$block,'huella'=>$hash];
+        return ['orden'=>$o,'consolidacion'=>$c,'recepciones'=>$selected,'otras_recepciones'=>$others,'productos'=>$agg,'diferencias'=>$diff,'saldos_oc'=>$remaining,'bloqueos'=>$block,'cierre_habilitado'=>!$block,'requiere_aceptacion'=>$diff->isNotEmpty()||!empty($remaining),'huella'=>$hash];
     }
     private function current(int $id): array {
         $c=DB::table('recepciones_consolidadas')->where('id',$id)->first();abort_unless($c&&$this->codigo($c->estado_id)!=='NULA',404,'Consolidación no encontrada.');
@@ -90,10 +91,13 @@ final class ConsolidacionesControlador
         $selected=array_values(array_filter($all,fn($r)=>(int)$r['recepcion_consolidada_id']===$id));
         $res=$this->estadoRevision($o,$all,$selected,$this->lineas(array_column($selected,'id')),$c);
         $res['estado']=$this->codigo($c->estado_id);
+        $res['solicitudes']=DB::table('solicitudes_regularizacion as s')->leftJoin('cola_notificaciones_correo as n','n.solicitud_id','=','s.id')->where('s.recepcion_consolidada_id',$id)->where('s.estado','<>','NULA')->orderBy('s.id')->get(['s.id','s.numero_interno','s.tipo_solicitud','s.estado','s.monto_total','n.id as notificacion_id','n.estado as estado_correo','n.ultimo_error']);
         if($res['estado']!=='ACTIVA')$res['cierre_habilitado']=false;
         $res['candidatas']=array_values(array_filter($all,fn($r)=>$this->eligible($r,$id)));
         return $res;
     }
+    public function solicitudPdf(int $id){$pdf=(new RegularizacionRecepcion())->pdf($id);return response($pdf,200,['Content-Type'=>'application/pdf','Content-Disposition'=>'inline; filename="solicitud-'.$id.'.pdf"','Cache-Control'=>'private, no-store']);}
+    public function reenviarSolicitud(Request $r,int $id){$this->usuario($r);$r->validate(['verificar_envio'=>'accepted']);$estado=(new RegularizacionRecepcion())->enviar($id,true);return response()->json(['estado'=>$estado,'mensaje'=>'Estado de envío: '.$estado]);}
     public function ver(int $id){return response()->json($this->current($id));}
     public function crear(Request $r){return $this->guardar($r,null);}
     public function actualizar(Request $r,int $id){return $this->guardar($r,$id);}
@@ -151,15 +155,17 @@ final class ConsolidacionesControlador
         DB::table('registros_auditoria')->insert(['usuario_id'=>$u,'accion'=>$accion,'tipo_entidad'=>'recepciones_consolidadas','entidad_id'=>$id,'valores_anteriores'=>json_encode($old,JSON_THROW_ON_ERROR),'valores_nuevos'=>json_encode($new,JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE)]);
     }
     public function confirmar(Request $r,int $id){
-        $v=$r->validate(['huella'=>'required|string|size:64','token_confirmacion'=>'required|uuid']);$u=$this->usuario($r);$token=strtolower($v['token_confirmacion']);
+        $v=$r->validate(['huella'=>'required|string|size:64','token_confirmacion'=>'required|uuid','aceptar_diferencias'=>'sometimes|boolean','motivo'=>'nullable|string|max:1000']);$u=$this->usuario($r);$token=strtolower($v['token_confirmacion']);
         $hint=DB::table('recepciones_consolidadas')->where('id',$id)->first();abort_unless($hint,404);
-        return response()->json(DB::transaction(function()use($hint,$v,$u,$token,$id){
+        $result=DB::transaction(function()use($hint,$v,$u,$token,$id){
             $o=$this->orden((int)$hint->orden_compra_id,true);$c=DB::table('recepciones_consolidadas')->where('id',$id)->lockForUpdate()->first();abort_unless($c,404);
             if($c->token_confirmacion===$token&&$this->codigo($c->estado_id)==='CONSOLIDADA')return ['id'=>$id,'estado'=>'CONSOLIDADA','repetida'=>true,'mensaje'=>'Consolidación ya confirmada.'];
             abort_unless($this->codigo($c->estado_id)==='ACTIVA'&&!$c->token_confirmacion,409,'Consolidación no confirmable.');
             $review=$this->current($id);
             abort_unless(hash_equals($review['huella'],$v['huella']),409,'Cambió la consolidación. Revise nuevamente.');
             abort_unless($review['cierre_habilitado'],409,implode(' ',$review['bloqueos']));
+            $motivo=trim((string)($v['motivo']??''));
+            abort_if($review['requiere_aceptacion']&&(!(bool)($v['aceptar_diferencias']??false)||mb_strlen($motivo)<3),422,'Acepte las diferencias e indique el motivo para generar solicitudes.');
             abort_unless(DB::table('bodegas')->where('id',$c->bodega_id)->where('activo',1)->lockForUpdate()->first(),409,'Bodega no activa.');
             $doc=DB::table('tipo_documentos')->where('codigo','CONSOLIDACION_RECEPCION')->where('codigo_sii',0)->where('activo',1)->where('documento_compra',1)->where('familia','INTERNO')->first();
             abort_unless($doc,409,'Documento interno de consolidación no configurado.');
@@ -219,10 +225,15 @@ final class ConsolidacionesControlador
                 DB::table('productos')->where('id',$pid)->update(['costo_neto'=>$newCost,'costo_promedio_ponderado'=>$newCpp]);
                 $verified[]=['producto_id'=>$pid,'fuente_valor_anterior'=>$source,'calculo'=>$calc,'ultimo_costo'=>$newCost];
             }
+            $notificaciones=$review['requiere_aceptacion']?(new RegularizacionRecepcion())->generar($c,$review,$u,$motivo):[];
             DB::table('recepciones_consolidadas')->where('id',$id)->update(['estado_id'=>$target,'fecha_consolidacion'=>now(),'token_confirmacion'=>$token,'consolidado_por'=>$u]);
             DB::table('ordenes_compra')->where('id',$o->id)->update(['estado_id'=>$ocTarget,'estado'=>'recepcionada','recibida_en'=>now()]);
-            $this->audit($u,$id,'CONFIRMAR_CONSOLIDACION',['estado'=>'ACTIVA'],['estado'=>'CONSOLIDADA','recepciones'=>$ids,'cpp'=>$verified,'token'=>$token]);
-            return ['id'=>$id,'estado'=>'CONSOLIDADA','repetida'=>false,'mensaje'=>'Consolidación confirmada. Stock disponible, CPP y orden actualizados.'];
-        },3));
+            $this->audit($u,$id,'CONFIRMAR_CONSOLIDACION',['estado'=>'ACTIVA'],['estado'=>'CONSOLIDADA','recepciones'=>$ids,'cpp'=>$verified,'token'=>$token,'notificaciones'=>$notificaciones,'motivo'=>$motivo]);
+            return ['id'=>$id,'estado'=>'CONSOLIDADA','repetida'=>false,'notificaciones'=>$notificaciones,'mensaje'=>'Consolidación confirmada. Stock disponible, CPP y orden actualizados.'];
+        },3);
+        $result['correos']=[];
+        // Un primer intento fuera de la transacción. La cola persiste aunque falle SMTP.
+        foreach($result['notificaciones']??[] as $nid){try{$result['correos'][]=['id'=>$nid,'estado'=>(new RegularizacionRecepcion())->enviar($nid)];}catch(\Throwable $e){$result['correos'][]=['id'=>$nid,'estado'=>'PENDIENTE_VERIFICACION'];}}
+        return response()->json($result);
     }
 }

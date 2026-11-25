@@ -1,0 +1,219 @@
+name: V93 - Kardex documental y validaciones claras
+on:
+  push:
+    branches: [deploy/v93-kardex-documentos-validaciones-20261125]
+    paths: [.github/workflows/v93-publicar-kardex-documentos-validaciones.yml]
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, pdo_sqlite
+      - name: Validar consulta documental Kardex
+        env:
+          APP_ENV: testing
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/ComprasConsultasControlador.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/kardex_documentos_v93.php
+      - name: Preparar respaldo y delta exclusivo de interfaz
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v93/{before,after,browser,styles}
+          git clone -q --depth=1 --branch feature/v93-kardex-documentos-validaciones-20261125 https://github.com/msanzana/rutahyd2front.git /tmp/v93/front
+          git -C /tmp/v93/front fetch -q --depth=1 origin 4625093cc814695f8fcff3259462b024eb797db8
+          git -C /tmp/v93/front show 4625093cc814695f8fcff3259462b024eb797db8:assets/css/validaciones-kardex-v93.css > /tmp/v93/density.css
+          git -C /tmp/v93/front show 4625093cc814695f8fcff3259462b024eb797db8:assets/js/compras-consultas-v66.js > /tmp/v93/new.js
+          git -C /tmp/v93/front fetch -q --depth=1 origin 217b4d9534f7d551b39575a191011673d4395641
+          git -C /tmp/v93/front show 217b4d9534f7d551b39575a191011673d4395641:assets/js/compras-consultas-v66.js > /tmp/v93/old.js
+          node --check /tmp/v93/new.js
+          cat >/tmp/v93/transport.py <<'PY'
+          import os,ssl,ftplib,io,pathlib,re,sys,html
+          from html.parser import HTMLParser
+          p=pathlib.Path('/tmp/v93')
+          css='assets/css/validaciones-kardex-v93.css'
+          index='index.html'
+          js='assets/js/compras-consultas-v66.js'
+          back='app/Http/Controllers/ComprasConsultasControlador.php'
+          guards={'root.guard':'/htdocs/.htaccess','api.guard':'/htdocs/api/.htaccess','private.guard':'/htdocs/api-v2/.htaccess','gateway.guard':'/htdocs/api/index.php'}
+          def remote(n):return guards.get(n,('/htdocs/api-v2/' if n==back else '/htdocs/')+n)
+          def get(f,n):
+              b=io.BytesIO();f.retrbinary('RETR '+remote(n),b.write);return b.getvalue()
+          def absent(f,n):
+              try:get(f,n);return False
+              except ftplib.error_perm as e:
+                  if str(e).startswith('550'):return True
+                  raise
+          def put(f,n,b):f.storbinary('STOR '+remote(n),io.BytesIO(b))
+          def save(area,n,b):
+              d=p/area/n;d.parent.mkdir(parents=True,exist_ok=True);d.write_bytes(b)
+          def read(area,n):return (p/area/n).read_bytes()
+          def verify_before(f):
+              assert absent(f,css),'El CSS nuevo ya existe; detener'
+              for n in [index,js,back,*guards]:assert get(f,n)==read('before',n),n
+          class Links(HTMLParser):
+              def __init__(self):super().__init__();self.links=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='link' and a.get('rel')=='stylesheet':
+                      href=a.get('href','').split('?')[0].lstrip('/')
+                      if re.fullmatch(r'assets/css/[A-Za-z0-9_.-]+\.css',href):self.links.append(href)
+          f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=45)
+          f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
+          with f:
+              mode=sys.argv[1]
+              if mode=='prepare':
+                  assert absent(f,css),'Archivo nuevo ya existe'
+                  save('before','absent-density.txt',css.encode())
+                  for n in [index,js,back,*guards]:save('before',n,get(f,n))
+                  src=read('before',index).decode()
+                  assert src.count('</head>')==1 and css not in src and 'formularios-compactos-v90.css?v=20261125-v90' in src and 'compras-consultas-v66.js?v=20261125-v92' in src
+                  assert read('before',js)==(p/'old.js').read_bytes(),'JS productivo diferente a la base auditada'
+                  save('after',js,(p/'new.js').read_bytes())
+                  import subprocess
+                  assert read('before',back)==subprocess.check_output(['git','show','a49a4d3589f5f0cef2cdb88e0361a45568718b25:'+back]),'Backend productivo distinto de base auditada'
+                  save('after',back,pathlib.Path(back).read_bytes())
+                  src=src.replace('compras-consultas-v66.js?v=20261125-v92','compras-consultas-v66.js?v=20261125-v93',1)
+                  tag='  <link rel="stylesheet" href="'+css+'?v=20261125-v93">\n'
+                  save('after',index,src.replace('</head>',tag+'</head>',1).encode())
+                  save('after',css,(p/'density.css').read_bytes())
+                  parser=Links();parser.feed(src)
+                  assert 'assets/css/app.css' in parser.links and 'assets/css/tipos-documentos-v63.css' in parser.links
+                  for i,n in enumerate(parser.links):save('styles',f'{i:03d}.css',get(f,n))
+                  print('V93_PRECHECK_OK',len(parser.links))
+              elif mode=='publish':
+                  verify_before(f)
+                  (p/'attempted').touch()
+                  for n in [back,css,js,index]:
+                      with (p/'attempted').open('a') as log:log.write(n+'\n')
+                      put(f,n,read('after',n))
+                  for n in [back,css,js,index]:assert get(f,n)==read('after',n),n
+                  for n in guards:assert get(f,n)==read('before',n),n
+                  print('V93_FTPS_BYTES_OK')
+              elif mode=='rollback':
+                  for n in reversed((p/'attempted').read_text().splitlines()):
+                      if n==css:
+                          if not absent(f,n):f.delete(remote(n))
+                      else:put(f,n,read('before',n))
+                  verify_before(f)
+                  print('V93_ROLLBACK_OK')
+          PY
+          python /tmp/v93/transport.py prepare
+      - name: Validar delta visual de cierre y Kardex
+        run: |
+          set -euo pipefail
+          cd /tmp/v93/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import {readdirSync} from 'node:fs';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({viewport:{width:1440,height:900},reducedMotion:'reduce'});
+            await page.route('**/*',r=>r.abort());
+            await page.setContent('<main id="root"></main>');
+            for(const f of readdirSync('/tmp/v93/styles').sort())await page.addStyleTag({path:'/tmp/v93/styles/'+f});
+            await page.addStyleTag({path:'/tmp/v93/density.css'});
+            await page.addStyleTag({content:'*,*::before,*::after{animation:none!important;transition:none!important}'});
+            await page.addScriptTag({path:'/tmp/v93/new.js'});
+            await page.evaluate(()=>{
+              window.calls=[];window.confirmed=false;window.diff=true;
+              const line={sku:'CI-01',nombre:'Producto CI',cantidad_documentada:'10',cantidad_recibida:'8',costo_oc:'1000.0000',costo_unitario_neto:'1000.2500'};
+              window.RutaHDApiCatalogos=Object.freeze({
+                purchaseConsultation:async(key,n,q,filters)=>{window.calls.push({key,n,filters});if(key==='kardex'&&filters.producto_id)return {data:[{id:1,fecha_movimiento:'2026-11-25 12:30:00',operacion_codigo:'ENTRADA_TRANSITO',tipo_documento:'Factura electrónica',tipo_documento_id:1,folio_documento:'000123',cantidad_documento:'8',fisico_anterior:'0',fisico_actual:'8',costo_unitario_neto:'1000.2500'},{id:2,fecha_movimiento:'2026-11-25 13:00:00',operacion_codigo:'CONSOLIDAR_TRANSITO',tipo_documento:'Consolidación',tipo_documento_id:2,folio_documento:'CON-0001',cantidad_documento:'8',fisico_anterior:'8',fisico_actual:'8',costo_unitario_neto:'1000.2500'}],total:26,last_page:2};return {data:key==='kardex'?[{id:7,sku:'CI-01',producto:'Producto CI'}]:[{id:12,numero_interno:'REC-CI',estado:window.confirmed?'DESCUADRADA':'PENDIENTE'}],total:1,last_page:1,bodegas:[{id:1,nombre:'Central'},{id:2,nombre:'Secundaria'}]};},
+                reviewReceiptDraft:async()=>({id:12,numero_interno:'REC-CI',version_borrador:3,huella_revision:'a'.repeat(64),resultado_previsto:window.diff?'DESCUADRADA':'RECEPCIONADA',cierre_habilitado:true,lineas:[line],diferencias:window.diff?[{tipo:'FALTANTE',producto:'Producto CI',cantidad_diferencia:'2',motivo:'Conteo físico'}]:[],saldos_oc:[]}),
+                confirmReceiptDraft:async(id,p)=>{if(id!==12||p.version_borrador!==3||p.huella_revision!=='a'.repeat(64)||!p.aceptar_diferencias||p.motivo!=='Conteo verificado'||!p.token_confirmacion)throw Error('Payload alterado');window.confirmed=true;return {mensaje:'Confirmada'};}
+              });window.mountCI=key=>window.RutaHDComprasConsultas.mount(document.getElementById('root'),key);
+              window.mountCI('recepciones');
+            });
+            await page.getByRole('button',{name:'Revisar diferencias 12'}).click();
+            const d=page.locator('dialog[open]');
+            await d.getByText('Resultado previsto: Descuadrada',{exact:true}).waitFor();
+            await d.getByRole('button',{name:'Confirmar recepción'}).click();
+            await d.locator('.hd93-alert[data-hd93-tone=error]').getByText('Acepte las diferencias e indique el motivo para continuar.').waitFor();
+            if(!await d.getByLabel('Acepto guardar la recepción descuadrada').evaluate(e=>e.getAttribute('aria-invalid')==='true'))throw Error('Campo no marcado');
+            await d.getByLabel('Acepto guardar la recepción descuadrada').check();
+            await d.getByLabel('Motivo de aceptación de diferencias').fill('Conteo verificado');
+            await d.getByRole('button',{name:'Confirmar recepción'}).click();
+            await d.waitFor({state:'detached'});
+            if(!await page.evaluate(()=>window.confirmed))throw Error('No confirmó');
+            for(const width of [1440,390]){
+              await page.setViewportSize({width,height:900});
+              await page.evaluate(()=>{window.confirmed=false;window.diff=false;window.mountCI('recepciones');});
+              await page.getByRole('button',{name:'Revisar diferencias 12'}).click();
+              await d.getByText('Resultado previsto: Recepcionada',{exact:true}).waitFor();
+              await d.getByText('Sin diferencias detectadas.',{exact:true}).waitFor();
+              if(await d.getByLabel('Acepto guardar la recepción descuadrada').count())throw Error('Aceptación indebida');
+              const bounds=await d.evaluate(e=>({w:e.getBoundingClientRect().width,viewport:innerWidth,footer:e.querySelector('.hd-doc-modal-footer').getBoundingClientRect().bottom,bottom:e.getBoundingClientRect().bottom}));
+              if(bounds.w>bounds.viewport+0.5||bounds.footer>bounds.bottom+2)throw Error(JSON.stringify(bounds));
+              await d.getByRole('button',{name:'Cerrar',exact:true}).last().click();
+              await page.evaluate(()=>window.mountCI('kardex'));
+              await page.getByRole('button',{name:'Ver Kardex de Producto CI'}).waitFor();
+              await page.getByRole('button',{name:'Ver Kardex de Producto CI'}).click();
+              await page.locator('.hd93-alert').getByText('Seleccione una bodega antes de consultar el Kardex.').waitFor();
+              await page.getByLabel('Bodega',{exact:true}).selectOption('2');
+              await page.getByRole('button',{name:'Ver Kardex de Producto CI'}).click();
+              await d.getByText('Entrada a tránsito',{exact:true}).waitFor();
+              await d.getByText('Consolidación de tránsito',{exact:true}).waitFor();
+              await d.getByText('Factura electrónica',{exact:true}).waitFor();
+              await d.getByText('000123',{exact:true}).waitFor();
+              await d.getByText('CON-0001',{exact:true}).waitFor();
+              await d.getByText('1.000,25',{exact:true}).first().waitFor();
+              if(await d.getByText('26',{exact:true}).count()!==1)throw Error('Total de movimientos');
+              await d.locator('.hd-doc-pager').first().getByRole('button',{name:'2',exact:true}).click();
+              await page.waitForFunction(()=>window.calls.some(x=>x.key==='kardex'&&x.n===2&&x.filters.producto_id==='7'&&x.filters.bodega_id==='2'));
+              await d.getByRole('button',{name:'Cerrar',exact:true}).click();
+            }
+            console.log('V93_RECEPCION_KARDEX_OK');
+          }finally{await browser.close();}
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v93-respaldo-previo
+          path: /tmp/v93/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar y cotejar bytes
+        run: python /tmp/v93/transport.py publish
+      - name: Verificar carga del CSS nuevo en el sitio
+        run: |
+          set -euo pipefail
+          cd /tmp/v93/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage();
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>[...document.styleSheets].some(s=>s.href?.includes('validaciones-kardex-v93.css?v=20261125-v93')&&s.cssRules.length>20),null,{timeout:45000});
+            const result=await page.evaluate(()=>({density:getComputedStyle(document.documentElement).getPropertyValue('--hd-form-control').trim(),v86:[...document.scripts].some(s=>s.src.includes('compras-consultas-v66.js?v=20261125-v93'))}));
+            if(response?.status()!==200||result.density!=='30px'||!result.v86||errors.length)throw Error(JSON.stringify({result,errors}));
+            console.log('V93_PUBLIC_OK');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar originales si falla la publicación
+        if: failure()
+        run: |
+          if [ -f /tmp/v93/attempted ]; then python /tmp/v93/transport.py rollback; fi

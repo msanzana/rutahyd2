@@ -68,7 +68,10 @@ final class RecepcionesBorradorControlador
           ->join('compras as c','c.id','=','r.compra_id')->where('r.id',$id)->where('e.codigo','<>','NULA')
           ->select('r.*','e.codigo as estado','c.documento_id','c.folio','c.fecha_documento','c.total_informado')->first();
         abort_unless($r,404,'Recepción no encontrada.');
-        return response()->json(['recepcion'=>$r,'detalles'=>DB::table('recepcion_detalle')->where('recepcion_id',$id)->orderBy('numero_linea')->get(),'diferencias'=>DB::table('recepcion_diferencias')->where('recepcion_id',$id)->orderBy('id')->get()]);
+        $details=DB::table('recepcion_detalle')->where('recepcion_id',$id)->orderBy('numero_linea')->get();
+        $diff=DB::table('recepcion_diferencias')->where('recepcion_id',$id)->orderBy('id')->get();
+        $eligible=$r->estado==='RECEPCIONADA'&&$r->stock_aplicado&&$r->token_confirmacion&&$diff->isEmpty()&&$this->directa($r,$details,'cantidad_aceptada');
+        return response()->json(['recepcion'=>$r,'detalles'=>$details,'diferencias'=>$diff,'completar_cierre_directo'=>(bool)$eligible]);
     }
 
     /** V74A: revisión de cierre, exclusivamente de lectura. No confirma existencias. */
@@ -120,7 +123,7 @@ final class RecepcionesBorradorControlador
         $pendientes=[];foreach($remaining as $lineId=>$qty){if($qty->isPositive())$pendientes[]=['detalle_orden_compra_id'=>$lineId,'cantidad_pendiente'=>(string)$qty];}
         return response()->json(['id'=>$id,'numero_interno'=>$r->numero_interno,'estado'=>$r->estado,'version_borrador'=>(int)$r->version_borrador,
           'resultado_previsto'=>$dif?'DESCUADRADA':'RECEPCIONADA','diferencias'=>$dif,'saldos_oc'=>$pendientes,'lineas'=>$lines,
-          'cierre_habilitado'=>!$lines->isEmpty(),'huella_revision'=>$this->huella($r,$lines,$dif,$pendientes),'mensaje'=>'Revise las diferencias antes de confirmar. Las unidades contadas ingresarán a tránsito.']);
+          'cierre_directo'=>!$dif&&!$pendientes&&$this->directa($r,$lines,'cantidad_recibida'),'cierre_habilitado'=>!$lines->isEmpty(),'huella_revision'=>$this->huella($r,$lines,$dif,$pendientes),'mensaje'=>'Revise las diferencias antes de confirmar. Las unidades contadas ingresarán a tránsito.']);
     }
 
 
@@ -134,10 +137,124 @@ final class RecepcionesBorradorControlador
         return (string)$n->toScale(8);
     }
 
+
+    /** Sólo una recepción vigente y cobertura exacta de TODAS las líneas OC. */
+    private function directa(object $r,iterable $lines,string $campo): bool
+    {
+        if($r->recepcion_consolidada_id!==null)return false;
+        if(DB::table('recepciones as rr')->join('estados as e','e.id','=','rr.estado_id')
+            ->where('rr.orden_compra_id',$r->orden_compra_id)->where('rr.id','<>',$r->id)->where('e.codigo','<>','NULA')->exists())return false;
+        if(!DB::table('ordenes_compra as o')->join('estados as e','e.id','=','o.estado_id')->where('o.id',$r->orden_compra_id)->where('e.codigo','ACTIVA')->exists())return false;
+        $oc=DB::table('detalles_ordenes_compra')->where('orden_compra_id',$r->orden_compra_id)->get()->keyBy('id');
+        if($oc->isEmpty())return false;
+        $sum=[];
+        foreach($lines as $l){
+            $d=(array)$l;$key=(int)$d['detalle_orden_compra_id'];$o=$oc->get($key);
+            if(!$o||(int)$o->producto_id!==(int)$d['producto_id'])return false;
+            $q=BigDecimal::of((string)$d[$campo]);
+            if($q->isNegative()||!$q->isEqualTo((string)$d['cantidad_documentada']))return false;
+            $sum[$key]=($sum[$key]??BigDecimal::zero())->plus($q);
+        }
+        foreach($oc as $o)if(!isset($sum[$o->id])||!$sum[$o->id]->isEqualTo((string)$o->cantidad))return false;
+        return true;
+    }
+    /** Bajo bloqueo de OC y productos. Si ya estaba en tránsito, sólo libera ese saldo. */
+    private function aplicarDirecta(object $r,object $c,iterable $lines,$products,int $user,bool $desdeTransito): array
+    {
+        $groups=[];$audit=[];$mov=0;
+        foreach($lines as $line){
+            $d=(array)$line;$pid=(int)$d['producto_id'];$p=$products->get($pid);
+            $q=BigDecimal::of((string)$d['cantidad_recibida']);$cost=BigDecimal::of((string)$d['costo_unitario_neto']);
+            abort_unless($p&&$p->activo&&$d['presentacion_id']===null&&BigDecimal::of((string)$d['unidades_por_presentacion_snapshot'])->isEqualTo('1')&&!$q->isNegative()&&!$cost->isNegative(),409,'Línea de recepción directa inconsistente.');
+            if($q->isZero())continue;
+            if($desdeTransito){
+                $k=DB::table('kardex')->where('origen_tipo','RECEPCION')->where('origen_detalle_id',$d['id'])->where('operacion_codigo','ENTRADA_TRANSITO')->first();
+                abort_unless($k&&(int)$k->tipo_movimiento===3&&(int)$k->producto_id===$pid&&(int)$k->bodega_id===(int)$r->bodega_id&&(int)$k->tipo_documento_id===(int)$c->documento_id&&(string)$k->folio_documento===(string)$c->folio&&BigDecimal::of((string)$k->cantidad_documento)->isEqualTo($q)&&BigDecimal::of((string)$k->costo_unitario_neto)->isEqualTo($cost)&&BigDecimal::of((string)$d['cantidad_aceptada'])->isEqualTo($q)&&BigDecimal::of((string)$d['cantidad_rechazada'])->isZero(),409,'No se acredita el tránsito original de la recepción.');
+                abort_if(DB::table('kardex')->where('origen_tipo','RECEPCION')->where('origen_detalle_id',$d['id'])->where('operacion_codigo','<>','ENTRADA_TRANSITO')->exists(),409,'La línea ya tiene otro movimiento; revise el historial.');
+            }
+            $groups[$pid]['q']=($groups[$pid]['q']??BigDecimal::zero())->plus($q);
+            $groups[$pid]['v']=($groups[$pid]['v']??BigDecimal::zero())->plus($q->multipliedBy($cost));
+            $groups[$pid]['lines'][]=$d;
+        }
+        ksort($groups,SORT_NUMERIC);
+        foreach($groups as $pid=>$g){
+            $p=$products->get($pid);$oldQty=BigDecimal::zero();$stock=null;
+            $bals=DB::table('stock')->where('producto_id',$pid)->orderBy('bodega_id')->lockForUpdate()->get();
+            foreach($bals as $b){
+                $a=BigDecimal::of((string)$b->disponible);$t=BigDecimal::of((string)$b->transito);$m=BigDecimal::of((string)$b->comprometido);$f=BigDecimal::of((string)$b->cantidad_fisica);
+                abort_unless(!$a->isNegative()&&!$t->isNegative()&&!$m->isNegative()&&$f->isEqualTo($a->plus($t)->plus($m)),409,'Stock previo inconsistente.');
+                $oldQty=$oldQty->plus($a)->plus($m);if((int)$b->bodega_id===(int)$r->bodega_id)$stock=$b;
+            }
+            if(!$stock){
+                abort_if($desdeTransito,409,'No existe el saldo de tránsito original.');
+                $sid=DB::table('stock')->insertGetId(['producto_id'=>$pid,'bodega_id'=>$r->bodega_id,'disponible'=>0,'transito'=>0,'comprometido'=>0,'cantidad_fisica'=>0]);
+                $stock=DB::table('stock')->where('id',$sid)->lockForUpdate()->first();
+            }
+            $q=$g['q'];$value=$g['v']->toScale(16);$oldCpp=BigDecimal::of((string)$p->costo_promedio_ponderado);$base=$oldCpp;$source='CPP_VIGENTE';
+            if($oldQty->isZero()){$base=BigDecimal::zero();$source='SIN_STOCK_VALORIZADO';}
+            elseif($oldCpp->isZero()){
+                $last=DB::table('kardex')->where('producto_id',$pid)->where('tipo_movimiento',1)->whereNotNull('cpp_actual')->orderByDesc('id')->first();
+                if($last){$base=BigDecimal::of((string)$last->cpp_actual);$source='CPP_ULTIMA_ENTRADA_KARDEX';}
+                else{$base=BigDecimal::of((string)$p->costo_neto);$source='COSTO_NETO_INICIAL';abort_unless($base->isPositive(),409,'CPP cero con stock previo sin costo comprobable. Regularice antes de cerrar.');}
+            }
+            $calc=(new \App\Services\CostoPromedioPonderado())->calcular($this->saldo($oldQty),(string)$oldCpp,$this->saldo($q),(string)$value,(string)$oldQty->multipliedBy($base)->toScale(16));
+            $newCpp=$calc['cpp_posterior'];$newCost=(string)$value->dividedBy($q,4,(defined(RoundingMode::class.'::HalfUp')?constant(RoundingMode::class.'::HalfUp'):constant(RoundingMode::class.'::HALF_UP')));
+            abort_if(BigDecimal::of($newCost)->isGreaterThan('99999999999.9999'),409,'Costo fuera de rango.');
+            $a=BigDecimal::of((string)$stock->disponible);$t=BigDecimal::of((string)$stock->transito);$m=BigDecimal::of((string)$stock->comprometido);$f=BigDecimal::of((string)$stock->cantidad_fisica);
+            abort_if($desdeTransito&&$t->isLessThan($q),409,'Tránsito insuficiente para completar el cierre directo.');
+            $first=true;
+            foreach($g['lines'] as $d){
+                $n=BigDecimal::of((string)$d['cantidad_recibida']);$na=$a->plus($n);$nt=$desdeTransito?$t->minus($n):$t;$nf=$desdeTransito?$f:$f->plus($n);
+                DB::table('kardex')->insert(['producto_id'=>$pid,'bodega_id'=>$r->bodega_id,'tipo_documento_id'=>$c->documento_id,'folio_documento'=>$c->folio,'tipo_movimiento'=>1,
+                  'cantidad_anterior'=>$this->saldo($a),'cantidad_documento'=>$this->saldo($n),'cantidad_actual'=>$this->saldo($na),
+                  'transito_anterior'=>$this->saldo($t),'transito_actual'=>$this->saldo($nt),'comprometido_anterior'=>$this->saldo($m),'comprometido_actual'=>$this->saldo($m),'fisico_anterior'=>$this->saldo($f),'fisico_actual'=>$this->saldo($nf),
+                  'costo_unitario_neto'=>$d['costo_unitario_neto'],'ultimo_costo_anterior'=>$first?$p->costo_neto:$newCost,'ultimo_costo_actual'=>$newCost,'cpp_anterior'=>$first?$p->costo_promedio_ponderado:$newCpp,'cpp_actual'=>$newCpp,
+                  'origen_tipo'=>'RECEPCION','origen_detalle_id'=>$d['id'],'operacion_codigo'=>$desdeTransito?'LIBERAR_TRANSITO_DIRECTO':'ENTRADA_DIRECTA','token_idempotencia'=>(string)Str::uuid(),'registrado_por'=>$user,
+                  'observaciones'=>($desdeTransito?'Regularización de tránsito a disponible; físico intacto.':'Recepción única completa; entrada directa a disponible.').' CPP global; base '.$source.'.']);
+                $a=$na;$t=$nt;$f=$nf;$first=false;$mov++;
+            }
+            DB::table('stock')->where('id',$stock->id)->update(['disponible'=>$this->saldo($a),'transito'=>$this->saldo($t),'cantidad_fisica'=>$this->saldo($f)]);
+            DB::table('productos')->where('id',$pid)->update(['costo_neto'=>$newCost,'costo_promedio_ponderado'=>$newCpp]);
+            $audit[]=['producto_id'=>$pid,'fuente_valor_anterior'=>$source,'calculo'=>$calc,'ultimo_costo'=>$newCost];
+        }
+        DB::table('ordenes_compra')->where('id',$r->orden_compra_id)->update(['estado_id'=>$this->estado('ORDEN_COMPRA','RECEPCIONADA'),'estado'=>'recepcionada','recibida_en'=>now()]);
+        return ['movimientos'=>$mov,'cpp'=>$audit];
+    }
+
+    /** Acción explícita para recepciones históricas confirmadas antes de V95. */
+    private function completarDirecta(Request $request,int $id)
+    {
+        $v=$request->validate(['version_borrador'=>'required|integer|min:0|max:4294967294']);
+        $user=(int)($request->user()?->id??0);abort_unless($user>0,401);
+        $hint=DB::table('recepciones')->where('id',$id)->first(['orden_compra_id']);abort_unless($hint&&$hint->orden_compra_id,404);
+        return response()->json(DB::transaction(function()use($hint,$v,$id,$user){
+            $oc=DB::table('ordenes_compra')->where('id',$hint->orden_compra_id)->lockForUpdate()->first();
+            $r=DB::table('recepciones')->where('id',$id)->lockForUpdate()->first();
+            abort_unless($oc&&$r&&(int)$r->orden_compra_id===(int)$oc->id&&(int)$r->proveedor_id===(int)$oc->proveedor_id&&(int)$r->recepcion_tipo===1&&$r->stock_aplicado&&$r->token_confirmacion&&DB::table('estados')->where('id',$r->estado_id)->where('codigo','RECEPCIONADA')->exists(),409,'Recepción no elegible para cierre directo.');
+            abort_unless((int)$r->version_borrador===(int)$v['version_borrador'],409,'La recepción cambió. Vuelva a abrirla.');
+            $lines=DB::table('recepcion_detalle')->where('recepcion_id',$id)->orderBy('numero_linea')->lockForUpdate()->get();
+            abort_unless($this->directa($r,$lines,'cantidad_aceptada')&&!DB::table('recepcion_diferencias')->where('recepcion_id',$id)->exists(),409,'Sólo procede con una recepción única, completa y sin diferencias.');
+            abort_unless(DB::table('bodegas')->where('id',$r->bodega_id)->where('activo',1)->lockForUpdate()->first(),409,'Bodega no activa.');
+            $c=DB::table('compras')->where('id',$r->compra_id)->lockForUpdate()->first();
+            abort_unless($c&&(int)$c->proveedor_id===(int)$r->proveedor_id&&(int)$c->orden_compra_id===(int)$oc->id&&DB::table('estados')->where('id',$c->estado_id)->where('codigo','RECEPCIONADA')->exists(),409,'Documento de compra inconsistente.');
+            $ids=$lines->pluck('producto_id')->unique()->sort()->values()->all();
+            $products=DB::table('productos')->whereIn('id',$ids)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+            abort_if(DB::table('saldos_inventario as si')->join('presentaciones_productos as pp','pp.id','=','si.presentacion_id')->whereIn('pp.producto_id',$ids)->where('si.cantidad','<>',0)->exists(),409,'Hay existencias en el inventario anterior; requiere conciliación.');
+            $result=$this->aplicarDirecta($r,$c,$lines,$products,$user,true);
+            (new \App\Services\LibroComprasInterno())->registrar((int)$c->id,$r->numero_interno);
+            DB::table('recepciones')->where('id',$id)->update(['version_borrador'=>(int)$r->version_borrador+1]);
+            DB::table('registros_auditoria')->insert(['usuario_id'=>$user,'accion'=>'COMPLETAR_CIERRE_DIRECTO','tipo_entidad'=>'recepciones','entidad_id'=>$id,
+              'valores_anteriores'=>json_encode(['estado'=>'RECEPCIONADA','orden'=>'ACTIVA','version_borrador'=>$r->version_borrador],JSON_THROW_ON_ERROR),
+              'valores_nuevos'=>json_encode(['orden'=>'RECEPCIONADA','cpp'=>$result['cpp'],'movimientos'=>$result['movimientos']],JSON_THROW_ON_ERROR)]);
+            return ['id'=>$id,'estado'=>'RECEPCIONADA','mensaje'=>'Cierre directo completado. Tránsito liberado sin duplicar existencias; CPP y orden actualizados.'];
+        },3));
+    }
+
     /** Confirmación atómica: acepta conteo físico en tránsito, sin valorizar dos veces.
      * La OC permanece activa hasta consolidación. No emite documentos ni correo. */
     public function confirmar(Request $request,int $id)
     {
+        if($request->boolean('completar_cierre_directo'))return $this->completarDirecta($request,$id);
         $v=$request->validate([
           'version_borrador'=>'required|integer|min:0|max:4294967294',
           'huella_revision'=>['required','regex:/^[a-f0-9]{64}$/D'],
@@ -174,7 +291,7 @@ final class RecepcionesBorradorControlador
             // ni diferencia proviene del cliente.
             $review=$this->revisar($id)->getData(true);
             abort_unless(hash_equals($review['huella_revision'],$v['huella_revision']),409,'Cambió la revisión. Abra nuevamente las diferencias.');
-            $dif=$review['diferencias'];$lines=$review['lineas'];
+            $dif=$review['diferencias'];$lines=$review['lineas'];$directa=(bool)$review['cierre_directo'];
             abort_unless(count($lines)>0,422,'La recepción requiere líneas.');
             $motivo=trim((string)($v['motivo']??''));
             if($dif&&(!(bool)$v['aceptar_diferencias']||mb_strlen($motivo)<3))$this->error('motivo','Confirme los descuadres e indique el motivo.');
@@ -200,7 +317,7 @@ final class RecepcionesBorradorControlador
                 $q=BigDecimal::of((string)$d['cantidad_recibida']);$cost=BigDecimal::of((string)$d['costo_unitario_neto']);
                 abort_if($q->isNegative()||$cost->isNegative(),409,'Cantidad o costo negativo.');
                 DB::table('recepcion_detalle')->where('id',$d['id'])->update(['cantidad_aceptada'=>$this->saldo($q),'cantidad_rechazada'=>0]);
-                if($q->isZero())continue;
+                if($q->isZero()||$directa)continue;
                 $stock=DB::table('stock')->where('producto_id',$p->id)->where('bodega_id',$r->bodega_id)->lockForUpdate()->first();
                 if(!$stock){
                     $sid=DB::table('stock')->insertGetId(['producto_id'=>$p->id,'bodega_id'=>$r->bodega_id,'disponible'=>0,'transito'=>0,'comprometido'=>0,'cantidad_fisica'=>0]);
@@ -220,6 +337,7 @@ final class RecepcionesBorradorControlador
                   'registrado_por'=>$user,'observaciones'=>'Entrada física pendiente de consolidación; sin cambio de CPP.']);
                 $movimientos++;
             }
+            $cpp=[];if($directa){$direct=$this->aplicarDirecta($r,$c,$lines,$products,$user,false);$movimientos=$direct['movimientos'];$cpp=$direct['cpp'];}
             foreach($dif as $d)DB::table('recepcion_diferencias')->insert([
               'recepcion_id'=>$id,'recepcion_detalle_id'=>$d['recepcion_detalle_id'],'producto_id'=>$d['producto_id'],
               'tipo_diferencia'=>$d['tipo'],'cantidad_documentada'=>$d['cantidad_documentada'],
@@ -232,9 +350,9 @@ final class RecepcionesBorradorControlador
               'token_confirmacion'=>$token,'version_borrador'=>(int)$r->version_borrador+1,'finalizado_por'=>$user]);
             DB::table('registros_auditoria')->insert(['usuario_id'=>$user,'accion'=>'CONFIRMAR_RECEPCION','tipo_entidad'=>'recepciones','entidad_id'=>$id,
               'valores_anteriores'=>json_encode(['estado'=>$estado,'version_borrador'=>$r->version_borrador],JSON_THROW_ON_ERROR),
-              'valores_nuevos'=>json_encode(['estado'=>$target,'diferencias'=>count($dif),'movimientos'=>$movimientos,'motivo'=>$motivo,'token'=>$token],JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE)]);
+              'valores_nuevos'=>json_encode(['estado'=>$target,'diferencias'=>count($dif),'movimientos'=>$movimientos,'cierre_directo'=>$directa,'cpp'=>$cpp,'motivo'=>$motivo,'token'=>$token],JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE)]);
             return ['id'=>$id,'estado'=>$target,'diferencias'=>count($dif),'movimientos'=>$movimientos,'repetida'=>false,
-              'mensaje'=>'Recepción confirmada como '.$target.'. Unidades contadas en tránsito; orden abierta para consolidación.'];
+              'cierre_directo'=>$directa,'mensaje'=>$directa?'Recepción completa confirmada. Stock disponible, CPP y orden de compra actualizados.':'Recepción confirmada como '.$target.'. Unidades contadas en tránsito; orden abierta para consolidación.'];
         },3));
     }
 

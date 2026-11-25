@@ -1,0 +1,241 @@
+name: V86 - Terminar recepción, búsqueda avanzada y exportaciones
+on:
+  push:
+    branches: [deploy/v86-recepcion-busqueda-20261125]
+    paths: [.github/workflows/v86-publicar-recepcion-busqueda.yml]
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Preparar cambios y respaldo FTPS
+        run: |
+          set -euo pipefail
+          git clone -q --depth=1 --branch feature/v86-recepcion-busqueda-20261125 https://github.com/msanzana/rutahyd2front.git /tmp/front67
+          git -C /tmp/front67 fetch -q --depth=1 origin da31fbc81b5f42e79342c7992980d1b00c7d9efa c29b5dd5502d6a81d16ddbe509d348de2f0c2b4c
+          mkdir -p /tmp/v86
+          cat > /tmp/v86/transport.py <<'PY'
+          import os,ssl,ftplib,io,pathlib,subprocess,re,sys
+          p=pathlib.Path('/tmp/v86')
+          newfiles=[]
+          back=[]
+          front=['assets/js/compras-consultas-v66.js','assets/css/tipos-documentos-v63.css']
+          files=back+front+['index.html']
+          guards={'root.guard':'/htdocs/.htaccess','api.guard':'/htdocs/api/.htaccess','private.guard':'/htdocs/api-v2/.htaccess','gateway.guard':'/htdocs/api/index.php'}
+          def remote(n):return guards.get(n,('/htdocs/api-v2/' if n in back else '/htdocs/')+n)
+          def get(f,n):
+              b=io.BytesIO();f.retrbinary('RETR '+remote(n),b.write);return b.getvalue()
+          def absent(f,n):
+              try:get(f,n);return False
+              except ftplib.error_perm as e:
+                  if str(e).startswith('550'):return True
+                  raise
+          def put(f,n,b):f.storbinary('STOR '+remote(n),io.BytesIO(b))
+          def save(area,n,b):
+              d=p/area/n;d.parent.mkdir(parents=True,exist_ok=True);d.write_bytes(b)
+          def read(area,n):return (p/area/n).read_bytes()
+          def git(repo,ref,n):return subprocess.check_output(['git','-C',repo,'show',ref+':'+n])
+          def verify_before(f,n):
+              if n in newfiles:assert absent(f,n),n
+              else:assert get(f,n)==read('before',n),n
+          f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=45)
+          f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
+          with f:
+              mode=sys.argv[1]
+              if mode=='prepare':
+                  for n in files+list(guards):
+                      if n in newfiles:
+                          assert absent(f,n),'El archivo nuevo ya existe: detener para no sobrescribir'
+                          save('before','absent-'+pathlib.Path(n).name+'.txt',n.encode())
+                      else:save('before',n,get(f,n))
+                  for n in back+front:
+                      repo=os.environ['GITHUB_WORKSPACE'] if n in back else '/tmp/front67'
+                      old='61e90ebe5997b3451f10cf30d498c1e2ebaece45' if n in back else 'da31fbc81b5f42e79342c7992980d1b00c7d9efa'
+                      new='c26b084d196a997b4a29398245639c56615f935a' if n in back else 'c29b5dd5502d6a81d16ddbe509d348de2f0c2b4c'
+                      if n in newfiles or read('before',n)==git(repo,old,n):save('after',n,git(repo,new,n))
+                      else:
+                          save('after',n,read('before',n))
+                          delta=subprocess.check_output(['git','-C',repo,'diff','--binary',old,new,'--',n])
+                          assert delta.count(b'diff --git')==1,n
+                          subprocess.run(['patch','--batch','--fuzz=0','-p1','-d',str(p/'after')],input=delta,check=True)
+                  html=read('before','index.html').decode()
+                  for n in front:
+                      pattern=re.escape(n)+r'(?:\?v=[^"\s]+)?(?=["\s])'
+                      matches=re.findall(pattern,html)
+                      assert len(matches)==1,(n,matches)
+                      html=html.replace(matches[0],n+'?v=20261125-v86',1)
+                  save('after','index.html',html.encode())
+                  print('V86_PRECHECK_OK')
+              elif mode=='publish':
+                  for n in files+list(guards):verify_before(f,n)
+                  (p/'attempted').touch()
+                  for n in front+['index.html']:
+                      with (p/'attempted').open('a') as log:log.write(n+'\n')
+                      put(f,n,read('after',n))
+                  for n in files:assert get(f,n)==read('after',n),n
+                  for n in guards:assert get(f,n)==read('before',n),n
+                  print('V86_FTPS_BYTES_OK')
+              elif mode=='rollback':
+                  for n in reversed((p/'attempted').read_text().splitlines()):
+                      if n in newfiles:
+                          if not absent(f,n):f.delete(remote(n))
+                      else:put(f,n,read('before',n))
+                  for n in files+list(guards):verify_before(f,n)
+                  print('V86_ROLLBACK_OK')
+          PY
+          python /tmp/v86/transport.py prepare
+
+
+
+
+
+
+
+
+          node --check /tmp/v86/after/assets/js/compras-consultas-v66.js
+          for f in /tmp/v86/after/assets/js/*.js; do node --check "$f"; done
+      - name: Probar guardado, revisión, búsqueda avanzada y exportaciones
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v86/browser
+          cd /tmp/v86/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import {readFileSync} from 'node:fs';
+          const browser=await chromium.launch({headless:true});
+          try {
+            const page=await browser.newPage({viewport:{width:1440,height:900},acceptDownloads:true});
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            await page.route('**/*',r=>r.abort());
+            await page.setContent('<main id="root"></main>');
+            await page.addStyleTag({path:'/tmp/front67/assets/css/app.css'});
+            await page.addStyleTag({path:'/tmp/front67/assets/css/carga-global-v42.css'});
+            await page.addStyleTag({path:'/tmp/v86/after/assets/css/tipos-documentos-v63.css'});
+            await page.addScriptTag({path:'/tmp/front67/assets/js/carga-global-v42.js'});
+            await page.addScriptTag({path:'/tmp/v86/after/assets/js/compras-consultas-v66.js'});
+            await page.evaluate(()=>{
+              let saved=false,confirmed=false,attempts=0;
+              const order={id:7,numero:'OC-CI',estado_codigo:'ACTIVA',proveedor_nombre:'Proveedor CI',detalles:[{id:41,sku:'SKU-CI',nombre:'Producto CI',cantidad:'2',costo_unitario_neto:'100',subtotal_neto:'200'}]};
+              window.calls=[];
+              window.RutaHDApiCatalogos=Object.freeze({
+                purchaseConsultation:async(key,p,q,filters)=>{window.calls.push({key,q,filters});const ledger={id:1,periodo_tributario:'2026-11',folio:'CI-1',razon_social_emisor:'Proveedor CI',signo_contable:1,monto_neto:'100',monto_total:'119'};const data=key==='libro'?[ledger]:key==='recepciones'&&saved?[{id:12,numero_interno:'REC-12',estado:confirmed?'RECEPCIONADA':'PENDIENTE'}]:[];return {data,total:data.length,last_page:1,bodegas:[{id:1,nombre:'Bodega CI'}]};},
+                orderStates:async()=>({items:[{id:1,codigo:'ACTIVA'}]}),
+                purchaseOrders:async()=>({data:[order],total:1,last_page:1}),
+                getPurchaseOrder:async()=>order,
+                documentTypes:async()=>({data:[{id:1,nombre:'Factura',familia:'FACTURA',codigo_sii:33,documento_compra:1}],last_page:1}),
+                resources:async()=>({data:[{id:1,nombre:'Bodega CI',activo:1}],last_page:1}),
+                createReceiptDraft:async p=>{attempts++;window.payload=p;if(attempts===1){const e=Error('Error HTTP 422');e.userMessage='Validación CI: revise folio.';throw e;}if(p.folio!=='CI-1'||p.detalles[0].cantidad_documentada!=='2'||p.detalles[0].cantidad_recibida!=='2'||p.total_informado!=='238')throw Error('Payload incorrecto');saved=true;return{id:12,estado:'PENDIENTE'};},
+                reviewReceiptDraft:async id=>{if(id!==12)throw Error('ID incorrecto');return {id,numero_interno:'REC-12',version_borrador:1,resultado_previsto:'RECEPCIONADA',cierre_habilitado:true,huella_revision:'a'.repeat(64),lineas:[],diferencias:[],saldos_oc:[]};},
+                confirmReceiptDraft:async(id,p)=>{if(id!==12||p.version_borrador!==1||p.huella_revision!=='a'.repeat(64)||p.aceptar_diferencias)throw Error('Confirmación incorrecta');confirmed=true;return {mensaje:'Recepción confirmada.'};}
+              });
+              window.mountCI=key=>window.RutaHDComprasConsultas.mount(document.getElementById('root'),key);
+              window.mountCI('recepciones');
+            });
+            await page.getByRole('button',{name:'+ Nueva recepción',exact:true}).click();
+            const d=page.locator('dialog[open]');
+            await d.getByRole('button',{name:'Seleccionar orden OC-CI'}).click();
+            await d.getByRole('button',{name:'Terminar Recepción',exact:true}).waitFor();
+            await d.getByRole('button',{name:'Terminar Recepción',exact:true}).click();
+            await d.locator('.hd-receipt-feedback').getByText('Complete el tipo de documento.',{exact:true}).waitFor();
+            await d.getByLabel('Tipo de documento',{exact:true}).selectOption('1');
+            await d.getByLabel('Bodega de recepción',{exact:true}).selectOption('1');
+            await d.getByLabel('Folio del documento',{exact:true}).fill('CI-1');
+            await d.getByLabel('Fecha de emisión',{exact:true}).fill('2026-11-25');
+            await d.getByLabel('Fecha de recepción',{exact:true}).fill('2026-11-25');
+            await d.getByLabel('Monto neto afecto',{exact:true}).fill('200');
+            await d.getByLabel('Total documento proveedor',{exact:true}).fill('238');
+            await d.getByLabel('Cantidad documentada SKU-CI',{exact:true}).fill('2');
+            await d.getByLabel('Cantidad recibida SKU-CI',{exact:true}).fill('2');
+            await d.getByLabel('Costo documento SKU-CI',{exact:true}).fill('100');
+            await d.getByRole('button',{name:'Terminar Recepción',exact:true}).click();
+            await d.locator('.hd-receipt-feedback').getByText('Validación CI: revise folio.',{exact:true}).waitFor();
+            await d.getByRole('button',{name:'Terminar Recepción',exact:true}).click();
+            await d.getByText('Resultado previsto: Recepcionada',{exact:true}).waitFor();
+            await d.getByRole('button',{name:'Confirmar recepción',exact:true}).click();
+            await d.waitFor({state:'detached'});
+            await page.getByRole('button',{name:'Ver recepción 12',exact:true}).waitFor();
+            for(const width of [1440,390]){
+              await page.setViewportSize({width,height:900});
+              for(const key of ['facturas','recepciones','consolidaciones','stock','kardex','libro']){
+                await page.evaluate(key=>window.mountCI(key),key);
+                const adv=page.locator('.hd-advanced-panel');
+                if(await adv.isVisible())throw Error('Panel abierto inicialmente '+key);
+                await page.getByLabel('Búsqueda general',{exact:true}).fill('CI');
+                await page.getByRole('button',{name:'Búsqueda avanzada',exact:true}).click();
+                await adv.waitFor({state:'visible'});
+                if(['facturas','recepciones','consolidaciones','libro'].includes(key))await adv.getByLabel('Proveedor',{exact:true}).fill('Proveedor CI');
+                if(['recepciones','consolidaciones','stock','kardex'].includes(key))await adv.getByLabel('Bodega',{exact:true}).selectOption('1');
+                await page.getByRole('button',{name:'Buscar',exact:true}).click();
+                await page.waitForFunction(key=>window.calls.some(x=>x.key===key&&x.q==='CI'&&(['facturas','recepciones','consolidaciones','libro'].includes(key)?x.filters.proveedor==='Proveedor CI':true)),key);
+                if(key==='libro'){
+                  for(const [label,ext] of [['Exportar Excel','xlsx'],['Exportar PDF','pdf']]){
+                    const b=page.getByRole('button',{name:label,exact:true});if(await b.locator('svg').count()!==1)throw Error('Falta icono');
+                    const download=page.waitForEvent('download');await b.click();const dl=await download;if(!dl.suggestedFilename().endsWith('.'+ext))throw Error('Extensión');
+                    await dl.saveAs('/tmp/v86-'+width+'.'+ext);
+                    const bytes=readFileSync('/tmp/v86-'+width+'.'+ext);if(ext==='pdf'?!bytes.subarray(0,4).equals(Buffer.from('%PDF')):!bytes.subarray(0,2).equals(Buffer.from('PK')))throw Error('Formato incorrecto');
+                  }
+                }
+                await page.getByRole('button',{name:'Limpiar',exact:true}).click();
+                if(await page.getByLabel('Búsqueda general',{exact:true}).inputValue()!=='')throw Error('No limpia');
+              }
+            }
+            if(errors.length)throw Error(errors.join('; '));
+            console.log('V86_RECEPCION_FILTROS_EXPORT_OK');
+          }finally{await browser.close();}
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v86-respaldo-previo
+          path: /tmp/v86/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar y cotejar bytes
+        run: python /tmp/v86/transport.py publish
+      - name: Verificar carga y protección JWT
+        run: |
+          set -euo pipefail
+          cd /tmp/v86/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage();const errors=[];
+            page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>!!window.RutaHDComprasConsultas?.mount,null,{timeout:45000});
+            const result=await page.evaluate(async()=>{
+              const version=[...document.scripts].some(s=>s.src.includes('compras-consultas-v66.js?v=20261125-v86'))&&[...document.querySelectorAll('link[rel=stylesheet]')].some(s=>s.href.includes('tipos-documentos-v63.css?v=20261125-v86'));
+              const status=(await fetch('/api/v1/inventario-consultas/kardex',{headers:{Accept:'application/json'},cache:'no-store'})).status;
+              const draft=(await fetch('/api/v1/recepciones-borrador/1',{headers:{Accept:'application/json'},cache:'no-store'})).status;
+              const revision=(await fetch('/api/v1/recepciones-borrador/1/revision',{headers:{Accept:'application/json'},cache:'no-store'})).status;
+              const cancel=(await fetch('/api/v1/recepciones-borrador/1/anular',{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:'{}',cache:'no-store'})).status;
+              const confirm=(await fetch('/api/v1/recepciones-borrador/1/confirmar',{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:'{}',cache:'no-store'})).status;
+              const consolidation=(await fetch('/api/v1/consolidaciones-recepcion/1',{headers:{Accept:'application/json'},cache:'no-store'})).status;
+              const close=(await fetch('/api/v1/consolidaciones-recepcion/1/confirmar',{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:'{}',cache:'no-store'})).status;
+              const pdf=(await fetch('/api/v1/solicitudes-regularizacion/1/pdf',{headers:{Accept:'application/json'},cache:'no-store'})).status;
+              const retry=(await fetch('/api/v1/notificaciones-regularizacion/1/reenviar',{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:'{}',cache:'no-store'})).status;
+              const operationalPdf=(await fetch('/api/v1/documentos-recepcion/recepcion/1/pdf',{headers:{Accept:'application/json'},cache:'no-store'})).status;
+              return {version,status,draft,revision,cancel,confirm,consolidation,close,pdf,retry,operationalPdf};
+            });
+            if(response?.status()!==200||!result.version||result.status!==401||result.draft!==401||result.revision!==401||result.cancel!==401||result.confirm!==401||result.consolidation!==401||result.close!==401||result.pdf!==401||result.retry!==401||result.operationalPdf!==401||errors.length)throw Error(JSON.stringify({result,errors}));
+            console.log('V86_PUBLIC_OK');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar originales si falla la publicación
+        if: failure()
+        run: |
+          if [ -f /tmp/v86/attempted ]; then python /tmp/v86/transport.py rollback; fi

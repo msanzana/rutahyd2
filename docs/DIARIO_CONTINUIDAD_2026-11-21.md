@@ -1189,3 +1189,7 @@ El titular pidió reemplazar los triggers propuestos por **funciones de backend 
 ### V96 · Paginadores proporcionados — 2026-11-25
 - Captura del titular: números ovalados por min-width 35px de V33 y altura 30px de V89. CSS aditivo al final: caja border-box, dimensiones mínimas/máximas iguales 30x30 escritorio y 40x40 táctil, flex no encogible, cápsulas Anterior/Siguiente con igual altura, centrado y foco. Cubre paginador compartido, galerías, documentos y diálogos; conserva paginación y lógica. Sin DDL ni cambios comerciales.
 - Frontend dedf36663a49873639efe7e51096251d3695d2e7; workflow 7fe399a320e370ad43dc6c6c5a73b318be0bc6b8. Ejecución https://github.com/msanzana/rutahyd2/actions/runs/45710687872 / pending. Concurrencia compartida FTPS; V95 in_progress / sin conclusión al registrar. V96 conserva el index productivo y acepta JS V93 o V95 sin revertirlo. Prueba geométrica focalizada escritorio/móvil, claro/oscuro y diálogo; respaldo y rollback. Pendiente terminal.
+
+- V95 terminal SUCCESS, ejecución https://github.com/msanzana/rutahyd2/actions/runs/45710306894; cierre directo y recuperación histórica publicados, aceptación autenticada pendiente.
+- V96 terminal SUCCESS, ejecución https://github.com/msanzana/rutahyd2/actions/runs/45710687872; paginadores publicados y comprobados técnicamente.
+- Titular reafirma regla obligatoria: recepciones directas pasan a existencia disponible, nunca a tránsito. Registrada también en REGLAS_OPERATIVAS_RUTA_HD_V2.md. Sin nuevos despliegues ni pruebas repetidas.

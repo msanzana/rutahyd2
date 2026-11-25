@@ -1,0 +1,20 @@
+<?php
+declare(strict_types=1);
+require __DIR__.'/../vendor/autoload.php';
+$app=require __DIR__.'/../bootstrap/app.php';
+$app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+use Illuminate\Support\Facades\DB;
+use Illuminate\Http\Request;
+DB::statement('CREATE TABLE productos(id INTEGER PRIMARY KEY, sku TEXT, nombre TEXT)');
+DB::statement('CREATE TABLE bodegas(id INTEGER PRIMARY KEY, nombre TEXT)');
+DB::statement('CREATE TABLE tipo_documentos(id INTEGER PRIMARY KEY, nombre TEXT)');
+DB::statement('CREATE TABLE kardex(id INTEGER PRIMARY KEY, producto_id INTEGER, bodega_id INTEGER, tipo_documento_id INTEGER, folio_documento TEXT, fecha_movimiento TEXT, operacion_codigo TEXT, cantidad_documento TEXT, fisico_anterior TEXT, fisico_actual TEXT, costo_unitario_neto TEXT)');
+DB::table('productos')->insert(['id'=>7,'sku'=>'CI-01','nombre'=>'Producto CI']);
+DB::table('bodegas')->insert(['id'=>2,'nombre'=>'Central']);
+DB::table('tipo_documentos')->insert([['id'=>1,'nombre'=>'Factura electrónica'],['id'=>2,'nombre'=>'Consolidación']]);
+foreach([[1,1,'000123'],[2,2,'CON-0001'],[3,null,null],[4,99,'HIST-99']] as [$id,$type,$folio])DB::table('kardex')->insert(['id'=>$id,'producto_id'=>7,'bodega_id'=>2,'tipo_documento_id'=>$type,'folio_documento'=>$folio,'fecha_movimiento'=>'2026-11-25','operacion_codigo'=>'CI','cantidad_documento'=>'8','fisico_anterior'=>'0','fisico_actual'=>'8','costo_unitario_neto'=>'1000.25']);
+$c=new \App\Http\Controllers\ComprasConsultasControlador;
+$d=$c->listar(Request::create('/','GET',['producto_id'=>7,'bodega_id'=>2]),'kardex')->getData(true);
+$rows=array_column($d['data'],null,'id');
+if($d['total']!==4||$rows[1]['tipo_documento']!=='Factura electrónica'||$rows[1]['folio_documento']!=='000123'||$rows[2]['tipo_documento']!=='Consolidación'||$rows[2]['folio_documento']!=='CON-0001'||$rows[3]['tipo_documento']!==null||$rows[4]['tipo_documento_id']!==99||$rows[4]['folio_documento']!=='HIST-99')throw new RuntimeException('Trazabilidad incorrecta');
+echo "V93_KARDEX_DOCUMENTOS_OK\n";

@@ -1,0 +1,159 @@
+name: V90 - Formularios compactos
+on:
+  push:
+    branches: [deploy/v90-formularios-compactos-20261125]
+    paths: [.github/workflows/v90-publicar-formularios-compactos.yml]
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar respaldo y delta exclusivo de interfaz
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v90/{before,after,browser,styles}
+          git clone -q --depth=1 --branch feature/v90-formularios-compactos-20261125 https://github.com/msanzana/rutahyd2front.git /tmp/v90/front
+          git -C /tmp/v90/front fetch -q --depth=1 origin cbb7f24306877ac4a4fac504302f6be8e9c944aa
+          git -C /tmp/v90/front show cbb7f24306877ac4a4fac504302f6be8e9c944aa:assets/css/formularios-compactos-v90.css > /tmp/v90/density.css
+          cat >/tmp/v90/transport.py <<'PY'
+          import os,ssl,ftplib,io,pathlib,re,sys,html
+          from html.parser import HTMLParser
+          p=pathlib.Path('/tmp/v90')
+          css='assets/css/formularios-compactos-v90.css'
+          index='index.html'
+          guards={'root.guard':'/htdocs/.htaccess','api.guard':'/htdocs/api/.htaccess','private.guard':'/htdocs/api-v2/.htaccess','gateway.guard':'/htdocs/api/index.php'}
+          def remote(n):return guards.get(n,'/htdocs/'+n)
+          def get(f,n):
+              b=io.BytesIO();f.retrbinary('RETR '+remote(n),b.write);return b.getvalue()
+          def absent(f,n):
+              try:get(f,n);return False
+              except ftplib.error_perm as e:
+                  if str(e).startswith('550'):return True
+                  raise
+          def put(f,n,b):f.storbinary('STOR '+remote(n),io.BytesIO(b))
+          def save(area,n,b):
+              d=p/area/n;d.parent.mkdir(parents=True,exist_ok=True);d.write_bytes(b)
+          def read(area,n):return (p/area/n).read_bytes()
+          def verify_before(f):
+              assert absent(f,css),'El CSS nuevo ya existe; detener'
+              for n in [index,*guards]:assert get(f,n)==read('before',n),n
+          class Links(HTMLParser):
+              def __init__(self):super().__init__();self.links=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='link' and a.get('rel')=='stylesheet':
+                      href=a.get('href','').split('?')[0].lstrip('/')
+                      if re.fullmatch(r'assets/css/[A-Za-z0-9_.-]+\.css',href):self.links.append(href)
+          f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=45)
+          f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
+          with f:
+              mode=sys.argv[1]
+              if mode=='prepare':
+                  assert absent(f,css),'Archivo nuevo ya existe'
+                  save('before','absent-density.txt',css.encode())
+                  for n in [index,*guards]:save('before',n,get(f,n))
+                  src=read('before',index).decode()
+                  assert src.count('</head>')==1 and css not in src and 'densidad-global-v89.css?v=20261125-v89' in src
+                  tag='  <link rel="stylesheet" href="'+css+'?v=20261125-v90">\n'
+                  save('after',index,src.replace('</head>',tag+'</head>',1).encode())
+                  save('after',css,(p/'density.css').read_bytes())
+                  parser=Links();parser.feed(src)
+                  assert 'assets/css/app.css' in parser.links and 'assets/css/tipos-documentos-v63.css' in parser.links
+                  for i,n in enumerate(parser.links):save('styles',f'{i:03d}.css',get(f,n))
+                  print('V90_PRECHECK_OK',len(parser.links))
+              elif mode=='publish':
+                  verify_before(f)
+                  (p/'attempted').touch()
+                  for n in [css,index]:
+                      with (p/'attempted').open('a') as log:log.write(n+'\n')
+                      put(f,n,read('after',n))
+                  for n in [css,index]:assert get(f,n)==read('after',n),n
+                  for n in guards:assert get(f,n)==read('before',n),n
+                  print('V90_FTPS_BYTES_OK')
+              elif mode=='rollback':
+                  for n in reversed((p/'attempted').read_text().splitlines()):
+                      if n==css:
+                          if not absent(f,n):f.delete(remote(n))
+                      else:put(f,n,read('before',n))
+                  verify_before(f)
+                  print('V90_ROLLBACK_OK')
+          PY
+          python /tmp/v90/transport.py prepare
+      - name: Validar delta de formularios y responsive
+        run: |
+          set -euo pipefail
+          cd /tmp/v90/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import {readdirSync} from 'node:fs';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({viewport:{width:1440,height:900}});
+            await page.route('**/*',r=>r.abort());
+            const field='<label class="field">Nombre<input value="Producto de prueba"></label>';
+            const combo='<label class="field">Categoría<div class="hd-choice"><select class="hd-choice-native"><option>Base</option></select><input class="hd-choice-search" value="Base"><span class="hd-choice-chevron">⌄</span></div></label>';
+            const cases=[
+              ['producto','<dialog class="modal product-editor-dialog crud-product-dialog" open><form class="product-editor-form"><header class="product-editor-heading"><h2>Producto</h2><button class="crud-close">×</button></header>'+field.repeat(6)+combo+'<div class="product-editor-section">Precios</div><footer class="product-editor-actions"><button class="button">Guardar</button></footer></form></dialog>','.product-editor-form','.field input','.product-editor-actions'],
+              ['cliente','<dialog class="modal official-editor crud-official-dialog" open><form class="official-editor-form"><header class="official-editor-heading"><h2>Cliente</h2><button class="crud-close">×</button></header><div class="official-editor-grid"><div class="hd-customer-identity-row"><label class="hd-customer-identity-field"><span>RUT</span><input value="123"></label><label class="hd-customer-identity-field"><span>Nombre</span><input value="Cliente"></label><label class="hd-customer-identity-field"><span>Código</span><input disabled value="Automático"></label></div>'+combo+'</div><footer class="official-editor-actions"><button class="button">Guardar</button></footer></form></dialog>','.official-editor-grid','.hd-customer-identity-field input','.official-editor-actions'],
+              ['recepcion','<dialog class="hd-doc-modal hd-v67 hd-v70-dialog" open><form class="hd-doc-form"><header class="hd-doc-modal-head"><h2>Recepción</h2><button class="hd-doc-close">×</button></header><div class="hd-doc-modal-scroll"><section class="hd-v70-docs"><h3>Documento</h3><div class="hd-doc-grid">'+Array.from({length:8},()=>'<label class="hd-doc-field">Monto<input value="100"></label>').join('')+combo+'</div></section></div><footer class="hd-doc-modal-footer"><button class="button">Terminar Recepción</button></footer></form></dialog>','.hd-v70-docs','.hd-doc-field input','.hd-doc-modal-footer'],
+              ['ubicacion','<dialog class="location-editor-dialog" open><form class="location-editor-shell"><header class="location-editor-heading"><h2>Ubicación</h2><button class="crud-close">×</button></header><div class="location-editor-grid">'+field.repeat(4)+combo+'</div><footer class="location-editor-actions"><button class="button">Guardar</button></footer></form></dialog>','.location-editor-shell','.field input','.location-editor-actions']
+            ];
+            for(const [name,markup,section,input,footer] of cases){
+              await page.setViewportSize({width:1440,height:900});
+              await page.setContent(markup);
+              for(const f of readdirSync('/tmp/v90/styles').sort())await page.addStyleTag({path:'/tmp/v90/styles/'+f});
+              const metrics=()=>page.evaluate(({section,input,footer})=>{const q=s=>document.querySelector(s);const rect=s=>q(s).getBoundingClientRect();const style=s=>getComputedStyle(q(s));return {input:rect(input).height,font:parseFloat(style(input).fontSize),combo:rect('.hd-choice-search').height,native:rect('.hd-choice-native').height,comboPad:parseFloat(style('.hd-choice-search').paddingRight),section:rect(section).height,close:rect('button[class*="close"]').width,footer:rect(footer).bottom,dialog:rect('dialog').bottom,dialogWidth:rect('dialog').width,button:rect(footer+' .button').height,body:document.documentElement.scrollWidth}}, {section,input,footer});
+              const before=await metrics();
+              await page.addStyleTag({path:'/tmp/v90/density.css'});
+              const after=await metrics();
+              if(!(after.input>=30&&after.input<=before.input&&after.font>=13&&after.combo<=before.combo&&after.combo>=30&&after.comboPad>=26&&after.native<=1.5&&after.close>=36&&after.button>=30))throw Error(JSON.stringify({name,before,after}));
+              if(name==='cliente'&&!(after.input<before.input))throw Error('Cliente no compactado');
+              if(name==='recepcion'&&!(after.section<before.section&&after.footer<=after.dialog+2))throw Error(JSON.stringify({name,before,after}));
+              await page.setViewportSize({width:390,height:844});
+              const mobile=await metrics();
+              if(!(mobile.dialogWidth<=390&&mobile.input>=40&&mobile.font>=16&&mobile.combo>=40&&mobile.button>=44&&mobile.native<=1.5&&mobile.body<=390))throw Error(JSON.stringify({name,mobile}));
+              console.log('V90_FORM_OK',name,JSON.stringify({before,after,mobile}));
+            }
+          }finally{await browser.close();}
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v90-respaldo-previo
+          path: /tmp/v90/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar y cotejar bytes
+        run: python /tmp/v90/transport.py publish
+      - name: Verificar carga del CSS nuevo en el sitio
+        run: |
+          set -euo pipefail
+          cd /tmp/v90/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage();
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>[...document.styleSheets].some(s=>s.href?.includes('formularios-compactos-v90.css?v=20261125-v90')&&s.cssRules.length>20),null,{timeout:45000});
+            const result=await page.evaluate(()=>({density:getComputedStyle(document.documentElement).getPropertyValue('--hd-form-control').trim(),v86:[...document.scripts].some(s=>s.src.includes('compras-consultas-v66.js?v=20261125-v86'))}));
+            if(response?.status()!==200||result.density!=='30px'||!result.v86||errors.length)throw Error(JSON.stringify({result,errors}));
+            console.log('V90_PUBLIC_OK');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar originales si falla la publicación
+        if: failure()
+        run: |
+          if [ -f /tmp/v90/attempted ]; then python /tmp/v90/transport.py rollback; fi

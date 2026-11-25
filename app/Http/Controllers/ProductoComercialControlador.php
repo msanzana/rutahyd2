@@ -322,6 +322,26 @@ final class ProductoComercialControlador extends Controller
         $q->update(['activo'=>0]); // Baja lógica: conservar trazabilidad de etiquetas históricas.
     }
 
+    /** Inventario operativo V75+: no sumar saldos legados de presentaciones. */
+    private function existenciasPorBodega(int $id): array
+    {
+        $fields=['disponible','transito','comprometido','cantidad_fisica'];
+        $rows=DB::table('bodegas as b')->leftJoin('stock as s',function($j)use($id){
+            $j->on('s.bodega_id','=','b.id')->where('s.producto_id','=',$id);
+        })->where(fn($q)=>$q->where('b.activo',1)->orWhereNotNull('s.id'))
+          ->orderBy('b.nombre')->orderBy('b.id')->get(['b.id as bodega_id','b.nombre as bodega','b.activo','s.disponible','s.transito','s.comprometido','s.cantidad_fisica']);
+        $totals=array_fill_keys($fields,'0');$data=[];
+        foreach($rows as $row){
+            $item=['bodega_id'=>(int)$row->bodega_id,'bodega'=>$row->bodega,'activo'=>(bool)$row->activo];
+            foreach($fields as $field){
+                $item[$field]=(string)($row->{$field}??'0');
+                $totals[$field]=(string)\Brick\Math\BigDecimal::of($totals[$field])->plus($item[$field]);
+            }
+            $data[]=$item;
+        }
+        return ['bodegas'=>$data,'totales'=>$totals];
+    }
+
     public function ver(int $id)
     {
         $producto=DB::table('productos')->where('id',$id)->first();
@@ -329,6 +349,7 @@ final class ProductoComercialControlador extends Controller
         $presentaciones=DB::table('presentaciones_productos')
             ->where('producto_id',$id)->orderBy('id')->get();
         $data=$this->resultado($producto,$presentaciones->first(),true);
+        $data['existencias']=$this->existenciasPorBodega($id);
         // La ficha individual debe incluir exactamente los mismos nombres
         // que el listado. Sin ello el frontend marca registros reales
         // como "Sin clasificar" cuando solo conoce el identificador.

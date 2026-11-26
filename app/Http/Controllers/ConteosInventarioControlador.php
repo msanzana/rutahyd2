@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Services\ContextoCompras;
 use App\Services\PlanConteoInventario;
+use App\Services\PlanAjusteGeneral;
+use Illuminate\Support\Str;
 use Brick\Math\BigDecimal;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -162,6 +164,75 @@ final class ConteosInventarioControlador extends Controller
             $this->auditoria($id,$uid,'CONTEO_AUTORIZACION',['estado'=>'EN_REVISION'],['estado'=>'EN_REVISION','huella'=>$plan['huella'],'motivo'=>$obs,'grupos'=>$plan['grupos']]);
             // No se altera el estado hasta confirmar ENUM final y relación de ajustes.
             return ['id'=>$id,'estado'=>'EN_REVISION','autorizado'=>true,'repetida'=>false,'movimiento_aplicado'=>false];
+        },3))->header('Cache-Control','no-store');
+    }
+    private function estadoOperacion(string $code): int {
+        $id=DB::table('modulos_estados as me')->join('modulos as m','m.id','=','me.modulo_id')->join('estados as e','e.id','=','me.estado_id')->where('m.codigo','INVENTARIO_OPERACION')->where('m.activo',1)->where('me.activo',1)->where('e.activo',1)->where('e.codigo',$code)->value('e.id');
+        abort_unless($id,409,'Estado de operación no configurado.');return (int)$id;
+    }
+    private function respaldos(Request $r): array {
+        $out=[];$total=0;
+        foreach($r->file('respaldos',[]) as $file){
+            abort_unless($file->isValid(),422,'Respaldo no válido.');
+            $data=$file->get();$total+=strlen($data);
+            abort_if($total>2097152||strlen($data)===0,422,'Respaldos de hasta 2 MB en conjunto.');
+            $mime=(new \finfo(FILEINFO_MIME_TYPE))->buffer($data);
+            $ext=match($mime){'application/pdf'=>'pdf','image/png'=>'png','image/jpeg'=>'jpg',default=>null};
+            abort_unless($ext,422,'Solo PDF, PNG y JPEG.');
+            $raw=basename(str_replace('\\','/',$file->getClientOriginalName()));
+            $name=preg_replace('/[^\p{L}\p{N} _.-]/u','_',pathinfo($raw,PATHINFO_FILENAME))??'respaldo';
+            $name=mb_substr(trim($name,' ._'),0,175);
+            $out[]=['nombre'=>($name?:'respaldo').'.'.$ext,'mime'=>$mime,'contenido'=>$data,'sha256'=>hash('sha256',$data)];
+        }
+        return $out;
+    }
+    public function prepararAjustes(Request $r,int $id){
+        $v=$r->validate(['huella'=>'required|string|size:64|regex:/^[a-f0-9]{64}$/D','respaldos'=>'nullable|array|max:3','respaldos.*'=>'required|file|max:2048']);
+        $files=$this->respaldos($r);
+        return response()->json(DB::transaction(function()use($r,$v,$id,$files){
+            $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$uid=(int)$r->user()->id;$c=$this->cabecera($id,$sid);
+            $plan=$this->prepararAprobacion($c,$sid,$uid);
+            abort_unless($plan['bloqueos']===[]&&hash_equals($plan['huella'],$v['huella']),409,'Conciliación no vigente.');
+            $auth=DB::table('registros_auditoria')->where('tipo_entidad','inventario_conteos')->where('entidad_id',$id)->where('accion','CONTEO_AUTORIZACION')->lockForUpdate()->get(['usuario_id','valores_nuevos']);
+            abort_unless($auth->count()===1&&(int)$auth[0]->usuario_id===$uid,409,'Requiere la autorización registrada del responsable.');
+            $approved=json_decode($auth[0]->valores_nuevos,true,512,JSON_THROW_ON_ERROR);
+            abort_unless(($approved['huella']??null)===$plan['huella']&&($approved['grupos']??null)===$plan['grupos'],409,'Autorización no coincide.');
+            $groups=array_filter($plan['grupos'],fn($g)=>count($g)>0);
+            abort_unless(!$groups||($files&&$uid!==(int)$c->creado_por),409,'Los ajustes requieren respaldo y aprobación independiente del creador.');
+            $manifest=array_map(fn($f)=>['nombre'=>$f['nombre'],'mime'=>$f['mime'],'sha256'=>$f['sha256']],$files);
+            $prior=DB::table('registros_auditoria')->where('tipo_entidad','inventario_conteos')->where('entidad_id',$id)->where('accion','CONTEO_AJUSTES_PREPARADOS')->lockForUpdate()->get(['usuario_id','valores_nuevos']);
+            $links=DB::table('inventario_conteos_operaciones')->where('conteo_id',$id)->orderBy('operacion_id')->lockForUpdate()->pluck('operacion_id')->map(fn($x)=>(int)$x)->all();
+            if($prior->isNotEmpty()){
+                $prev=json_decode($prior[0]->valores_nuevos,true,512,JSON_THROW_ON_ERROR);
+                abort_unless($prior->count()===1&&(int)$prior[0]->usuario_id===$uid&&($prev['huella']??null)===$plan['huella']&&($prev['respaldos']??null)===$manifest&&($prev['operaciones']??null)===$links,409,'Preparación previa incompatible.');
+                return ['id'=>$id,'operaciones'=>$links,'repetida'=>true,'movimiento_aplicado'=>false];
+            }
+            abort_unless($links===[],409,'Vínculos previos sin preparación verificable.');
+            $pending=$groups?$this->estadoOperacion('INV_PEND_APROBACION'):null;
+            $state=$groups?$this->estadoOperacion('INV_APROBADA'):null;
+            foreach($groups as $code=>$items){
+                $m=DB::table('inventario_motivos as m')->join('inventario_grupos_motivos as g','g.id','=','m.grupo_id')->join('inventario_tipos_movimiento as t','t.id','=','m.tipo_movimiento_id')->where('m.codigo',$code)->where('m.activo',1)->where('g.activo',1)->where('t.activo',1)->select('m.*','g.codigo as grupo_codigo','t.naturaleza','t.codigo as tipo_codigo')->lockForUpdate()->first();
+                abort_unless($m&&$m->tipo_codigo===$m->naturaleza,409,'Motivo no disponible.');
+                $op=DB::table('inventario_operaciones')->insertGetId(['sucursal_id'=>$sid,'clase'=>'CONTEO','motivo_id'=>$m->id,'estado_id'=>$state,'motivo_codigo_snapshot'=>$m->codigo,'motivo_nombre_snapshot'=>$m->nombre,'regla_snapshot'=>$m->regla,'politica_cpp_snapshot'=>$m->politica_cpp,'justificacion'=>$approved['motivo'],'revision_tributaria'=>'PENDIENTE','evaluacion_aviso_sii'=>'NO_APLICA','token_creacion'=>(string)Str::uuid(),'creado_por'=>$c->creado_por,'aprobado_por'=>$uid,'aprobado_en'=>now(),'version'=>2]);
+                DB::table('inventario_operaciones')->where('id',$op)->update(['numero_interno'=>'CNT-AJ-'.str_pad((string)$op,8,'0',STR_PAD_LEFT)]);
+                foreach($items as $n=>$item){
+                    abort_if(DB::table('inventario_traspasos_detalle')->where('producto_id',$item['producto_id'])->whereRaw('(cantidad_despachada-cantidad_recibida-cantidad_regularizada)>0')->exists(),409,'Producto con traspaso pendiente.');
+                    $a=$this->actual($item['producto_id'],(int)$c->bodega_id,$sid);
+                    $p=(new PlanAjusteGeneral())->calcular($m,$item['cantidad'],$a['stock'],$a['cpp']);
+                    abort_unless($p['delta_disponible']===$item['delta_disponible']&&$p['cpp_actual']===$item['cpp'],409,'Ajuste no coincide con la autorización.');
+                    DB::table('inventario_operaciones_detalle')->insert(['operacion_id'=>$op,'numero_linea'=>$n+1,'producto_id'=>$item['producto_id'],'bodega_id'=>$item['bodega_id'],'cantidad'=>$p['cantidad'],'delta_disponible'=>$p['delta_disponible'],'delta_fisico'=>$p['delta_fisico'],'delta_transito'=>$p['delta_transito'],'delta_comprometido'=>$p['delta_comprometido'],'costo_unitario_snapshot'=>$p['costo_unitario_snapshot']]);
+                }
+                foreach($files as $f)DB::table('inventario_operaciones_adjuntos')->insert($f+['operacion_id'=>$op,'creado_por'=>$uid]);
+                DB::table('inventario_conteos_operaciones')->insert(['conteo_id'=>$id,'operacion_id'=>$op]);
+                DB::table('inventario_operaciones_historial')->insert([
+                    ['operacion_id'=>$op,'estado_anterior_id'=>null,'estado_nuevo_id'=>$pending,'usuario_id'=>$c->creado_por,'accion'=>'CREAR','observaciones'=>'Origen: conteo '.$id],
+                    ['operacion_id'=>$op,'estado_anterior_id'=>$pending,'estado_nuevo_id'=>$state,'usuario_id'=>$uid,'accion'=>'APROBAR','observaciones'=>'Autorización de diferencias de conteo '.$id]
+                ]);
+                $links[]=(int)$op;
+            }
+            sort($links,SORT_NUMERIC);
+            $this->auditoria($id,$uid,'CONTEO_AJUSTES_PREPARADOS',[],['huella'=>$plan['huella'],'respaldos'=>$manifest,'operaciones'=>$links]);
+            return ['id'=>$id,'operaciones'=>$links,'repetida'=>false,'movimiento_aplicado'=>false];
         },3))->header('Cache-Control','no-store');
     }
     public function ver(Request $r,int $id){

@@ -1,0 +1,93 @@
+name: V109D2 - Validar registro de conteos
+on:
+  push:
+    branches: [feature/v109a-inventario-contexto-20261126]
+    paths:
+      - .github/workflows/v109d2-registro-conteos.yml
+      - app/Http/Controllers/TraspasosInventarioControlador.php
+      - app/Http/Controllers/TraspasosConsultasControlador.php
+      - routes/api.php
+      - app/Http/Controllers/ConteosInventarioControlador.php
+      - app/Services/PlanConteoInventario.php
+      - app/Services/HabilitacionTraspasos.php
+      - app/Http/Middleware/AutorizarTraspasoInterno.php
+      - config/traspasos.php
+      - app/Services/PlanStockTraspaso.php
+      - app/Services/LectorBaseValorizadaInventario.php
+      - app/Services/BaseValorizadaInventario.php
+      - routes/api.php
+      - tests/conteos_registro_v109d2.php
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, fileinfo, pdo_sqlite, iconv
+      - name: Validar sintaxis y motor aislado
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/ConteosInventarioControlador.php
+          php -l app/Services/PlanConteoInventario.php
+          php -l app/Http/Controllers/TraspasosConsultasControlador.php
+          php -l routes/api.php
+          php -l routes/api.php
+          php -l tests/conteos_registro_v109d2.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/conteos_registro_v109d2.php | tee /tmp/v109d2.log
+          grep -Fx V109D2_REGISTRO_OK /tmp/v109d2.log
+  validar-mariadb:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: temporal_ci_solamente
+          MARIADB_DATABASE: rutahyd_v109d2_ci
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: rutahyd_v109d2_ci
+      DB_USERNAME: root
+      DB_PASSWORD: temporal_ci_solamente
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, fileinfo, pdo_mysql, iconv
+      - name: Motor aislado MariaDB
+        run: |
+          set -euo pipefail
+          php -l tests/conteos_registro_v109d2.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/conteos_registro_v109d2.php | tee /tmp/v109d2-mariadb.log
+          grep -Fx V109D2_REGISTRO_OK /tmp/v109d2-mariadb.log

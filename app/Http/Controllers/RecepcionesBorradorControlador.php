@@ -13,6 +13,30 @@ use Illuminate\Validation\ValidationException;
 /** Recepción con OC: borrador, revisión y confirmación física a tránsito. */
 final class RecepcionesBorradorControlador
 {
+    private function contexto(Request $request,bool $lock=false): int
+    {
+        return (int)app(\App\Services\ContextoCompras::class)->resolver($request,$lock)->id;
+    }
+    private function bodegaSucursal(int $bid,int $sid,bool $lock=false): void
+    {
+        $q=DB::table('inventario_bodegas_sucursales')->where('bodega_id',$bid)->where('sucursal_id',$sid);
+        if($lock)$q->lockForUpdate();
+        abort_unless($q->first(),404,'Bodega no disponible en la sucursal.');
+    }
+    private function referencias(object $r,int $sid,bool $lock=false): void
+    {
+        abort_unless((int)$r->sucursal_id===$sid,404,'Recepción no encontrada.');
+        $this->bodegaSucursal((int)$r->bodega_id,$sid,$lock);
+        $oc=DB::table('ordenes_compra')->where('id',$r->orden_compra_id)->where('sucursal_id',$sid);
+        $c=DB::table('compras')->where('id',$r->compra_id)->where('sucursal_id',$sid)->where('orden_compra_id',$r->orden_compra_id);
+        if($lock){$oc->lockForUpdate();$c->lockForUpdate();}
+        abort_unless($oc->first()&&$c->first(),409,'Referencias de recepción sin atribución válida.');
+        // No ignorar recepciones previas no atribuidas: impedir doble contabilización de OC.
+        abort_if(DB::table('recepciones')->where('orden_compra_id',$r->orden_compra_id)->where(fn($q)=>$q->whereNull('sucursal_id')->orWhere('sucursal_id','<>',$sid))->exists(),409,'Orden con recepciones pendientes de atribución.');
+        if($r->recepcion_consolidada_id!==null){
+            abort_unless(DB::table('recepciones_consolidadas')->where('id',$r->recepcion_consolidada_id)->where('sucursal_id',$sid)->exists(),409,'Consolidación sin atribución válida.');
+        }
+    }
     private function estado(string $modulo,string $codigo='PENDIENTE'): int
     {
         $id=DB::table('modulos_estados as me')->join('modulos as m','m.id','=','me.modulo_id')
@@ -62,12 +86,13 @@ final class RecepcionesBorradorControlador
           'detalles.*.confirmar_cero'=>'required|boolean',
         ]);
     }
-    public function ver(int $id)
+    public function ver(Request $request,int $id)
     {
         $r=DB::table('recepciones as r')->join('estados as e','e.id','=','r.estado_id')
-          ->join('compras as c','c.id','=','r.compra_id')->where('r.id',$id)->where('e.codigo','<>','NULA')
+          ->join('compras as c','c.id','=','r.compra_id')->where('r.id',$id)->where('r.sucursal_id',$this->contexto($request))->where('e.codigo','<>','NULA')
           ->select('r.*','e.codigo as estado','c.documento_id','c.folio','c.fecha_documento','c.total_informado')->first();
         abort_unless($r,404,'Recepción no encontrada.');
+        $this->referencias($r,(int)$r->sucursal_id);
         $details=DB::table('recepcion_detalle')->where('recepcion_id',$id)->orderBy('numero_linea')->get();
         $diff=DB::table('recepcion_diferencias')->where('recepcion_id',$id)->orderBy('id')->get();
         $eligible=$r->estado==='RECEPCIONADA'&&$r->stock_aplicado&&$r->token_confirmacion&&$diff->isEmpty()&&$this->directa($r,$details,'cantidad_aceptada');
@@ -80,12 +105,13 @@ final class RecepcionesBorradorControlador
     }
 
     /** V74A: revisión de cierre, exclusivamente de lectura. No confirma existencias. */
-    public function revisar(int $id)
+    public function revisar(Request $request,int $id)
     {
         $r=DB::table('recepciones as r')->join('estados as e','e.id','=','r.estado_id')
-          ->join('compras as c','c.id','=','r.compra_id')->where('r.id',$id)->where('e.codigo','<>','NULA')
+          ->join('compras as c','c.id','=','r.compra_id')->where('r.id',$id)->where('r.sucursal_id',$this->contexto($request))->where('e.codigo','<>','NULA')
           ->select('r.*','e.codigo as estado','c.folio','c.total_informado','c.iva_recuperable','c.subtotal_neto as compra_neto','c.total_exento as compra_exento','c.total as compra_total')->first();
         abort_unless($r,404,'Recepción no encontrada.');
+        $this->referencias($r,(int)$r->sucursal_id);
         abort_unless(in_array($r->estado,['ACTIVA','PENDIENTE'],true),409,'La revisión preliminar solo está disponible para recepciones activas.');
         $lines=DB::table('recepcion_detalle as d')->join('productos as p','p.id','=','d.producto_id')
           ->leftJoin('compras_detalle as cd','cd.id','=','d.compra_detalle_id')
@@ -173,7 +199,7 @@ final class RecepcionesBorradorControlador
             abort_unless($p&&$p->activo&&$d['presentacion_id']===null&&BigDecimal::of((string)$d['unidades_por_presentacion_snapshot'])->isEqualTo('1')&&!$q->isNegative()&&!$cost->isNegative(),409,'Línea de recepción directa inconsistente.');
             if($q->isZero())continue;
             if($desdeTransito){
-                $k=DB::table('kardex')->where('origen_tipo','RECEPCION')->where('origen_detalle_id',$d['id'])->where('operacion_codigo','ENTRADA_TRANSITO')->first();
+                $k=DB::table('kardex')->where('origen_tipo','RECEPCION')->where('origen_detalle_id',$d['id'])->where('operacion_codigo','ENTRADA_TRANSITO')->where('sucursal_id',$r->sucursal_id)->first();
                 abort_unless($k&&(int)$k->tipo_movimiento===3&&(int)$k->producto_id===$pid&&(int)$k->bodega_id===(int)$r->bodega_id&&(int)$k->tipo_documento_id===(int)$c->documento_id&&(string)$k->folio_documento===(string)$c->folio&&BigDecimal::of((string)$k->cantidad_documento)->isEqualTo($q)&&BigDecimal::of((string)$k->costo_unitario_neto)->isEqualTo($cost)&&BigDecimal::of((string)$d['cantidad_aceptada'])->isEqualTo($q)&&BigDecimal::of((string)$d['cantidad_rechazada'])->isZero(),409,'No se acredita el tránsito original de la recepción.');
                 abort_if(DB::table('kardex')->where('origen_tipo','RECEPCION')->where('origen_detalle_id',$d['id'])->where('operacion_codigo','<>','ENTRADA_TRANSITO')->exists(),409,'La línea ya tiene otro movimiento; revise el historial.');
             }
@@ -210,7 +236,7 @@ final class RecepcionesBorradorControlador
             $first=true;
             foreach($g['lines'] as $d){
                 $n=BigDecimal::of((string)$d['cantidad_recibida']);$na=$a->plus($n);$nt=$desdeTransito?$t->minus($n):$t;$nf=$desdeTransito?$f:$f->plus($n);
-                DB::table('kardex')->insert(['producto_id'=>$pid,'bodega_id'=>$r->bodega_id,'tipo_documento_id'=>$c->documento_id,'folio_documento'=>$c->folio,'tipo_movimiento'=>1,
+                DB::table('kardex')->insert(['sucursal_id'=>$r->sucursal_id,'producto_id'=>$pid,'bodega_id'=>$r->bodega_id,'tipo_documento_id'=>$c->documento_id,'folio_documento'=>$c->folio,'tipo_movimiento'=>1,
                   'cantidad_anterior'=>$this->saldo($a),'cantidad_documento'=>$this->saldo($n),'cantidad_actual'=>$this->saldo($na),
                   'transito_anterior'=>$this->saldo($t),'transito_actual'=>$this->saldo($nt),'comprometido_anterior'=>$this->saldo($m),'comprometido_actual'=>$this->saldo($m),'fisico_anterior'=>$this->saldo($f),'fisico_actual'=>$this->saldo($nf),
                   'costo_unitario_neto'=>$d['costo_unitario_neto'],'ultimo_costo_anterior'=>$first?$p->costo_neto:$newCost,'ultimo_costo_actual'=>$newCost,'cpp_anterior'=>$first?$p->costo_promedio_ponderado:$newCpp,'cpp_actual'=>$newCpp,
@@ -231,10 +257,12 @@ final class RecepcionesBorradorControlador
     {
         $v=$request->validate(['version_borrador'=>'required|integer|min:0|max:4294967294']);
         $user=(int)($request->user()?->id??0);abort_unless($user>0,401);
-        $hint=DB::table('recepciones')->where('id',$id)->first(['orden_compra_id']);abort_unless($hint&&$hint->orden_compra_id,404);
-        return response()->json(DB::transaction(function()use($hint,$v,$id,$user){
+        $hint=DB::table('recepciones')->where('id',$id)->where('sucursal_id',$this->contexto($request))->first(['orden_compra_id']);abort_unless($hint&&$hint->orden_compra_id,404);
+        return response()->json(DB::transaction(function()use($hint,$v,$id,$user,$request){
+            $branch=$this->contexto($request,true);
             $oc=DB::table('ordenes_compra')->where('id',$hint->orden_compra_id)->lockForUpdate()->first();
-            $r=DB::table('recepciones')->where('id',$id)->lockForUpdate()->first();
+            $r=DB::table('recepciones')->where('id',$id)->where('sucursal_id',$branch)->lockForUpdate()->first();
+            abort_unless($r,404,'Recepción no encontrada.');$this->referencias($r,$branch,true);
             abort_unless($oc&&$r&&(int)$r->orden_compra_id===(int)$oc->id&&(int)$r->proveedor_id===(int)$oc->proveedor_id&&(int)$r->recepcion_tipo===1&&$r->stock_aplicado&&$r->token_confirmacion&&DB::table('estados')->where('id',$r->estado_id)->where('codigo','RECEPCIONADA')->exists(),409,'Recepción no elegible para cierre directo.');
             abort_unless((int)$r->version_borrador===(int)$v['version_borrador'],409,'La recepción cambió. Vuelva a abrirla.');
             $lines=DB::table('recepcion_detalle')->where('recepcion_id',$id)->orderBy('numero_linea')->lockForUpdate()->get();
@@ -271,11 +299,13 @@ final class RecepcionesBorradorControlador
         $token=strtolower($v['token_confirmacion']);
         // Obtener la OC antes de la transacción: el primer snapshot de lectura
         // debe establecerse DESPUÉS de bloquear la OC, no antes.
-        $hint=DB::table('recepciones')->where('id',$id)->first(['orden_compra_id']);
+        $hint=DB::table('recepciones')->where('id',$id)->where('sucursal_id',$this->contexto($request))->first(['orden_compra_id']);
         abort_unless($hint&&$hint->orden_compra_id,404,'Recepción con orden de compra no encontrada.');
-        return response()->json(DB::transaction(function()use($id,$v,$user,$token,$hint){
+        return response()->json(DB::transaction(function()use($id,$v,$user,$token,$hint,$request){
+            $branch=$this->contexto($request,true);
             $oc=DB::table('ordenes_compra')->where('id',$hint->orden_compra_id)->lockForUpdate()->first();
-            $r=DB::table('recepciones')->where('id',$id)->lockForUpdate()->first();
+            $r=DB::table('recepciones')->where('id',$id)->where('sucursal_id',$branch)->lockForUpdate()->first();
+            abort_unless($r,404,'Recepción no encontrada.');$this->referencias($r,$branch,true);
             abort_unless($oc&&$r&&(int)$r->orden_compra_id===(int)$oc->id,409,'La orden de la recepción cambió.');
             $estado=DB::table('estados')->where('id',$r->estado_id)->value('codigo');
             if($r->token_confirmacion===$token&&$r->stock_aplicado&&in_array($estado,['RECEPCIONADA','DESCUADRADA','FINALIZADA'],true)){
@@ -294,7 +324,7 @@ final class RecepcionesBorradorControlador
             abort_unless($doc&&in_array($doc->familia,['FACTURA','FACTURA_COMPRA','BOLETA','GUIA'],true),409,'Tipo de documento no confirmable.');
             // Revisión nuevamente en servidor bajo bloqueo de OC. Ningún importe
             // ni diferencia proviene del cliente.
-            $review=$this->revisar($id)->getData(true);
+            $review=$this->revisar($request,$id)->getData(true);
             abort_unless(hash_equals($review['huella_revision'],$v['huella_revision']),409,'Cambió la revisión. Abra nuevamente las diferencias.');
             $dif=$review['diferencias'];$lines=$review['lineas'];$directa=(bool)$review['cierre_directo'];
             abort_unless(count($lines)>0,422,'La recepción requiere líneas.');
@@ -332,7 +362,7 @@ final class RecepcionesBorradorControlador
                 abort_unless(!$a->isNegative()&&!$t->isNegative()&&!$m->isNegative()&&$f->isEqualTo($a->plus($t)->plus($m)),409,'Stock previo inconsistente. Regularice antes de confirmar.');
                 $nt=$t->plus($q);$nf=$f->plus($q);
                 DB::table('stock')->where('id',$stock->id)->update(['transito'=>$this->saldo($nt),'cantidad_fisica'=>$this->saldo($nf)]);
-                DB::table('kardex')->insert(['producto_id'=>$p->id,'bodega_id'=>$r->bodega_id,'tipo_documento_id'=>$doc->id,
+                DB::table('kardex')->insert(['sucursal_id'=>$r->sucursal_id,'producto_id'=>$p->id,'bodega_id'=>$r->bodega_id,'tipo_documento_id'=>$doc->id,
                   'folio_documento'=>$c->folio,'tipo_movimiento'=>3,'cantidad_anterior'=>$this->saldo($a),'cantidad_documento'=>$this->saldo($q),
                   'cantidad_actual'=>$this->saldo($a),'transito_anterior'=>$this->saldo($t),'transito_actual'=>$this->saldo($nt),
                   'comprometido_anterior'=>$this->saldo($m),'comprometido_actual'=>$this->saldo($m),'fisico_anterior'=>$this->saldo($f),'fisico_actual'=>$this->saldo($nf),
@@ -367,11 +397,13 @@ final class RecepcionesBorradorControlador
         $v=$request->validate(['version_borrador'=>'required|integer|min:0|max:4294967294','motivo'=>'required|string|min:3|max:1000']);
         $motivo=trim($v['motivo']);if(mb_strlen($motivo)<3)$this->error('motivo','Ingrese el motivo de anulación.');
         $user=(int)($request->user()?->id??0);abort_unless($user>0,401);
-        return response()->json(DB::transaction(function()use($id,$v,$motivo,$user){
-            $hint=DB::table('recepciones')->where('id',$id)->first(['orden_compra_id']);
+        return response()->json(DB::transaction(function()use($id,$v,$motivo,$user,$request){
+            $branch=$this->contexto($request,true);
+            $hint=DB::table('recepciones')->where('id',$id)->where('sucursal_id',$this->contexto($request))->first(['orden_compra_id']);
             abort_unless($hint,404,'Recepción no encontrada.');
             if($hint->orden_compra_id!==null)DB::table('ordenes_compra')->where('id',$hint->orden_compra_id)->lockForUpdate()->first();
-            $r=DB::table('recepciones')->where('id',$id)->lockForUpdate()->first();
+            $r=DB::table('recepciones')->where('id',$id)->where('sucursal_id',$branch)->lockForUpdate()->first();
+            abort_unless($r,404,'Recepción no encontrada.');$this->referencias($r,$branch,true);
             abort_unless($r,404,'Recepción no encontrada.');
             $codigo=DB::table('estados')->where('id',$r->estado_id)->value('codigo');
             abort_unless(in_array($codigo,['ACTIVA','PENDIENTE'],true)&&!$r->stock_aplicado&&!$r->recepcion_consolidada_id&&!$r->token_confirmacion,409,'Solo se anulan recepciones activas sin movimientos.');
@@ -399,21 +431,25 @@ final class RecepcionesBorradorControlador
         $user=(int)($request->user()?->id??0);
         abort_unless($user>0,401);
         try {
-            $out=DB::transaction(function()use($v,$id,$user){
-                $oc=DB::table('ordenes_compra')->where('id',$v['orden_compra_id'])->lockForUpdate()->first();
+            $out=DB::transaction(function()use($v,$id,$user,$request){
+                $branch=$this->contexto($request,true);
+                $oc=DB::table('ordenes_compra')->where('id',$v['orden_compra_id'])->where('sucursal_id',$branch)->lockForUpdate()->first();
                 abort_unless($oc,404,'Orden de compra inexistente.');
                 abort_unless(DB::table('estados')->where('id',$oc->estado_id)->where('codigo','ACTIVA')->exists(),409,'La orden ya no está activa.');
                 $prov=DB::table('proveedores')->where('id',$oc->proveedor_id)->lockForUpdate()->first();
                 abort_unless($prov && $prov->activo,409,'Proveedor no activo.');
                 $b=DB::table('bodegas')->where('id',$v['bodega_id'])->where('activo',1)->lockForUpdate()->first();
                 abort_unless($b,422,'Seleccione una bodega activa.');
+                $this->bodegaSucursal((int)$b->id,$branch,true);
+                abort_if(DB::table('recepciones')->where('orden_compra_id',$oc->id)->where(fn($q)=>$q->whereNull('sucursal_id')->orWhere('sucursal_id','<>',$branch))->exists(),409,'Orden con recepciones pendientes de atribución.');
                 $doc=DB::table('tipo_documentos')->where('id',$v['documento_id'])->where('activo',1)->where('documento_compra',1)->lockForUpdate()->first();
                 // No registrar NC/ND como entradas físicas; su flujo corresponde a regularización.
                 abort_unless($doc&&in_array($doc->familia,['FACTURA','FACTURA_COMPRA','BOLETA','GUIA'],true),422,'Tipo de documento no habilitado para recepción.');
                 $recEstado=$this->estado('RECEPCION'); $compEstado=$this->estado('FACTURA_COMPRA');
                 $r=null;$c=null;$old=collect();
                 if($id!==null){
-                    $r=DB::table('recepciones')->where('id',$id)->lockForUpdate()->first();
+                    $r=DB::table('recepciones')->where('id',$id)->where('sucursal_id',$branch)->lockForUpdate()->first();
+            abort_unless($r,404,'Recepción no encontrada.');$this->referencias($r,$branch,true);
                     abort_unless($r,404,'Recepción no encontrada.');
                     abort_unless((int)$r->orden_compra_id===(int)$oc->id&&(int)$r->proveedor_id===(int)$prov->id,409,'No se puede cambiar la orden de un borrador.');
                     abort_unless((int)$r->estado_id===$recEstado&&!$r->stock_aplicado&&!$r->recepcion_consolidada_id&&!$r->token_confirmacion,409,'La recepción ya no es editable.');
@@ -447,13 +483,13 @@ final class RecepcionesBorradorControlador
                     $lines[]=[$o,$lineId,$qd,$qr,$cost,$exLine,$docMoney,$recMoney];
                 }
                 foreach($old as $lineId=>$existing)if(!isset($seen[(int)$lineId]))$this->error('detalles','Las líneas guardadas no se eliminan. Corrija sus cantidades y costos.');
-                $header=['proveedor_id'=>$prov->id,'documento_id'=>$doc->id,'folio'=>$folio,'orden_compra_id'=>$oc->id,
+                $header=['sucursal_id'=>$branch,'proveedor_id'=>$prov->id,'documento_id'=>$doc->id,'folio'=>$folio,'orden_compra_id'=>$oc->id,
                   'fecha_documento'=>$v['fecha_documento'],'estado_id'=>$compEstado,'subtotal_neto'=>$net,'total_exento'=>$ex,
                   'iva_recuperable'=>$iva,'otros_impuestos'=>$other,'total'=>$total,'total_informado'=>(int)$v['total_informado'],
                   'signo_contable'=>1,'observaciones'=>$v['observaciones']??null];
                 if($c){$compra=(int)$c->id;DB::table('compras')->where('id',$compra)->update($header);}
                 else {$compra=DB::table('compras')->insertGetId($header+['creado_por'=>$user]);}
-                $rh=['orden_compra_id'=>$oc->id,'compra_id'=>$compra,'proveedor_id'=>$prov->id,'bodega_id'=>$b->id,
+                $rh=['sucursal_id'=>$branch,'orden_compra_id'=>$oc->id,'compra_id'=>$compra,'proveedor_id'=>$prov->id,'bodega_id'=>$b->id,
                   'recepcion_tipo'=>1,'estado_id'=>$recEstado,'fecha_recepcion'=>$v['fecha_recepcion'].' 00:00:00',
                   'subtotal_neto'=>$net,'total_exento'=>$ex,'total_iva'=>$iva,'otros_impuestos'=>$other,'total'=>$total,
                   'observaciones'=>$v['observaciones']??null,'version_borrador'=>$r?(int)$r->version_borrador+1:1];

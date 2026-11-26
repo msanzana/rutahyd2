@@ -6,20 +6,22 @@ use App\Services\ContextoCompras;
 use App\Services\PlanAjusteGeneral;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Brick\Math\BigDecimal;
+use Symfony\Component\HttpFoundation\Response;
 
-/** V109B1: vista previa de ajustes, sin reservar ni modificar inventario. */
+/** V109B2: registro y respaldo de ajustes pendientes, sin movimientos de inventario. */
 final class AjustesGeneralesControlador extends Controller
 {
-    public function revisar(Request $r)
-    {
-        $v=$r->validate([
+    private function reglas(): array {
+        return [
             'motivo_codigo'=>'required|integer|in:101,102,107',
             'producto_id'=>'required|integer|min:1',
             'bodega_id'=>'required|integer|min:1',
             'cantidad'=>['required','string','regex:/^(?:0|[1-9][0-9]{0,19})(?:\.[0-9]{1,8})?$/D'],
-        ]);
-        return response()->json(DB::transaction(function()use($r,$v){
-            $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;
+        ];
+    }
+    private function evaluar(array $v,int $sid): array {
+            abort_unless(DB::transactionLevel()>0,500,'Evaluación sin transacción.');
             $m=DB::table('inventario_motivos as m')
               ->join('inventario_grupos_motivos as g','g.id','=','m.grupo_id')
               ->join('inventario_tipos_movimiento as t','t.id','=','m.tipo_movimiento_id')
@@ -38,7 +40,90 @@ final class AjustesGeneralesControlador extends Controller
             $s=DB::table('stock')->where('producto_id',$p->id)->where('bodega_id',$b->id)->lockForUpdate()->first()
               ??(object)['disponible'=>'0','transito'=>'0','comprometido'=>'0','cantidad_fisica'=>'0'];
             $plan=(new PlanAjusteGeneral())->calcular($m,$v['cantidad'],$s,(string)$p->costo_promedio_ponderado);
+            return [$m,$b,$p,$plan];
+    }
+    public function revisar(Request $r)
+    {
+        $v=$r->validate($this->reglas());
+        return response()->json(DB::transaction(function()use($r,$v){
+            $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;
+            [$m,$b,$p,$plan]=$this->evaluar($v,$sid);
             return ['sucursal_id'=>$sid,'producto'=>['id'=>$p->id,'sku'=>$p->sku,'nombre'=>$p->nombre],'bodega'=>$b,'motivo'=>['codigo'=>$m->codigo,'nombre'=>$m->nombre],'plan'=>$plan,'solo_previsualizacion'=>true,'puede_confirmar'=>false,'mensaje'=>'Simulación. No guarda ni modifica stock. La confirmación requiere respaldo, aprobación y nueva validación.'];
         },3))->header('Cache-Control','no-store');
+    }
+    private function estado(string $codigo): int {
+        $id=DB::table('modulos_estados as me')->join('modulos as m','m.id','=','me.modulo_id')->join('estados as e','e.id','=','me.estado_id')->where('m.codigo','INVENTARIO_OPERACION')->where('m.activo',1)->where('me.activo',1)->where('e.activo',1)->where('e.codigo',$codigo)->value('e.id');
+        abort_unless($id,409,'Estado de inventario no configurado.');return (int)$id;
+    }
+    private function archivos(Request $r): array {
+        $out=[];$total=0;
+        foreach($r->file('respaldos',[]) as $file){
+            abort_unless($file->isValid(),422,'Archivo no válido.');
+            $data=$file->get();$total+=strlen($data);
+            abort_if($total>2*1024*1024||strlen($data)===0,422,'Los respaldos no pueden superar 2 MB en conjunto.');
+            $mime=(new \finfo(FILEINFO_MIME_TYPE))->buffer($data);
+            $ext=match($mime){'application/pdf'=>'pdf','image/png'=>'png','image/jpeg'=>'jpg',default=>null};
+            abort_unless($ext,422,'Solo se permiten PDF, PNG y JPEG.');
+            $raw=basename(str_replace('\\','/',$file->getClientOriginalName()));
+            $name=preg_replace('/[^\p{L}\p{N} _.-]/u','_',pathinfo($raw,PATHINFO_FILENAME))??'respaldo';
+            $name=mb_substr(trim($name,' ._'),0,175);
+            $out[]=['nombre'=>($name?:'respaldo').'.'.$ext,'mime'=>$mime,'contenido'=>$data,'sha256'=>hash('sha256',$data)];
+        }
+        abort_unless($out,422,'Adjunte al menos un respaldo.');
+        return $out;
+    }
+    public function crear(Request $r)
+    {
+        $v=$r->validate($this->reglas()+['justificacion'=>'required|string|min:10|max:4000','token_creacion'=>'required|uuid','respaldos'=>'required|array|min:1|max:3','respaldos.*'=>'required|file|max:2048']);
+        $just=trim($v['justificacion']);abort_if(mb_strlen($just)<10,422,'Justificación insuficiente.');
+        $files=$this->archivos($r);$token=strtolower($v['token_creacion']);
+        $result=DB::transaction(function()use($r,$v,$just,$files,$token){
+            $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$uid=(int)$r->user()->id;
+            $old=DB::table('inventario_operaciones')->where('token_creacion',$token)->lockForUpdate()->first();
+            if($old){
+                abort_unless((int)$old->sucursal_id===$sid&&$old->clase==='AJUSTE'&&(int)$old->creado_por===$uid&&(int)$old->motivo_codigo_snapshot===(int)$v['motivo_codigo']&&$old->justificacion===$just,409,'Token usado en otra solicitud.');
+                $lines=DB::table('inventario_operaciones_detalle')->where('operacion_id',$old->id)->get();
+                $l=$lines->first();
+                $stored=DB::table('inventario_operaciones_adjuntos')->where('operacion_id',$old->id)->orderBy('id')->get(['nombre','mime','sha256'])->map(fn($x)=>(array)$x)->all();
+                $requested=array_map(fn($x)=>['nombre'=>$x['nombre'],'mime'=>$x['mime'],'sha256'=>$x['sha256']],$files);
+                abort_unless($lines->count()===1&&(int)$l->producto_id===(int)$v['producto_id']&&(int)$l->bodega_id===(int)$v['bodega_id']&&BigDecimal::of($l->cantidad)->isEqualTo($v['cantidad'])&&$stored===$requested,409,'Token usado en otra solicitud.');
+                return ['id'=>(int)$old->id,'numero_interno'=>$old->numero_interno,'repetida'=>true];
+            }
+            [$m,$b,$p,$plan]=$this->evaluar($v,$sid);
+            $state=$this->estado('INV_PEND_APROBACION');
+            $id=DB::table('inventario_operaciones')->insertGetId(['sucursal_id'=>$sid,'clase'=>'AJUSTE','motivo_id'=>$m->id,'estado_id'=>$state,'motivo_codigo_snapshot'=>$m->codigo,'motivo_nombre_snapshot'=>$m->nombre,'regla_snapshot'=>$m->regla,'politica_cpp_snapshot'=>$m->politica_cpp,'justificacion'=>$just,'revision_tributaria'=>'PENDIENTE','evaluacion_aviso_sii'=>'NO_APLICA','token_creacion'=>$token,'creado_por'=>$uid]);
+            $num='AJG-'.str_pad((string)$id,8,'0',STR_PAD_LEFT);
+            DB::table('inventario_operaciones')->where('id',$id)->update(['numero_interno'=>$num]);
+            DB::table('inventario_operaciones_detalle')->insert(['operacion_id'=>$id,'numero_linea'=>1,'producto_id'=>$p->id,'bodega_id'=>$b->id,'cantidad'=>$plan['cantidad'],'delta_disponible'=>$plan['delta_disponible'],'delta_fisico'=>$plan['delta_fisico'],'delta_transito'=>$plan['delta_transito'],'delta_comprometido'=>$plan['delta_comprometido'],'costo_unitario_snapshot'=>$plan['costo_unitario_snapshot']]);
+            foreach($files as $f)DB::table('inventario_operaciones_adjuntos')->insert($f+['operacion_id'=>$id,'creado_por'=>$uid]);
+            DB::table('inventario_operaciones_historial')->insert(['operacion_id'=>$id,'estado_anterior_id'=>null,'estado_nuevo_id'=>$state,'usuario_id'=>$uid,'accion'=>'CREAR','observaciones'=>'Ajuste con respaldo pendiente de aprobación.']);
+            DB::table('registros_auditoria')->insert(['usuario_id'=>$uid,'accion'=>'INVENTARIO_CREAR','tipo_entidad'=>'inventario_operaciones','entidad_id'=>$id,'valores_anteriores'=>json_encode(null,JSON_THROW_ON_ERROR),'valores_nuevos'=>json_encode(['estado_id'=>$state,'sucursal_id'=>$sid,'respaldos'=>array_column($files,'sha256')],JSON_THROW_ON_ERROR)]);
+            return ['id'=>(int)$id,'numero_interno'=>$num,'repetida'=>false];
+        },3);
+        return response()->json($result,$result['repetida']?200:201)->header('Cache-Control','no-store');
+    }
+    private function base(int $sid){
+        return DB::table('inventario_operaciones as o')->join('estados as e','e.id','=','o.estado_id')->where('o.clase','AJUSTE')->where('o.sucursal_id',$sid)->where('e.codigo','<>','INV_ANULADA')->select('o.*','e.codigo as estado_codigo','e.nombre as estado_nombre');
+    }
+    public function listar(Request $r){
+        $v=$r->validate(['buscar'=>'nullable|string|max:120','page'=>'nullable|integer|min:1']);
+        $q=$this->base((int)app(ContextoCompras::class)->resolver($r)->id);
+        if(trim($v['buscar']??'')!==''){$s=trim($v['buscar']);$q->where(fn($x)=>$x->where('o.numero_interno','like','%'.$s.'%')->orWhere('o.motivo_nombre_snapshot','like','%'.$s.'%'));}
+        return response()->json($q->orderByDesc('o.id')->paginate(25))->header('Cache-Control','no-store');
+    }
+    public function ver(Request $r,int $id){
+        $sid=(int)app(ContextoCompras::class)->resolver($r)->id;
+        $o=$this->base($sid)->where('o.id',$id)->first();abort_unless($o,404);
+        $d=DB::table('inventario_operaciones_detalle as d')->join('productos as p','p.id','=','d.producto_id')->join('bodegas as b','b.id','=','d.bodega_id')->where('d.operacion_id',$id)->orderBy('d.numero_linea')->get(['d.*','p.sku','p.nombre as producto','b.nombre as bodega']);
+        $a=DB::table('inventario_operaciones_adjuntos')->where('operacion_id',$id)->orderBy('id')->get(['id','nombre','mime','sha256','creado_en']);
+        return response()->json(['operacion'=>$o,'detalles'=>$d,'respaldos'=>$a])->header('Cache-Control','no-store');
+    }
+    public function respaldo(Request $r,int $id,int $adjunto): Response {
+        $sid=(int)app(ContextoCompras::class)->resolver($r)->id;
+        abort_unless($this->base($sid)->where('o.id',$id)->exists(),404);
+        $a=DB::table('inventario_operaciones_adjuntos')->where('id',$adjunto)->where('operacion_id',$id)->first();
+        abort_unless($a,404);abort_unless(hash_equals($a->sha256,hash('sha256',$a->contenido)),409,'Respaldo inconsistente.');
+        $ext=match($a->mime){'application/pdf'=>'pdf','image/png'=>'png','image/jpeg'=>'jpg',default=>'bin'};
+        return response($a->contenido,200,['Content-Type'=>'application/octet-stream','Content-Disposition'=>'attachment; filename="respaldo-'.$adjunto.'.'.$ext.'"','X-Content-Type-Options'=>'nosniff','Cache-Control'=>'private, no-store']);
     }
 }

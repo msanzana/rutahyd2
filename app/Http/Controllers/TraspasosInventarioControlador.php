@@ -7,8 +7,9 @@ use App\Services\PlanStockTraspaso;
 use Brick\Math\BigDecimal;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
-/** V109C3: solicitudes y aprobación; sin despacho, recepción ni guía emitida. */
+/** V109C4: solicitudes, aprobación, anulación y traspaso inmediato interno. */
 final class TraspasosInventarioControlador extends Controller
 {
     private function estado(string $code): int {
@@ -90,7 +91,15 @@ final class TraspasosInventarioControlador extends Controller
             $o=DB::table('inventario_operaciones')->where('id',$link->operacion_id)->where('sucursal_id',$sid)->where('clase','TRASPASO')->lockForUpdate()->first();
             $pending=$this->estado('INV_PEND_APROBACION');$approved=$this->estado('INV_APROBADA');
             abort_unless($o&&(int)$o->estado_id===$pending&&(int)$o->version===(int)$v['version']&&(int)$o->creado_por!==$uid&&(int)$o->motivo_codigo_snapshot===709,409,'Estado, versión o aprobador inválido.');
-            $items=DB::table('inventario_traspasos_detalle')->where('traspaso_id',$id)->lockForUpdate()->get();
+            $this->revisarGuardado($t,$o,$sid);
+            DB::table('inventario_operaciones')->where('id',$o->id)->update(['estado_id'=>$approved,'version'=>$o->version+1,'aprobado_por'=>$uid,'aprobado_en'=>now()]);
+            $this->historial((int)$o->id,$pending,$approved,$uid,'APROBAR',$obs);
+            return ['id'=>$id,'operacion_id'=>(int)$o->id,'estado_operacion'=>'INV_APROBADA','estado_traspaso'=>'BORRADOR','version'=>(int)$o->version+1,'movimiento_aplicado'=>false];
+        },3))->header('Cache-Control','no-store');
+    }
+
+    private function revisarGuardado(object $t,object $o,int $sid): array {
+            $items=DB::table('inventario_traspasos_detalle')->where('traspaso_id',$t->id)->lockForUpdate()->get();
             abort_unless($items->count()>=1&&$items->count()<=50,409,'Detalle inválido.');
             foreach($items as $l)foreach(['cantidad_despachada','cantidad_recibida','cantidad_regularizada'] as $k)abort_unless(BigDecimal::of($l->$k)->isZero(),409,'Traspaso ya iniciado.');
             [$m,$plans]=$this->evaluar($sid,(int)$t->bodega_origen_id,(int)$t->bodega_destino_id,$t->modalidad,$items->map(fn($l)=>['producto_id'=>$l->producto_id,'cantidad'=>(string)$l->cantidad_solicitada])->all());
@@ -105,9 +114,59 @@ final class TraspasosInventarioControlador extends Controller
                     foreach(['disponible'=>'delta_disponible','transito'=>'delta_transito','comprometido'=>'delta_comprometido','cantidad_fisica'=>'delta_fisico'] as $k=>$f)abort_unless(BigDecimal::of($d->$f)->isEqualTo($p[$side][$k]['delta']),409,'Detalle alterado.');
                 }
             }
-            DB::table('inventario_operaciones')->where('id',$o->id)->update(['estado_id'=>$approved,'version'=>$o->version+1,'aprobado_por'=>$uid,'aprobado_en'=>now()]);
-            $this->historial((int)$o->id,$pending,$approved,$uid,'APROBAR',$obs);
-            return ['id'=>$id,'operacion_id'=>(int)$o->id,'estado_operacion'=>'INV_APROBADA','estado_traspaso'=>'BORRADOR','version'=>(int)$o->version+1,'movimiento_aplicado'=>false];
+        return [$items,$details,$plans];
+    }
+    private function cargar(int $id,int $sid): array {
+        $t=DB::table('inventario_traspasos')->where('id',$id)->where('sucursal_origen_id',$sid)->where('sucursal_destino_id',$sid)->lockForUpdate()->first();abort_unless($t,404);
+        $links=DB::table('inventario_traspasos_operaciones')->where('traspaso_id',$id)->lockForUpdate()->get();
+        $link=$links->first();abort_unless($links->count()===1&&$link->etapa===$this->etapa($t->modalidad),409,'Etapa inválida.');
+        $o=DB::table('inventario_operaciones')->where('id',$link->operacion_id)->where('sucursal_id',$sid)->where('clase','TRASPASO')->lockForUpdate()->first();
+        abort_unless($o&&(int)$o->motivo_codigo_snapshot===709,409,'Operación de traspaso inválida.');
+        return [$t,$o];
+    }
+    public function anular(Request $r,int $id){
+        $v=$r->validate(['version'=>'required|integer|min:1|max:4294967294','motivo'=>'required|string|min:3|max:1000']);
+        $obs=trim($v['motivo']);abort_if(mb_strlen($obs)<3,422,'Motivo insuficiente.');
+        return response()->json(DB::transaction(function()use($r,$id,$v,$obs){
+            $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$uid=(int)$r->user()->id;
+            [$t,$o]=$this->cargar($id,$sid);
+            abort_unless($t->estado==='BORRADOR'&&in_array((int)$o->estado_id,[$this->estado('INV_PEND_APROBACION'),$this->estado('INV_APROBADA')],true)&&(int)$o->version===(int)$v['version'],409,'Solo solicitudes sin ejecución pueden anularse.');
+            abort_if($t->guia_despacho_id!==null||DB::table('inventario_operaciones_detalle')->where('operacion_id',$o->id)->whereNotNull('kardex_id')->exists(),409,'Hay documentos o movimientos asociados.');
+            $items=DB::table('inventario_traspasos_detalle')->where('traspaso_id',$id)->lockForUpdate()->get();
+            foreach($items as $l)foreach(['cantidad_despachada','cantidad_recibida','cantidad_regularizada'] as $f)abort_unless(BigDecimal::of($l->$f)->isZero(),409,'Traspaso iniciado.');
+            $state=$this->estado('INV_ANULADA');
+            // El enum de cabecera aún no está completo: la operación vinculada es la fuente de estado de anulación.
+            DB::table('inventario_operaciones')->where('id',$o->id)->update(['estado_id'=>$state,'version'=>$o->version+1,'anulado_por'=>$uid,'anulado_en'=>now(),'motivo_anulacion'=>$obs]);
+            $this->historial((int)$o->id,(int)$o->estado_id,$state,$uid,'ANULAR',$obs);
+            return ['id'=>$id,'estado_operacion'=>'INV_ANULADA','version'=>(int)$o->version+1,'movimiento_aplicado'=>false];
+        },3))->header('Cache-Control','no-store');
+    }
+    public function confirmar(Request $r,int $id){
+        $v=$r->validate(['version'=>'required|integer|min:1|max:4294967294','token_confirmacion'=>'required|uuid']);$token=strtolower($v['token_confirmacion']);
+        return response()->json(DB::transaction(function()use($r,$id,$v,$token){
+            $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$uid=(int)$r->user()->id;
+            [$t,$o]=$this->cargar($id,$sid);$approved=$this->estado('INV_APROBADA');$done=$this->estado('INV_CONFIRMADA');
+            if((int)$o->estado_id===$done&&$t->estado==='RECIBIDO'&&$o->token_confirmacion===$token&&(int)$o->confirmado_por===$uid)return ['id'=>$id,'estado_operacion'=>'INV_CONFIRMADA','estado_traspaso'=>'RECIBIDO','version'=>(int)$o->version];
+            abort_unless($t->modalidad==='INMEDIATO'&&$t->estado==='BORRADOR'&&$t->guia_despacho_id===null,409,'Solo traspaso inmediato interno sin guía vinculada. Despacho con tránsito aún no habilitado.');
+            abort_unless((int)$o->estado_id===$approved&&(int)$o->version===(int)$v['version']&&$o->aprobado_por&&(int)$o->aprobado_por!==(int)$o->creado_por,409,'Se requiere aprobación y versión vigente.');
+            abort_if(DB::table('inventario_operaciones')->where('token_confirmacion',$token)->exists(),409,'Token utilizado.');
+            [$items,$details,$plans]=$this->revisarGuardado($t,$o,$sid);
+            foreach($items->sortBy('producto_id') as $l){
+                $pid=(int)$l->producto_id;$plan=$plans[$pid];$p=DB::table('productos')->where('id',$pid)->lockForUpdate()->first();
+                foreach([[$t->bodega_origen_id,'origen'],[$t->bodega_destino_id,'destino']] as [$bid,$side]){
+                    $b=(int)$bid;$d=$details->first(fn($d)=>(int)$d->producto_id===$pid&&(int)$d->bodega_id===$b);$s=$plan[$side];
+                    $stock=DB::table('stock')->where('producto_id',$pid)->where('bodega_id',$b)->lockForUpdate()->first();
+                    $stockId=$stock->id??DB::table('stock')->insertGetId(['producto_id'=>$pid,'bodega_id'=>$b,'disponible'=>0,'transito'=>0,'comprometido'=>0,'cantidad_fisica'=>0]);
+                    $k=DB::table('kardex')->insertGetId(['sucursal_id'=>$sid,'producto_id'=>$pid,'bodega_id'=>$b,'tipo_documento_id'=>null,'folio_documento'=>$t->numero_interno,'tipo_movimiento'=>$side==='origen'?2:1,'cantidad_anterior'=>$s['disponible']['anterior'],'cantidad_documento'=>$plan['cantidades']['cantidad_movimiento'],'cantidad_actual'=>$s['disponible']['posterior'],'transito_anterior'=>$s['transito']['anterior'],'transito_actual'=>$s['transito']['posterior'],'comprometido_anterior'=>$s['comprometido']['anterior'],'comprometido_actual'=>$s['comprometido']['posterior'],'fisico_anterior'=>$s['cantidad_fisica']['anterior'],'fisico_actual'=>$s['cantidad_fisica']['posterior'],'costo_unitario_neto'=>$plan['costo_cpp_snapshot'],'ultimo_costo_anterior'=>$p->costo_neto,'ultimo_costo_actual'=>$p->costo_neto,'cpp_anterior'=>$plan['cpp_anterior'],'cpp_actual'=>$plan['cpp_actual'],'origen_tipo'=>'AJUSTE_INVENTARIO','origen_detalle_id'=>$d->id,'operacion_codigo'=>'TRASPASO_INTERNO','token_idempotencia'=>(string)Str::uuid(),'registrado_por'=>$uid,'observaciones'=>$t->numero_interno.' | '.$o->justificacion]);
+                    DB::table('stock')->where('id',$stockId)->update(['disponible'=>$s['disponible']['posterior'],'cantidad_fisica'=>$s['cantidad_fisica']['posterior']]);
+                    DB::table('inventario_operaciones_detalle')->where('id',$d->id)->update(['kardex_id'=>$k]);
+                }
+                DB::table('inventario_traspasos_detalle')->where('id',$l->id)->update(['cantidad_despachada'=>$l->cantidad_solicitada,'cantidad_recibida'=>$l->cantidad_solicitada]);
+            }
+            DB::table('inventario_traspasos')->where('id',$id)->update(['estado'=>'RECIBIDO']);
+            DB::table('inventario_operaciones')->where('id',$o->id)->update(['estado_id'=>$done,'version'=>$o->version+1,'confirmado_por'=>$uid,'confirmado_en'=>now(),'token_confirmacion'=>$token]);
+            $this->historial((int)$o->id,$approved,$done,$uid,'CONFIRMAR','Traspaso inmediato interno; CPP conservado, sin emisión de DTE.');
+            return ['id'=>$id,'estado_operacion'=>'INV_CONFIRMADA','estado_traspaso'=>'RECIBIDO','version'=>(int)$o->version+1];
         },3))->header('Cache-Control','no-store');
     }
 }

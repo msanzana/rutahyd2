@@ -50,16 +50,25 @@ final class ContextoSucursalControlador extends Controller
         abort_unless($row,503,'Configuración de sucursales pendiente.');
         return $this->listo() && (bool)$row->contexto_obligatorio;
     }
+    // Etapa transitoria: confirmar una sucursal única no equivale a aislar operaciones.
+    // Si existe cualquier segunda sucursal (activa o histórica), no habilitar este modo.
+    private function unica(): bool
+    {
+        return DB::table('sucursales')->count()===1 && DB::table('sucursales')->where('activo',1)->count()===1;
+    }
     public function estado(Request $r)
     {
         $token=$this->token($r);$u=$this->usuario((int)$token->usuario_id);
         $required=$this->obligatorio();
+        $single=!$required&&$this->unica();
         $context=DB::table('sesiones_sucursales')->where('token_acceso_id',$token->id)->first();
         $allowed=$this->autorizadas($u)->orderBy('s.nombre')->orderBy('s.id')->get();
-        $current=$required&&$context?$allowed->first(fn($s)=>(int)$s->id===(int)$context->sucursal_id):null;
+        $current=($required||$single)&&$context?$allowed->first(fn($s)=>(int)$s->id===(int)$context->sucursal_id):null;
         return response()->json([
             'contexto_obligatorio'=>$required,
             'aislamiento_completo'=>$this->listo(),
+            'seleccion_habilitada'=>$required||$single,
+            'modo_sucursal_unica'=>$single,
             'sucursales'=>$allowed,
             'sucursal_actual'=>$current,
             'version_contexto'=>(int)($context->version_contexto??0),
@@ -70,9 +79,11 @@ final class ContextoSucursalControlador extends Controller
         $v=$r->validate(['sucursal_id'=>'required|integer|min:1','version_contexto'=>'required|integer|min:0|max:2147483646']);
         // El bloqueo de sucursal precede a usuario/token, igual que la administración de accesos.
         return response()->json(DB::transaction(function()use($r,$v){
-            abort_unless($this->obligatorio(),409,'El contexto operativo multisucursal aún no está habilitado.');
+            $required=$this->obligatorio();
+            abort_unless($required||$this->unica(),409,'El contexto operativo multisucursal aún no está habilitado.');
             $s=DB::table('sucursales')->where('id',(int)$v['sucursal_id'])->where('activo',1)->lockForUpdate()->first();
             abort_unless($s,403,'Sucursal no autorizada o inactiva.');
+            abort_unless($required||$this->unica(),409,'La configuración de sucursales cambió.');
             $u=$this->usuario((int)($r->user()?->id??0),true);
             abort_unless($this->autorizadas($u)->where('s.id',$s->id)->exists(),403,'Sucursal no autorizada.');
             $token=$this->token($r,true);

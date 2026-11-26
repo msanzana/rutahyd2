@@ -20,7 +20,7 @@ function fixture({context={bodegas:[{id:7,nombre:'Bodega autorizada'}]},closed=f
  return {run,calls,alerts,docType,depot};
 }
 let f=fixture();await f.run;
-assert.deepEqual(f.calls.filter(x=>x[0]==='recepciones'),[['recepciones',1,'',{}]]);
+assert.equal(JSON.stringify(f.calls.filter(x=>x[0]==='recepciones')),JSON.stringify([['recepciones',1,'',{}]]));
 assert.deepEqual(f.depot.items.map(x=>x.value),['','7']);
 assert.deepEqual(f.docType.items.map(x=>x.value),['33']);
 for(const options of [{context:{}},{context:{bodegas:[]}},{fail:true}]){

@@ -1,0 +1,170 @@
+name: V103 - Paleta corporativa por secciones
+on:
+  push:
+    branches: [deploy/v103-paleta-secciones-20261126]
+    paths: [.github/workflows/v103-publicar-paleta-secciones.yml]
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preparar respaldo y delta exclusivo de interfaz
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v103/{before,after,browser,styles}
+          git clone -q --depth=1 --branch feature/v103-paleta-secciones-20261126 https://github.com/msanzana/rutahyd2front.git /tmp/v103/front
+          git -C /tmp/v103/front fetch -q --depth=1 origin d7f3490a257b4ab277fb0cdb7163da6e202fc9b1
+          git -C /tmp/v103/front show d7f3490a257b4ab277fb0cdb7163da6e202fc9b1:assets/js/paleta-secciones-v103.js > /tmp/v103/new.js
+          git -C /tmp/v103/front show d7f3490a257b4ab277fb0cdb7163da6e202fc9b1:assets/css/paleta-secciones-v103.css > /tmp/v103/new.css
+          node --check /tmp/v103/new.js
+          cat >/tmp/v103/transport.py <<'PY'
+          import os,ssl,ftplib,io,pathlib,re,sys,html
+          from html.parser import HTMLParser
+          p=pathlib.Path('/tmp/v103')
+          index='index.html'
+          js='assets/js/paleta-secciones-v103.js'
+          css='assets/css/paleta-secciones-v103.css'
+          guards={'compras.guard':'/htdocs/assets/js/compras-consultas-v66.js','recepcion-css.guard':'/htdocs/assets/css/recepciones-compactas-v102.css','preload-js.guard':'/htdocs/assets/js/carga-global-v42.js','preload-css.guard':'/htdocs/assets/css/carga-global-v42.css','productos.guard':'/htdocs/assets/js/productos-remotos.js','stock-css.guard':'/htdocs/assets/css/stock-ficha-v98.css','recepcion.guard':'/htdocs/api-v2/app/Http/Controllers/RecepcionesBorradorControlador.php','stock.guard':'/htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php','pdf.guard':'/htdocs/api-v2/app/Services/PdfRecepcionCompra.php','root.guard':'/htdocs/.htaccess','api.guard':'/htdocs/api/.htaccess','private.guard':'/htdocs/api-v2/.htaccess','gateway.guard':'/htdocs/api/index.php'}
+          def remote(n):return guards.get(n,'/htdocs/'+n)
+          def get(f,n):
+              b=io.BytesIO();f.retrbinary('RETR '+remote(n),b.write);return b.getvalue()
+          def absent(f,n):
+              try:get(f,n);return False
+              except ftplib.error_perm as e:
+                  if str(e).startswith('550'):return True
+                  raise
+          def put(f,n,b):f.storbinary('STOR '+remote(n),io.BytesIO(b))
+          def save(area,n,b):
+              d=p/area/n;d.parent.mkdir(parents=True,exist_ok=True);d.write_bytes(b)
+          def read(area,n):return (p/area/n).read_bytes()
+          def verify_before(f):
+              assert absent(f,css) and absent(f,js),'Recursos V103 ya existentes'
+              for n in [index,*guards]:assert get(f,n)==read('before',n),n
+          class Links(HTMLParser):
+              def __init__(self):super().__init__();self.links=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='link' and a.get('rel')=='stylesheet':
+                      href=a.get('href','').split('?')[0].lstrip('/')
+                      if re.fullmatch(r'assets/css/[A-Za-z0-9_.-]+\.css',href):self.links.append(href)
+          f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=45)
+          f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
+          with f:
+              mode=sys.argv[1]
+              if mode=='prepare':
+                  for n in [index,*guards]:save('before',n,get(f,n))
+                  src=read('before',index).decode()
+                  assert src.count('</head>')==1 and 'paginadores-v96.css?v=20261125-v96' in src and 'compras-consultas-v66.js?v=20261126-v102' in src and 'recepciones-compactas-v102.css?v=20261126-v102' in src and 'carga-global-v42.js?v=20261126-v99r' in src and 'stock-ficha-v98.css?v=20261125-v98' in src
+                  save('after',js,(p/'new.js').read_bytes())
+                  assert absent(f,css) and absent(f,js)
+                  save('after',css,(p/'new.css').read_bytes())
+                  src=src.replace('</head>','  <link rel="stylesheet" href="assets/css/paleta-secciones-v103.css?v=20261126-v103">\n  <script src="assets/js/paleta-secciones-v103.js?v=20261126-v103" defer></script>\n</head>',1)
+                  save('after',index,src.encode())
+                  parser=Links();parser.feed(src)
+                  assert 'assets/css/app.css' in parser.links and 'assets/css/tipos-documentos-v63.css' in parser.links
+                  for i,n in enumerate(parser.links):save('styles',f'{i:03d}.css',(p/'new.css').read_bytes() if n==css else get(f,n))
+                  print('V103_PRECHECK_OK',len(parser.links))
+              elif mode=='publish':
+                  verify_before(f)
+                  (p/'attempted').touch()
+                  for n in [css,js,index]:
+                      with (p/'attempted').open('a') as log:log.write(n+'\n')
+                      put(f,n,read('after',n))
+                  for n in [css,js,index]:assert get(f,n)==read('after',n),n
+                  for n in guards:assert get(f,n)==read('before',n),n
+                  print('V103_FTPS_BYTES_OK')
+              elif mode=='rollback':
+                  for n in reversed((p/'attempted').read_text().splitlines()):
+                      if n in (css,js):
+                          if not absent(f,n):f.delete(remote(n))
+                      else:put(f,n,read('before',n))
+                  verify_before(f)
+                  print('V103_ROLLBACK_OK')
+          PY
+          python /tmp/v103/transport.py prepare
+      - name: Validar tonos, contraste, exclusiones y contenido dinámico
+        run: |
+          set -euo pipefail
+          cd /tmp/v103/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import {readdirSync} from 'node:fs';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({viewport:{width:1440,height:900},reducedMotion:'reduce'});
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            await page.route('**/*',r=>r.abort());
+            await page.setContent('<meta name="viewport" content="width=device-width, initial-scale=1"><main id="root"></main>');
+            for(const f of readdirSync('/tmp/v103/styles').sort())await page.addStyleTag({path:'/tmp/v103/styles/'+f});
+            await page.addScriptTag({path:'/tmp/v103/new.js'});
+            await page.evaluate(()=>{
+              document.getElementById('root').id='workspaceContent';
+              document.body.insertAdjacentHTML('beforeend','<dialog id="loginDialog"><h3>Precios</h3></dialog><dialog id="palette" data-hd-receipt-window="editor"><div class="hd-doc-modal-head"><h2>Formulario</h2></div><div class="hd-doc-modal-scroll"><section class="hd-v70-docs"><h3>Documento de compra</h3><input value="123"></section><section class="product-detail-section"><h3>Clasificación del producto</h3></section><section class="hd98-stock"><h3>Existencias por bodega</h3></section><section class="hd-oc-totals"><h3>Totales</h3></section><section><h3>Observaciones</h3></section><section class="hd92-acceptance"><h3>Aceptación de diferencias</h3></section><section class="hd102-lines-scroll"><table class="hd102-receipt-lines"><thead><tr><th>SKU</th></tr></thead><tbody><tr><td data-label="SKU">CI</td></tr></tbody></table></section></div><button class="button primary">Guardar</button></dialog>');
+              document.getElementById('palette').showModal();
+            });
+            const modal=page.locator('#palette');
+            await modal.locator('[data-hd-heading-tone="azul"]').waitFor();
+            for(const tone of ['azul','indigo','petroleo','bronce','pizarra'])if(!await modal.locator('[data-hd-heading-tone="'+tone+'"]').count())throw Error('Falta tono '+tone);
+            if(await page.locator('#loginDialog [data-hd-heading-tone],#palette .hd92-acceptance [data-hd-heading-tone]').count())throw Error('Login o alertas modificados');
+            const color=()=>modal.locator('.hd-v70-docs').evaluate(e=>getComputedStyle(e).backgroundColor);
+            const light=await color();
+            await page.evaluate(()=>document.documentElement.dataset.theme='oscuro');
+            const dark=await color();if(light===dark)throw Error('No cambia modo oscuro');
+            const contrasts=await modal.locator('[data-hd-heading-tone]').evaluateAll(nodes=>{
+              const lum=s=>{const rgb=s.match(/[0-9.]+/g).slice(0,3).map(x=>Number(x)/255).map(v=>v<=0.04045?v/12.92:((v+0.055)/1.055)**2.4);return .2126*rgb[0]+.7152*rgb[1]+.0722*rgb[2]};
+              return nodes.map(n=>{const c=getComputedStyle(n),b=c.backgroundColor==='rgba(0, 0, 0, 0)'?getComputedStyle(n.parentElement).backgroundColor:c.backgroundColor;const a=lum(c.color),d=lum(b);return {title:n.textContent,ratio:(Math.max(a,d)+.05)/(Math.min(a,d)+.05)}});
+            });
+            if(contrasts.some(x=>x.ratio<4.5))throw Error(JSON.stringify(contrasts));
+            await page.evaluate(()=>{const h=document.createElement('h3');h.className='product-editor-section';h.textContent='Precios';document.querySelector('#palette .hd-doc-modal-scroll').append(h);});
+            await modal.locator('h3[data-hd-heading-tone="bronce"]').filter({hasText:'Precios'}).waitFor();
+            if(await modal.locator('input').first().inputValue()!=='123')throw Error('Campo modificado');
+            await page.setViewportSize({width:390,height:844});
+            await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+            if(errors.length)throw Error(JSON.stringify(errors));
+            console.log('V103_UI_OK');
+          }finally{await browser.close();}
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v103-respaldo-previo
+          path: /tmp/v103/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar y cotejar bytes
+        run: python /tmp/v103/transport.py publish
+      - name: Verificar paleta V103
+        run: |
+          set -euo pipefail
+          cd /tmp/v103/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage();
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/?v=20261126-v103',{waitUntil:'load',timeout:60000});
+            await page.waitForFunction(()=>[...document.styleSheets].some(s=>s.href?.includes('recepciones-compactas-v103.css?v=20261126-v103')&&s.cssRules.length>=10),null,{timeout:45000});
+            await page.waitForFunction(()=>[...document.scripts].some(s=>s.src.includes('paleta-secciones-v103.js?v=20261126-v103')),null,{timeout:45000});
+            const result=await page.evaluate(async()=>({auth:(await fetch('/api/v1/recepciones-borrador/1',{headers:{Accept:'application/json'}})).status,density:getComputedStyle(document.documentElement).getPropertyValue('--hd-form-control').trim(),v86:[...document.scripts].some(s=>s.src.includes('paleta-secciones-v103.js?v=20261126-v103'))}));
+            if(response?.status()!==200||result.density!=='30px'||!result.v86||result.auth!==401||errors.length)throw Error(JSON.stringify({result,errors}));
+            console.log('V103_PUBLIC_OK');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar originales si falla la publicación
+        if: failure()
+        run: |
+          if [ -f /tmp/v103/attempted ]; then python /tmp/v103/transport.py rollback; fi

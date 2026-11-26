@@ -1,0 +1,36 @@
+name: V109C5A - Validar base valorizada del inventario
+on:
+  push:
+    branches: [feature/v109a-inventario-contexto-20261126]
+    paths:
+      - .github/workflows/v109c5a-base-valorizada.yml
+      - app/Services/BaseValorizadaInventario.php
+      - app/Services/PlanCantidadesTraspaso.php
+      - app/Services/CostoPromedioPonderado.php
+      - tests/base_valorizada_v109c5a.php
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, pdo_sqlite, iconv
+      - name: Validar núcleo sin escrituras
+        run: |
+          set -euo pipefail
+          php -l app/Services/BaseValorizadaInventario.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/base_valorizada_v109c5a.php | tee /tmp/v109c5a.log
+          grep -Fx V109C5A_BASE_CPP_OK /tmp/v109c5a.log

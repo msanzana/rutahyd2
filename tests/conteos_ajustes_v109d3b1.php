@@ -43,7 +43,7 @@ foreach([
  'CREATE TABLE registros_auditoria(id INTEGER PRIMARY KEY,usuario_id INTEGER,accion TEXT,tipo_entidad TEXT,entidad_id INTEGER,valores_anteriores TEXT,valores_nuevos TEXT)'
 ] as $sql){
  if($mysql){
-   $sql=str_replace('INTEGER PRIMARY KEY','BIGINT PRIMARY KEY AUTO_INCREMENT',$sql);
+   $sql=str_replace('INTEGER PRIMARY KEY','BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT',$sql);
    $sql=preg_replace('/\\b(fecha_movimiento|creado_en) TEXT DEFAULT CURRENT_TIMESTAMP\\b/','$1 DATETIME DEFAULT CURRENT_TIMESTAMP',$sql);
    $sql=preg_replace('/\\b(expira_en|aprobado_en|confirmado_en|anulado_en) TEXT\\b/','$1 DATETIME NULL',$sql);
    $sql=preg_replace('/\\b(disponible|transito|comprometido|cantidad_fisica|cantidad|delta_disponible|delta_fisico|delta_transito|delta_comprometido|cantidad_anterior|cantidad_documento|cantidad_actual|transito_anterior|transito_actual|comprometido_anterior|comprometido_actual|fisico_anterior|fisico_actual|costo_unitario_neto|costo_neto|costo_promedio_ponderado|ultimo_costo_anterior|ultimo_costo_actual|cpp_anterior|cpp_actual|costo_unitario_snapshot|cantidad_solicitada|cantidad_despachada|cantidad_recibida|cantidad_regularizada|costo_cpp_snapshot) TEXT\\b/','$1 DECIMAL(28,8)',$sql);
@@ -69,7 +69,7 @@ foreach([
  'CREATE TABLE inventario_conteos(id INTEGER PRIMARY KEY,numero_interno VARCHAR(60) UNIQUE,bodega_id INTEGER NOT NULL,alcance VARCHAR(30) NOT NULL,estado VARCHAR(30) NOT NULL,conteo_ciego INTEGER NOT NULL DEFAULT 1,fecha_corte VARCHAR(30),operacion_ajuste_id INTEGER UNIQUE,creado_por INTEGER NOT NULL,creado_en VARCHAR(30) DEFAULT CURRENT_TIMESTAMP,sucursal_id INTEGER)',
  'CREATE TABLE inventario_conteos_detalle(id INTEGER PRIMARY KEY,conteo_id INTEGER NOT NULL,producto_id INTEGER NOT NULL,saldo_corte TEXT NOT NULL,ultimo_kardex_id INTEGER,cantidad_contada TEXT,cantidad_recontada TEXT,contado_por INTEGER,recontado_por INTEGER,observaciones VARCHAR(1000))'
 ] as $sql){
- if($mysql){$sql=str_replace('INTEGER PRIMARY KEY','BIGINT PRIMARY KEY AUTO_INCREMENT',$sql);
+ if($mysql){$sql=str_replace('INTEGER PRIMARY KEY','BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT',$sql);
  $sql=str_replace('fecha_corte VARCHAR(30)','fecha_corte DATETIME(6)',$sql);
  $sql=str_replace('creado_en VARCHAR(30) DEFAULT CURRENT_TIMESTAMP','creado_en DATETIME DEFAULT CURRENT_TIMESTAMP',$sql);
  $sql=preg_replace('/\b(saldo_corte|cantidad_contada|cantidad_recontada) TEXT\b/','$1 DECIMAL(28,8)',$sql);

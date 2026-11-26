@@ -95,6 +95,9 @@ $other=array_replace($payload,['modalidad'=>'DESPACHO_RECEPCION','token_creacion
 $y=val($c->crear(req($other)));check(DB::table('inventario_traspasos_operaciones')->where('traspaso_id',$y['id'])->value('etapa')==='DESPACHO','Etapa despacho');
 DB::table('inventario_operaciones_detalle')->where('operacion_id',$y['operacion_id'])->where('bodega_id',2)->update(['delta_transito'=>0]);
 blocked(fn()=>$c->aprobar(req($approval,2),$y['id']));
+DB::table('inventario_traspasos_detalle')->where('traspaso_id',$y['id'])->where('producto_id',1)->update(['cantidad_despachada'=>'1.12345678','cantidad_recibida'=>'1.12345677']);
+blocked(fn()=>$c->crear(req(array_replace($payload,['token_creacion'=>(string)Str::uuid()]))));
+DB::table('inventario_traspasos_detalle')->where('traspaso_id',$y['id'])->where('producto_id',1)->update(['cantidad_despachada'=>'0','cantidad_recibida'=>'0']);
 $insufficient=array_replace($payload,['items'=>[['producto_id'=>1,'cantidad'=>'6']],'token_creacion'=>(string)Str::uuid()]);
 blocked(fn()=>$c->crear(req($insufficient)));
 if($mysql)DB::unprepared("CREATE TRIGGER ci_fail_trp BEFORE INSERT ON inventario_traspasos_operaciones FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Fallo CI'");

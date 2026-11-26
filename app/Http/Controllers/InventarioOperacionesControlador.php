@@ -65,6 +65,21 @@ final class InventarioOperacionesControlador extends Controller
         abort_unless(($k->tipo_documento_id!==null&&trim((string)$k->folio_documento)!=='')||($k->tipo_documento_id===null),409,'Referencia documental incompleta.');
         return $k;
     }
+    public function candidatos(Request $r) {
+        $v=$r->validate(['buscar'=>'nullable|string|max:120','page'=>'nullable|integer|min:1']);
+        $q=DB::table('kardex as k')->join('productos as p','p.id','=','k.producto_id')->join('bodegas as b','b.id','=','k.bodega_id')
+          ->where('k.tipo_movimiento',2)->whereIn('k.origen_tipo',['VENTA','NOTA_VENTA','DESPACHO'])
+          ->whereNull('k.movimiento_reversado_id')->where('k.cantidad_documento','>',0)
+          ->whereRaw('k.cantidad_anterior-k.cantidad_actual=k.cantidad_documento AND k.fisico_anterior-k.fisico_actual=k.cantidad_documento AND k.transito_anterior=k.transito_actual AND k.comprometido_anterior=k.comprometido_actual')
+          ->whereNotExists(fn($x)=>$x->selectRaw('1')->from('kardex as r')->whereColumn('r.movimiento_reversado_id','k.id'))
+          ->whereNotExists(fn($x)=>$x->selectRaw('1')->from('inventario_operaciones as o')->join('estados as e','e.id','=','o.estado_id')->whereColumn('o.referencia_kardex_id','k.id')->where('e.codigo','<>','INV_ANULADA'))
+          ->select('k.id','k.producto_id','p.nombre as producto','p.sku','k.bodega_id','b.nombre as bodega','k.cantidad_documento as cantidad','k.folio_documento as folio','k.fecha_movimiento');
+        if(!empty($v['buscar'])){$s=trim($v['buscar']);$q->where(fn($x)=>$x->where('p.nombre','like','%'.$s.'%')->orWhere('p.sku','like','%'.$s.'%')->orWhere('k.folio_documento','like','%'.$s.'%'));}
+        return response()->json($q->orderByDesc('k.id')->paginate(25));
+    }
+    public function bodegas(Request $r) {
+        return response()->json(DB::table('bodegas')->where('activo',1)->orderBy('nombre')->get(['id','nombre']));
+    }
     public function origen(Request $r,int $id) {
         $k=$this->original($id);
         return response()->json(['id'=>$k->id,'producto_id'=>$k->producto_id,'bodega_id'=>$k->bodega_id,'cantidad'=>$k->cantidad_documento,'tipo_documento_id'=>$k->tipo_documento_id,'folio'=>$k->folio_documento,'producto'=>DB::table('productos')->where('id',$k->producto_id)->value('nombre'),'bodega'=>DB::table('bodegas')->where('id',$k->bodega_id)->value('nombre')]);
@@ -93,7 +108,7 @@ final class InventarioOperacionesControlador extends Controller
         $v=$this->validarPlan($r);$user=$this->usuario($r);
         return response()->json(DB::transaction(function()use($v,$user){
             $old=DB::table('inventario_operaciones')->where('token_creacion',$v['token_creacion'])->lockForUpdate()->first();
-            if($old){abort_unless((int)$old->creado_por===$user&&(int)$old->motivo_codigo_snapshot===(int)$v['motivo_codigo']&&(int)$old->referencia_kardex_id===(int)$v['kardex_id']&&$old->justificacion===trim($v['justificacion']),409,'Token ya utilizado.');return ['id'=>$old->id,'numero_interno'=>$old->numero_interno];}
+            if($old){$target=DB::table('inventario_operaciones_detalle')->where('operacion_id',$old->id)->where('numero_linea',2)->first();$code=(int)$v['motivo_codigo'];abort_unless((int)$old->creado_por===$user&&(int)$old->motivo_codigo_snapshot===$code&&(int)$old->referencia_kardex_id===(int)$v['kardex_id']&&$old->justificacion===trim($v['justificacion'])&&($code!==201||(int)($target->producto_id??0)===(int)($v['producto_real_id']??0))&&($code!==203||(int)($target->bodega_id??0)===(int)($v['bodega_real_id']??0)),409,'Token ya utilizado para otra solicitud.');return ['id'=>$old->id,'numero_interno'=>$old->numero_interno];}
             $k=$this->original((int)$v['kardex_id'],true);$m=$this->motivo((int)$v['motivo_codigo']);
             $lines=$this->plan($k,(int)$m->codigo,isset($v['producto_real_id'])?(int)$v['producto_real_id']:null,isset($v['bodega_real_id'])?(int)$v['bodega_real_id']:null);
             abort_if(DB::table('inventario_operaciones')->where('referencia_kardex_id',$k->id)->whereNotIn('estado_id',[$this->estado('INV_ANULADA')])->exists(),409,'Ya existe una regularización de este movimiento.');
@@ -126,7 +141,7 @@ final class InventarioOperacionesControlador extends Controller
         $v=$r->validate(['version'=>'required|integer|min:1|max:4294967294','motivo'=>'required|string|min:3|max:1000']);$user=$this->usuario($r);
         return response()->json(DB::transaction(function()use($v,$user,$id,$from,$to,$action){
             $o=DB::table('inventario_operaciones')->where('id',$id)->where('clase','AJUSTE_RAPIDO')->lockForUpdate()->first();abort_unless($o,404);
-            $a=$this->estado($from);$b=$this->estado($to);abort_unless((int)$o->estado_id===$a&&(int)$o->version===(int)$v['version'],409,'Estado o versión cambió.');
+            $a=(int)$o->estado_id;$b=$this->estado($to);$permitted=$action==='ANULAR'?[$this->estado('INV_PEND_APROBACION'),$this->estado('INV_APROBADA')]:[$this->estado($from)];abort_unless(in_array($a,$permitted,true)&&(int)$o->version===(int)$v['version'],409,'Estado o versión cambió.');
             $data=['estado_id'=>$b,'version'=>$o->version+1];
             if($action==='APROBAR'){$this->motivo((int)$o->motivo_codigo_snapshot);$this->original((int)$o->referencia_kardex_id);$data+=['aprobado_por'=>$user,'aprobado_en'=>now()];}
             else $data+=['anulado_por'=>$user,'anulado_en'=>now(),'motivo_anulacion'=>trim($v['motivo'])];
@@ -152,6 +167,7 @@ final class InventarioOperacionesControlador extends Controller
             foreach($pids as $pid){
                 $p=$products->get($pid);abort_unless($p&&$p->activo,409,'Producto inactivo.');
                 abort_if(DB::table('saldos_inventario as s')->join('presentaciones_productos as pp','pp.id','=','s.presentacion_id')->where('pp.producto_id',$pid)->where('s.cantidad','<>',0)->exists(),409,'Existe inventario legado sin conciliar.');
+                abort_if(DB::table('inventario_traspasos_detalle')->where('producto_id',$pid)->whereRaw('cantidad_despachada>cantidad_recibida+cantidad_regularizada')->exists(),409,'Hay traspasos en camino. Requiere motor de valorización de traslados.');
                 $valued[$pid]=BigDecimal::zero();
                 foreach(DB::table('stock')->where('producto_id',$pid)->orderBy('bodega_id')->lockForUpdate()->get() as $s){
                     $a=$this->decimal($s->disponible);$t=$this->decimal($s->transito);$c=$this->decimal($s->comprometido);$f=$this->decimal($s->cantidad_fisica);

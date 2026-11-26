@@ -25,7 +25,7 @@ final class ConteosInventarioControlador extends Controller
         $last=DB::table('kardex')->where('producto_id',$pid)->where('bodega_id',$bid)->orderByDesc('id')->lockForUpdate()->first(['id','sucursal_id']);
         abort_if($last&&(int)$last->sucursal_id!==$sid,409,'Kardex sin atribución válida.');
         $global=DB::table('kardex')->where('producto_id',$pid)->orderByDesc('id')->lockForUpdate()->first(['id']);
-        $plan=(new PlanConteoInventario())->calcular($stock,BigDecimal::of((string)$stock->disponible)->plus((string)$stock->comprometido)->toScale(8)->__toString(),(string)$p->costo_promedio_ponderado);
+        $plan=(new PlanConteoInventario())->calcular($stock,(string)BigDecimal::of((string)$stock->disponible)->plus((string)$stock->comprometido)->toScale(8),(string)$p->costo_promedio_ponderado);
         return ['stock'=>$stock,'cpp'=>(string)$p->costo_promedio_ponderado,'saldo'=>$plan['esperado'],'snapshot'=>$plan['snapshot'],'ultimo'=>$last?(int)$last->id:null,'ultimo_global'=>$global?(int)$global->id:null];
     }
     private function cabecera(int $id,int $sid): object {
@@ -78,7 +78,12 @@ final class ConteosInventarioControlador extends Controller
             $l=DB::table('inventario_conteos_detalle')->where('conteo_id',$id)->where('id',$line)->lockForUpdate()->first();abort_unless($l,404);
             $field=$recount?'cantidad_recontada':'cantidad_contada';$who=$recount?'recontado_por':'contado_por';
             if($recount)abort_unless($l->cantidad_contada!==null&&(int)$l->contado_por!==$uid,409,'El reconteo requiere otra persona.');
-            if($l->$field!==null){abort_unless((int)$l->$who===$uid&&BigDecimal::of((string)$l->$field)->isEqualTo($qty)&&($l->observaciones??'')===$obs,409,'La medición registrada no puede reemplazarse.');return ['id'=>$id,'linea'=>$line,'repetida'=>true];}
+            if($l->$field!==null){
+                $action=$recount?'CONTEO_RECONTEO':'CONTEO_REGISTRO';
+                $audit=DB::table('registros_auditoria')->where('tipo_entidad','inventario_conteos')->where('entidad_id',$id)->where('accion',$action)->where('usuario_id',$uid)->get(['valores_nuevos'])->map(fn($a)=>json_decode($a->valores_nuevos,true,512,JSON_THROW_ON_ERROR))->filter(fn($a)=>(int)($a['linea']??0)===$line);
+                abort_unless($audit->count()===1&&(int)$l->$who===$uid&&BigDecimal::of((string)$l->$field)->isEqualTo($qty)&&($audit->first()['observaciones']??null)===$obs,409,'La medición registrada no puede reemplazarse.');
+                return ['id'=>$id,'linea'=>$line,'repetida'=>true];
+            }
             $this->vigente($c,$l,$this->corte($c),$sid);
             DB::table('inventario_conteos_detalle')->where('id',$line)->update([$field=>$qty,$who=>$uid,'observaciones'=>$obs]);
             $this->auditoria($id,$uid,$recount?'CONTEO_RECONTEO':'CONTEO_REGISTRO',['linea'=>$line],['linea'=>$line,'cantidad'=>$qty,'observaciones'=>$obs]);

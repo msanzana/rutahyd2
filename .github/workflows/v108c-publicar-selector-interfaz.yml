@@ -1,4 +1,4 @@
-name: V108C - Interfaz compacta de selector de sucursal
+name: V108CR - Corrección de interfaz compacta del selector
 on:
   push:
     branches: [feature/v108c-selector-interfaz-20261126]
@@ -24,13 +24,13 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/v108c/{before,after,browser,styles}
           git clone -q --depth=1 --branch feature/v108c-selector-interfaz-20261126 https://github.com/msanzana/rutahyd2front.git /tmp/v108c/front
-          git -C /tmp/v108c/front fetch -q --depth=1 origin e4209fd2d82eebb370400f3cd98941619204091b
+          git -C /tmp/v108c/front fetch -q --depth=1 origin f8d3e13f7c3d928d7171c7e370208dca8473ed28
           git -C /tmp/v108c/front fetch -q --depth=1 origin 3b5bb3a26caad8bc0791d3be1c893998f0465b91
           for n in contexto-sucursal-v107.js; do
-            git -C /tmp/v108c/front show e4209fd2d82eebb370400f3cd98941619204091b:assets/js/$n >/tmp/v108c/$n
+            git -C /tmp/v108c/front show f8d3e13f7c3d928d7171c7e370208dca8473ed28:assets/js/$n >/tmp/v108c/$n
             node --check /tmp/v108c/$n
           done
-          git -C /tmp/v108c/front show e4209fd2d82eebb370400f3cd98941619204091b:assets/css/selector-sucursal-v108c.css >/tmp/v108c/selector-sucursal-v108c.css
+          git -C /tmp/v108c/front show f8d3e13f7c3d928d7171c7e370208dca8473ed28:assets/css/selector-sucursal-v108c.css >/tmp/v108c/selector-sucursal-v108c.css
           cat >/tmp/v108c/transport.py <<'PY'
           import os,ssl,ftplib,io,pathlib,re,sys,subprocess
           from html.parser import HTMLParser
@@ -85,12 +85,12 @@ jobs:
                       assert required in src,required
                   old='src="'+js+'?v=20261126-v107s"'
                   assert src.count(old)==1
-                  src=src.replace(old,'src="'+js+'?v=20261126-v108c"',1)
+                  src=src.replace(old,'src="'+js+'?v=20261126-v108cr"',1)
                   assert css not in src and src.count('</head>')==1
-                  src=src.replace('</head>','  <link rel="stylesheet" href="'+css+'?v=20261126-v108c">\n</head>',1)
+                  src=src.replace('</head>','  <link rel="stylesheet" href="'+css+'?v=20261126-v108cr">\n</head>',1)
                   parser=Links();parser.feed(src)
-                  assert js+'?v=20261126-v108c' in parser.scripts and css+'?v=20261126-v108c' in parser.links
-                  assert parser.scripts.index(js+'?v=20261126-v108c')<parser.scripts.index(app+'?v=20261126-v107')
+                  assert js+'?v=20261126-v108cr' in parser.scripts and css+'?v=20261126-v108cr' in parser.links
+                  assert parser.scripts.index(js+'?v=20261126-v108cr')<parser.scripts.index(app+'?v=20261126-v107')
                   save('after',index,src.encode())
                   for i,link in enumerate(parser.links):
                       n=link.split('?')[0].lstrip('/')
@@ -160,18 +160,18 @@ jobs:
             await page.evaluate(()=>{document.documentElement.dataset.theme='oscuro';window.signed=false;document.dispatchEvent(new CustomEvent('rutahd:sesion-finalizada'));window.pending=RutaHDContextoSucursalV107.beforeLogin();});
             await card.waitFor();
             if(await page.locator('#hdBranchCurrent').isVisible())throw Error('Sucursal visible sin sesión');
-            const mobile=await d.boundingBox();if(mobile.width>390||mobile.x<0)throw Error('Desborde móvil');
+            const mobile=await d.boundingBox(),mobileButton=await enter.boundingBox();if(mobile.width>363||mobile.x<0||mobile.height>370||mobileButton.height<44||mobileButton.width>180)throw Error(JSON.stringify({mobile,mobileButton}));
             await d.getByRole('radio').focus();await page.keyboard.press('Space');
             if(!await d.getByRole('radio').isChecked())throw Error('Selección teclado');
             if(await enter.isDisabled())throw Error('Selección teclado no habilita ingreso');
             await d.getByRole('button',{name:'Cerrar sesión'}).click();await d.waitFor({state:'detached'});
             if(await page.evaluate(()=>window.pending)||await page.evaluate(()=>window.writes)!==1||errors.length)throw Error(JSON.stringify(errors));
-            console.log('V108C_UI_OK');
+            console.log('V108CR_UI_OK');
           }finally{await browser.close();}
           JS
       - uses: actions/upload-artifact@v4
         with:
-          name: rutahd-v108c-respaldo-previo
+          name: rutahd-v108cr-respaldo-previo
           path: /tmp/v108c/before/
           retention-days: 30
           if-no-files-found: error
@@ -187,11 +187,11 @@ jobs:
           try{
             const page=await browser.newPage();
             const errors=[];page.on('pageerror',e=>errors.push(e.message));
-            const response=await page.goto('https://rutahyd2.free.nf/?v=20261126-v108c',{waitUntil:'load',timeout:60000});
+            const response=await page.goto('https://rutahyd2.free.nf/?v=20261126-v108cr',{waitUntil:'load',timeout:60000});
             await page.waitForFunction(()=>window.RutaHDContextoSucursalV107&&window.RutaHDSucursalesV106&&window.RutaHDLogin&&window.RutaHDApiCatalogos?.branchContext,null,{timeout:45000});
-            const result=await page.evaluate(async()=>({catalog:(await fetch('/api/v1/contexto-sucursal',{headers:{Accept:'application/json'}})).status,adjustment:(await fetch('/api/v1/inventario/ajustes-rapidos',{headers:{Accept:'application/json'}})).status,receipts:(await fetch('/api/v1/recepciones-borrador/1',{headers:{Accept:'application/json'}})).status,scripts:[...document.scripts].map(s=>s.src)}));
-            if(response?.status()!==200||result.catalog!==401||result.adjustment!==401||result.receipts!==401||errors.length||!['catalogos-api.js','login-produccion.js'].every(n=>result.scripts.some(s=>s.includes(n+'?v=20261126-v107')))||!result.scripts.some(s=>s.includes('contexto-sucursal-v107.js?v=20261126-v108c')))throw Error(JSON.stringify({result,errors}));
-            console.log('V108C_PUBLIC_OK');
+            const result=await page.evaluate(async()=>({catalog:(await fetch('/api/v1/contexto-sucursal',{headers:{Accept:'application/json'}})).status,adjustment:(await fetch('/api/v1/inventario/ajustes-rapidos',{headers:{Accept:'application/json'}})).status,receipts:(await fetch('/api/v1/recepciones-borrador/1',{headers:{Accept:'application/json'}})).status,scripts:[...document.scripts].map(s=>s.src),styles:[...document.querySelectorAll('link[rel=stylesheet]')].map(s=>s.href)}));
+            if(response?.status()!==200||result.catalog!==401||result.adjustment!==401||result.receipts!==401||errors.length||!['catalogos-api.js','login-produccion.js'].every(n=>result.scripts.some(s=>s.includes(n+'?v=20261126-v107')))||!result.scripts.some(s=>s.includes('contexto-sucursal-v107.js?v=20261126-v108cr'))||!result.styles.some(s=>s.includes('selector-sucursal-v108c.css?v=20261126-v108cr')))throw Error(JSON.stringify({result,errors}));
+            console.log('V108CR_PUBLIC_OK');
           }finally{await browser.close();}
           JS
       - name: Restaurar originales si falla la publicacion

@@ -27,7 +27,7 @@ final class PlanStockTraspaso
         abort_unless(BigDecimal::of($out['cantidad_fisica']['posterior'])->isEqualTo(BigDecimal::of($out['disponible']['posterior'])->plus($out['transito']['posterior'])->plus($out['comprometido']['posterior'])),409,'Plan físico inconsistente.');
         return $out;
     }
-    public function calcular(object $motivo,object $line,string $modalidad,string $etapa,string $cantidad,object $origen,object $destino,string $cpp): array {
+    public function calcular(object $motivo,object $line,string $modalidad,string $etapa,string $cantidad,object $origen,object $destino,string $cpp,bool $transitoAcreditado=false): array {
         abort_unless((int)$motivo->codigo===709&&(int)$motivo->grupo_codigo===700&&(int)$motivo->activo===1
             &&$motivo->regla==='TRASPASO_INTERNO'&&$motivo->politica_cpp==='CONSERVAR'&&$motivo->naturaleza==='TRASLADO'
             &&(int)$motivo->ajuste_rapido===0&&(int)$motivo->requiere_referencia===0&&(int)$motivo->requiere_aprobacion===1
@@ -49,7 +49,7 @@ final class PlanStockTraspaso
             // La identidad del tránsito se verifica en persistencia mediante el detalle.
             abort_unless($b['transito']->isGreaterThanOrEqualTo($qty['anterior']['pendiente_recepcion']),409,'Tránsito de destino insuficiente para este traspaso.');
             $snapshot=$this->decimal((string)($line->costo_cpp_snapshot??'0'));
-            abort_unless($snapshot->isPositive()&&$snapshot->isEqualTo($cost),409,'CPP cambió durante tránsito; requiere conciliación de valorización.');
+            abort_unless($snapshot->isPositive()&&($transitoAcreditado||$snapshot->isEqualTo($cost)),409,'CPP cambió durante tránsito; requiere conciliación de valorización.');
             $db=['transito'=>$neg,'disponible'=>$q];
         }
         $oa=$this->aplicar($a,$da);$ob=$this->aplicar($b,$db);

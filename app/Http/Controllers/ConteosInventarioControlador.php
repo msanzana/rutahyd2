@@ -332,7 +332,7 @@ final class ConteosInventarioControlador extends Controller
                     $review=['usuario_id'=>(int)$rev->first()->usuario_id,'planes'=>$data['planes']??[]];
                 }
                 $authorized=$auth->count()===1;$prepared=$prep->count()===1;
-                $ops=DB::table('inventario_conteos_operaciones as x')->join('inventario_operaciones as o','o.id','=','x.operacion_id')->join('estados as e','e.id','=','o.estado_id')->where('x.conteo_id',$id)->where('o.sucursal_id',$sid)->where('o.clase','CONTEO')->select('o.id','o.numero_interno','o.motivo_codigo_snapshot','o.motivo_nombre_snapshot','e.codigo as estado','e.nombre as estado_nombre')->orderBy('o.id')->get();
+                if($prepared)$ops=DB::table('inventario_conteos_operaciones as x')->join('inventario_operaciones as o','o.id','=','x.operacion_id')->join('estados as e','e.id','=','o.estado_id')->where('x.conteo_id',$id)->where('o.sucursal_id',$sid)->where('o.clase','CONTEO')->select('o.id','o.numero_interno','o.motivo_codigo_snapshot','o.motivo_nombre_snapshot','e.codigo as estado','e.nombre as estado_nombre')->orderBy('o.id')->get();
                 foreach($ops as $o){
                     $o->detalles=DB::table('inventario_operaciones_detalle as l')->join('productos as p','p.id','=','l.producto_id')->where('l.operacion_id',$o->id)->where('l.bodega_id',$c->bodega_id)->select('p.sku','p.nombre as producto','l.cantidad','l.delta_disponible','l.costo_unitario_snapshot','l.kardex_id')->orderBy('l.numero_linea')->get();
                     $o->respaldos=DB::table('inventario_operaciones_adjuntos')->where('operacion_id',$o->id)->orderBy('id')->get(['id','nombre','mime','sha256']);

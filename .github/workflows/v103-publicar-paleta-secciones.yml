@@ -24,9 +24,9 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/v103/{before,after,browser,styles}
           git clone -q --depth=1 --branch feature/v103-paleta-secciones-20261126 https://github.com/msanzana/rutahyd2front.git /tmp/v103/front
-          git -C /tmp/v103/front fetch -q --depth=1 origin d7f3490a257b4ab277fb0cdb7163da6e202fc9b1
-          git -C /tmp/v103/front show d7f3490a257b4ab277fb0cdb7163da6e202fc9b1:assets/js/paleta-secciones-v103.js > /tmp/v103/new.js
-          git -C /tmp/v103/front show d7f3490a257b4ab277fb0cdb7163da6e202fc9b1:assets/css/paleta-secciones-v103.css > /tmp/v103/new.css
+          git -C /tmp/v103/front fetch -q --depth=1 origin ed3b6cbf1d44c597b3de582fadba4b5d9a7fddd9
+          git -C /tmp/v103/front show ed3b6cbf1d44c597b3de582fadba4b5d9a7fddd9:assets/js/paleta-secciones-v103.js > /tmp/v103/new.js
+          git -C /tmp/v103/front show ed3b6cbf1d44c597b3de582fadba4b5d9a7fddd9:assets/css/paleta-secciones-v103.css > /tmp/v103/new.css
           node --check /tmp/v103/new.js
           cat >/tmp/v103/transport.py <<'PY'
           import os,ssl,ftplib,io,pathlib,re,sys,html
@@ -120,10 +120,15 @@ jobs:
             await modal.locator('[data-hd-heading-tone="azul"]').waitFor();
             for(const tone of ['azul','indigo','petroleo','bronce','pizarra'])if(!await modal.locator('[data-hd-heading-tone="'+tone+'"]').count())throw Error('Falta tono '+tone);
             if(await page.locator('#loginDialog [data-hd-heading-tone],#palette .hd92-acceptance [data-hd-heading-tone]').count())throw Error('Login o alertas modificados');
-            const color=()=>modal.locator('.hd-v70-docs').evaluate(e=>getComputedStyle(e).backgroundColor);
-            const light=await color();
+            const sample=()=>modal.locator('.hd-v70-docs').evaluate(e=>({tone:e.dataset.hdSectionTone,theme:document.documentElement.dataset.theme,bg:getComputedStyle(e).backgroundColor,token:getComputedStyle(e).getPropertyValue('--hd-section-bg').trim(),root:getComputedStyle(document.documentElement).getPropertyValue('--hd-azul-bg').trim()}));
+            await page.evaluate(()=>document.documentElement.dataset.theme='claro');
+            await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+            const light=await sample();
             await page.evaluate(()=>document.documentElement.dataset.theme='oscuro');
-            const dark=await color();if(light===dark)throw Error('No cambia modo oscuro');
+            await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+            const dark=await sample();
+            console.log('V103_THEME',JSON.stringify({light,dark}));
+            if(light.bg!=='rgb(237, 243, 250)'||dark.bg!=='rgb(40, 57, 77)')throw Error('Fondos incorrectos: '+JSON.stringify({light,dark}));
             const contrasts=await modal.locator('[data-hd-heading-tone]').evaluateAll(nodes=>{
               const lum=s=>{const rgb=s.match(/[0-9.]+/g).slice(0,3).map(x=>Number(x)/255).map(v=>v<=0.04045?v/12.92:((v+0.055)/1.055)**2.4);return .2126*rgb[0]+.7152*rgb[1]+.0722*rgb[2]};
               return nodes.map(n=>{const c=getComputedStyle(n),b=c.backgroundColor==='rgba(0, 0, 0, 0)'?getComputedStyle(n.parentElement).backgroundColor:c.backgroundColor;const a=lum(c.color),d=lum(b);return {title:n.textContent,ratio:(Math.max(a,d)+.05)/(Math.min(a,d)+.05)}});

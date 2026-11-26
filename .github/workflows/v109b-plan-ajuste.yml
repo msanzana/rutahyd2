@@ -1,0 +1,34 @@
+name: V109B - Validar cálculo de ajustes generales
+on:
+  push:
+    branches: [feature/v109a-inventario-contexto-20261126]
+    paths:
+      - .github/workflows/v109b-plan-ajuste.yml
+      - app/Services/PlanAjusteGeneral.php
+      - tests/plan_ajuste_general_v109b.php
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, pdo_sqlite, iconv
+      - name: Validar núcleo sin escrituras
+        run: |
+          set -euo pipefail
+          php -l app/Services/PlanAjusteGeneral.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/plan_ajuste_general_v109b.php | tee /tmp/v109b.log
+          grep -Fx V109B_PLAN_OK /tmp/v109b.log

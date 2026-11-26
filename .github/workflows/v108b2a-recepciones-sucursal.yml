@@ -1,0 +1,52 @@
+name: V108B2A - Validar recepciones por sucursal
+on:
+  push:
+    branches: [feature/v108b1-consultas-sucursal-20261126]
+    paths:
+      - .github/workflows/v108b2a-recepciones-sucursal.yml
+      - app/Http/Controllers/RecepcionesBorradorControlador.php
+      - tests/recepciones_sucursal_v108b2a.php
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: temporal_ci_solamente
+          MARIADB_DATABASE: rutahd_v108b2_ci
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: rutahd_v108b2_ci
+      DB_USERNAME: root
+      DB_PASSWORD: temporal_ci_solamente
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, pdo_mysql, iconv
+      - name: Regresión de recepciones y CPP en MariaDB aislada
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/RecepcionesBorradorControlador.php
+          php -l tests/recepciones_sucursal_v108b2a.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/recepciones_sucursal_v108b2a.php | tee /tmp/v108b2a.log
+          grep -Fx V108B2A_RECEPCIONES_OK /tmp/v108b2a.log

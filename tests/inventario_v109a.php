@@ -8,7 +8,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Brick\Math\BigDecimal;
 function check(bool $ok,string $msg):void{if(!$ok)throw new RuntimeException($msg);}
-check(config('app.env')==='testing'&&DB::getDatabaseName()===':memory:','Solo CI aislado');
+$mysql=DB::connection()->getDriverName()==='mysql';
+check(config('app.env')==='testing'&&($mysql?DB::getDatabaseName()==='rutahyd_v109a_ci':DB::getDatabaseName()===':memory:'),'Solo CI aislado');
+if($mysql)check(DB::selectOne('SELECT DATABASE() AS db')->db==='rutahyd_v109a_ci','Base CI incorrecta');
 foreach([
  'CREATE TABLE sucursales(id INTEGER PRIMARY KEY,activo INTEGER,codigo TEXT)',
  'CREATE TABLE roles(id INTEGER PRIMARY KEY,codigo TEXT)',
@@ -36,7 +38,17 @@ foreach([
  'CREATE TABLE inventario_operaciones_detalle(id INTEGER PRIMARY KEY,operacion_id INTEGER,numero_linea INTEGER,producto_id INTEGER,bodega_id INTEGER,cantidad TEXT,delta_disponible TEXT,delta_fisico TEXT,delta_transito TEXT DEFAULT "0",delta_comprometido TEXT DEFAULT "0",kardex_referencia_id INTEGER,kardex_id INTEGER,costo_unitario_snapshot TEXT)',
  'CREATE TABLE inventario_operaciones_historial(id INTEGER PRIMARY KEY,operacion_id INTEGER,estado_anterior_id INTEGER,estado_nuevo_id INTEGER,usuario_id INTEGER,accion TEXT,observaciones TEXT)',
  'CREATE TABLE registros_auditoria(id INTEGER PRIMARY KEY,usuario_id INTEGER,accion TEXT,tipo_entidad TEXT,entidad_id INTEGER,valores_anteriores TEXT,valores_nuevos TEXT)'
-] as $sql)DB::statement($sql);
+] as $sql){
+ if($mysql){
+   $sql=str_replace('INTEGER PRIMARY KEY','BIGINT PRIMARY KEY AUTO_INCREMENT',$sql);
+   $sql=preg_replace('/\\b(fecha_movimiento|creado_en) TEXT DEFAULT CURRENT_TIMESTAMP\\b/','$1 DATETIME DEFAULT CURRENT_TIMESTAMP',$sql);
+   $sql=preg_replace('/\\b(expira_en|aprobado_en|confirmado_en|anulado_en) TEXT\\b/','$1 DATETIME NULL',$sql);
+   $sql=preg_replace('/\\b(disponible|transito|comprometido|cantidad_fisica|cantidad|delta_disponible|delta_fisico|delta_transito|delta_comprometido|cantidad_anterior|cantidad_documento|cantidad_actual|transito_anterior|transito_actual|comprometido_anterior|comprometido_actual|fisico_anterior|fisico_actual|costo_unitario_neto|costo_neto|costo_promedio_ponderado|ultimo_costo_anterior|ultimo_costo_actual|cpp_anterior|cpp_actual|costo_unitario_snapshot) TEXT\\b/','$1 DECIMAL(28,8)',$sql);
+   $sql=str_replace('NUMERIC','DECIMAL(28,8)',$sql);
+   $sql=preg_replace('/\\b(numero_interno|token_creacion|token_confirmacion|token_idempotencia) TEXT UNIQUE\\b/','$1 VARCHAR(100) UNIQUE',$sql);
+ }
+ DB::statement($sql);
+}
 DB::table('sucursales')->insert(['id'=>1,'activo'=>1,'codigo'=>'S01']);
 DB::table('roles')->insert(['id'=>1,'codigo'=>'operador']);
 foreach([1,2] as $u){DB::table('usuarios')->insert(['id'=>$u,'rol_id'=>1,'activo'=>1]);DB::table('tokens_acceso')->insert(['id'=>$u,'usuario_id'=>$u,'expira_en'=>now()->addHour()]);DB::table('sesiones_sucursales')->insert(['token_acceso_id'=>$u,'sucursal_id'=>1]);DB::table('usuarios_sucursales')->insert(['usuario_id'=>$u,'sucursal_id'=>1,'activo'=>1]);DB::table('inventario_bodegas_sucursales')->insert(['bodega_id'=>$u,'sucursal_id'=>1]);}

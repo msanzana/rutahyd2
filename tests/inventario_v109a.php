@@ -92,6 +92,19 @@ DB::table('bodegas')->insert(['id'=>3,'nombre'=>'No asignada','activo'=>1]);
 check(count(val($c->bodegas(req())))===2,'bodega no asignada excluida');
 $payload=['motivo_codigo'=>203,'kardex_id'=>5,'bodega_real_id'=>3,'justificacion'=>'Rechazo de bodega sin asignar','token_creacion'=>(string)Str::uuid()];
 blocked(fn()=>$c->crear(req($payload)));
+// Reversa de salida histórica cuyo saldo actual no existe: el ID generado
+// de stock no puede sobrescribir el contexto de sucursal.
+DB::table('productos')->insert(['id'=>6,'sku'=>'CI-6','nombre'=>'Producto sin saldo CI','activo'=>1,'costo_neto'=>'500','costo_promedio_ponderado'=>'500']);
+$origin=(array)DB::table('kardex')->where('id',4)->first();
+$origin['id']=100;$origin['producto_id']=6;$origin['origen_detalle_id']=100;$origin['token_idempotencia']=(string)Str::uuid();
+DB::table('kardex')->insert($origin);
+$payload=['motivo_codigo'=>207,'kardex_id'=>100,'justificacion'=>'Reversa con saldo nuevo CI','token_creacion'=>(string)Str::uuid()];
+$id=val($c->crear(req($payload)))['id'];
+$c->aprobar(req(['version'=>1,'motivo'=>'Autorización CI'],2),$id);
+$c->confirmar(req(['version'=>2,'token_confirmacion'=>(string)Str::uuid()],2),$id);
+$created=DB::table('stock')->where('producto_id',6)->first();
+check((int)$created->id!==1&&BigDecimal::of($created->disponible)->isEqualTo(1),'saldo nuevo');
+check((int)DB::table('kardex')->where('movimiento_reversado_id',100)->value('sucursal_id')===1,'sucursal no confundida con saldo nuevo');
 DB::table('sesiones_sucursales')->where('token_acceso_id',1)->delete();
 blocked(fn()=>$c->listar(req()));
 DB::table('sesiones_sucursales')->insert(['token_acceso_id'=>1,'sucursal_id'=>1]);

@@ -1,0 +1,27 @@
+name: V109D5 - Validar descargas de conteos
+on:
+  push:
+    branches: [feature/v109a-inventario-contexto-20261126]
+    paths:
+      - .github/workflows/v109d5-documentos-front.yml
+      - tests/conteos_front_v109d5.mjs
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validar candidato frontend fijado
+        run: |
+          set -euo pipefail
+          git clone -q --depth=1 --branch feature/v109b4-ajustes-generales-20261126 https://github.com/msanzana/rutahyd2front.git /tmp/v109d5-front
+          test "$(git -C /tmp/v109d5-front rev-parse HEAD)" = ee55aa4fec4d8f6a3fed7c17d2110a6c6925e9d4
+          for f in catalogos-api inventario-v104 app-produccion; do node --check "/tmp/v109d5-front/assets/js/$f.js"; done
+          npm install --prefix /tmp/v109d5-js --no-audit --no-fund jsdom@26.1.0
+          node tests/conteos_front_v109d5.mjs /tmp/v109d5-front | tee /tmp/v109d5.log
+          grep -Fx V109D5_FRONT_OK /tmp/v109d5.log

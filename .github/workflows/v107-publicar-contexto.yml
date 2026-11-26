@@ -1,0 +1,271 @@
+name: V107 - Contexto de sucursal y acceso preparado
+on:
+  push:
+    branches: [deploy/v107-contexto-sucursal-20261126]
+    paths: [.github/workflows/v107-publicar-contexto.yml]
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, pdo_sqlite, iconv
+      - name: Validar administracion aislada de sucursales
+        env:
+          APP_ENV: testing
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          MAIL_MAILER: log
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/SucursalesControlador.php
+          php -l app/Http/Controllers/ContextoSucursalControlador.php
+          php -l routes/api.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/sucursales_v106.php | tee /tmp/v107-test.log
+          grep -Fx V106_ADMIN_OK /tmp/v107-test.log
+          php tests/contexto_sucursal_v107.php | tee /tmp/v107-context.log
+          grep -Fx V107_CONTEXT_OK /tmp/v107-context.log
+      - name: Preparar delta y respaldo de archivos productivos
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v107/{before,after,browser,styles}
+          git clone -q --depth=1 --branch feature/v107-contexto-sucursal-20261126 https://github.com/msanzana/rutahyd2front.git /tmp/v107/front
+          git -C /tmp/v107/front fetch -q --depth=1 origin dfcd2e1f62e5623dcdf056e45f19e1127079e7af
+          git -C /tmp/v107/front fetch -q --depth=1 origin 995847da601defc184d16dcf9dc2e5dc0e8558a2
+          for n in catalogos-api.js login-produccion.js contexto-sucursal-v107.js; do
+            git -C /tmp/v107/front show dfcd2e1f62e5623dcdf056e45f19e1127079e7af:assets/js/$n >/tmp/v107/$n
+            node --check /tmp/v107/$n
+          done
+          cat >/tmp/v107/transport.py <<'PY'
+          import os,ssl,ftplib,io,pathlib,re,sys,subprocess
+          from html.parser import HTMLParser
+          p=pathlib.Path('/tmp/v107')
+          index='index.html'
+          api='assets/js/catalogos-api.js'
+          app='assets/js/login-produccion.js'
+          js='assets/js/contexto-sucursal-v107.js'
+          controller='app/Http/Controllers/ContextoSucursalControlador.php'
+          admin='app/Http/Controllers/SucursalesControlador.php'
+          routes='routes/api.php'
+          changed=[api,app,routes,admin]
+          new=[js,controller]
+          guards={'ajustes-js.guard':'/htdocs/assets/js/inventario-v104.js','ajustes-back.guard':'/htdocs/api-v2/app/Http/Controllers/InventarioOperacionesControlador.php','sucursales-js.guard':'/htdocs/assets/js/sucursales-v106.js','app-js.guard':'/htdocs/assets/js/app-produccion.js','sesion.guard':'/htdocs/api-v2/app/Http/Controllers/SesionControlador.php','compras.guard':'/htdocs/assets/js/compras-consultas-v66.js','recepcion-css.guard':'/htdocs/assets/css/recepciones-compactas-v102.css','paleta-css.guard':'/htdocs/assets/css/paleta-secciones-v103.css','paleta-js.guard':'/htdocs/assets/js/paleta-secciones-v103.js','preload-js.guard':'/htdocs/assets/js/carga-global-v42.js','preload-css.guard':'/htdocs/assets/css/carga-global-v42.css','productos.guard':'/htdocs/assets/js/productos-remotos.js','stock-css.guard':'/htdocs/assets/css/stock-ficha-v98.css','recepcion.guard':'/htdocs/api-v2/app/Http/Controllers/RecepcionesBorradorControlador.php','stock.guard':'/htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php','pdf.guard':'/htdocs/api-v2/app/Services/PdfRecepcionCompra.php','root.guard':'/htdocs/.htaccess','api.guard':'/htdocs/api/.htaccess','private.guard':'/htdocs/api-v2/.htaccess','gateway.guard':'/htdocs/api/index.php'}
+          def remote(n):return guards.get(n,('/htdocs/api-v2/' if n in (controller,routes,admin) else '/htdocs/')+n)
+          def get(f,n):
+              b=io.BytesIO();f.retrbinary('RETR '+remote(n),b.write);return b.getvalue()
+          def absent(f,n):
+              try:get(f,n);return False
+              except ftplib.error_perm as e:
+                  if str(e).startswith('550'):return True
+                  raise
+          def put(f,n,b):f.storbinary('STOR '+remote(n),io.BytesIO(b))
+          def save(area,n,b):
+              d=p/area/n;d.parent.mkdir(parents=True,exist_ok=True);d.write_bytes(b)
+          def read(area,n):return (p/area/n).read_bytes()
+          def front(ref,n):return subprocess.check_output(['git','-C',str(p/'front'),'show',ref+':'+n])
+          def verify_before(f):
+              for n in new:assert absent(f,n),n
+              for n in [index,*changed,*guards]:assert get(f,n)==read('before',n),n
+          class Links(HTMLParser):
+              def __init__(self):super().__init__();self.links=[];self.scripts=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='link' and a.get('rel')=='stylesheet':self.links.append(a.get('href',''))
+                  if tag=='script':self.scripts.append(a.get('src',''))
+          f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=45)
+          f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
+          with f:
+              mode=sys.argv[1]
+              if mode=='prepare':
+                  for n in new:assert absent(f,n),'Unexpected new file '+n
+                  for n in [index,*changed,*guards]:save('before',n,get(f,n))
+                  for n in [api,app]:assert read('before',n)==front('995847da601defc184d16dcf9dc2e5dc0e8558a2',n),'Baseline mismatch '+n
+                  assert read('before',admin)==subprocess.check_output(['git','show','abdfca6cb34203bc1b32f56b732a5ab82d6f3ad1:'+admin]),'Controlador V106 distinto'
+                  # Aplicar solo las dos rutas V107 sobre el archivo productivo real.
+                  live=read('before',routes)
+                  reference=subprocess.check_output(['git','show','abdfca6cb34203bc1b32f56b732a5ab82d6f3ad1:'+routes])
+                  proposed=pathlib.Path(routes).read_bytes()
+                  anchor='    // V106: núcleo administrativo multisucursal (DDL44-45 requeridos).'.encode('utf-8')
+                  start='    // V107: preparar contexto de sesión;'.encode('utf-8')
+                  group=b"Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {"
+                  assert proposed.count(start)==1 and proposed.count(anchor)==1
+                  block=proposed[proposed.index(start):proposed.index(anchor)]
+                  assert proposed.replace(block,b'',1)==reference,'El delta de rutas no es exclusivamente V107'
+                  # Admitir CRLF en el servidor, sin cambiar sus terminaciones de linea.
+                  newline=b'\r\n' if b'\r\n' in live else b'\n'
+                  block=block.replace(b'\r\n',b'\n').replace(b'\n',newline)
+                  assert live.count(anchor)==1 and live.count(group)==1 and live.index(group)<live.index(anchor)
+                  assert b'ContextoSucursalControlador' not in live and b"'/contexto-sucursal" not in live and b'SucursalesControlador' in live,'Posible colision o ausencia V106'
+                  merged=live.replace(anchor,block+anchor,1)
+                  assert merged.replace(block,b'',1)==live and merged.count(start)==1
+                  save('after',routes,merged)
+                  subprocess.run(['php','-l',str(p/'after'/routes)],check=True)
+                  print('V107_ROUTES_DELTA_OK',len(block.splitlines())-1)
+                  for n in [api,app,js]:save('after',n,(p/pathlib.Path(n).name).read_bytes())
+                  save('after',controller,pathlib.Path(controller).read_bytes())
+                  save('after',admin,pathlib.Path(admin).read_bytes())
+                  src=read('before',index).decode()
+                  for required in ['inventario-v104.js?v=20261126-v105','catalogos-api.js?v=20261126-v106','app-produccion.js?v=20261126-v106','sucursales-v106.js?v=20261126-v106','login-produccion.js?v=20261122-copy39','compras-consultas-v66.js?v=20261126-v102','recepciones-compactas-v102.css?v=20261126-v102','paleta-secciones-v103.css?v=20261126-v103','paleta-secciones-v103.js?v=20261126-v103','carga-global-v42.js?v=20261126-v99r','stock-ficha-v98.css?v=20261125-v98']:
+                      assert required in src,required
+                  for n in [api,app]:
+                      src,count=re.subn(re.escape(n)+r'\?v=[^"\x27]+',lambda m:n+'?v=20261126-v107',src)
+                      assert count==1,n
+                  assert 'data-nav="administracion_sucursales"' in src
+                  appref='<script src="'+app+'?v=20261126-v107"'
+                  assert src.count(appref)==1
+                  src=src.replace(appref,'<script src="'+js+'?v=20261126-v107" defer></script>\n  '+appref)
+                  parser=Links();parser.feed(src)
+                  for n in [api,app,js]:assert n+'?v=20261126-v107' in parser.scripts,n
+                  save('after',index,src.encode())
+                  for i,link in enumerate(parser.links):
+                      n=link.split('?')[0].lstrip('/')
+                      if re.fullmatch(r'assets/css/[A-Za-z0-9_.-]+\.css',n):save('styles',f'{i:03d}.css',get(f,n))
+                  print('V107_PRECHECK_OK')
+              elif mode=='publish':
+                  verify_before(f);(p/'attempted').touch()
+                  for n in [controller,admin,routes,js,api,app,index]:
+                      with (p/'attempted').open('a') as log:log.write(n+'\n')
+                      put(f,n,read('after',n))
+                  for n in [index,*changed,*new]:assert get(f,n)==read('after',n),n
+                  for n in guards:assert get(f,n)==read('before',n),n
+                  print('V107_FTPS_BYTES_OK')
+              elif mode=='rollback':
+                  for n in reversed((p/'attempted').read_text().splitlines()):
+                      if n in new:
+                          if not absent(f,n):f.delete(remote(n))
+                      else:put(f,n,read('before',n))
+                  verify_before(f);print('V107_ROLLBACK_OK')
+          PY
+          python /tmp/v107/transport.py prepare
+      - name: Verificar registro de rutas reales y middleware
+        env:
+          APP_ENV: testing
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          MAIL_MAILER: log
+        run: |
+          set -euo pipefail
+          cp routes/api.php /tmp/v107/routes-repo.php
+          trap 'cp /tmp/v107/routes-repo.php routes/api.php' EXIT
+          cp /tmp/v107/before/routes/api.php routes/api.php
+          php artisan route:list --json > /tmp/v107/routes-before.json
+          cp /tmp/v107/after/routes/api.php routes/api.php
+          php artisan route:list --json > /tmp/v107/routes-after.json
+          python - <<'PY'
+          import json
+          def read(p):
+              with open('/tmp/v107/routes-'+p+'.json') as f:return json.load(f)
+          before=read('before');after=read('after')
+          def key(r):return (r['method'],r['uri'],r.get('domain'))
+          old={key(r):r for r in before};new={key(r):r for r in after}
+          assert len(old)==len(before) and len(new)==len(after),'Rutas duplicadas'
+          assert all(new.get(k)==v for k,v in old.items()),'Una ruta anterior cambió'
+          expected={
+              ('GET|HEAD','api/v1/contexto-sucursal'):'60,1',
+              ('POST','api/v1/contexto-sucursal'):'20,1'
+          }
+          added=[v for k,v in new.items() if k not in old]
+          assert len(added)==len(expected),'Número inesperado de rutas nuevas'
+          for r in added:
+              perm=expected[(r['method'],r['uri'])]
+              mid=' '.join(r['middleware'])
+              assert ('token.rutahd' in mid or 'Autenticar' in mid or 'Token' in mid) and perm in mid, (r['uri'],mid)
+              assert 'ContextoSucursalControlador' in r['action'],r['uri']
+          print('V107_ROUTES_AUTH_OK',len(added))
+          PY
+      - name: Pruebas UI aisladas de contexto y acceso no bloqueado
+        run: |
+          set -euo pipefail
+          cd /tmp/v107/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import {readdirSync} from 'node:fs';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({viewport:{width:1440,height:900},reducedMotion:'reduce'});
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            await page.route('https://ci.invalid/**',r=>r.fulfill({contentType:'text/html',body:'<meta name="viewport" content="width=device-width, initial-scale=1"><div><button id="menuProfile">Mi perfil</button></div><main id="workspaceContent"></main>'}));
+            await page.goto('https://ci.invalid/');
+            for(const f of readdirSync('/tmp/v107/styles').sort())await page.addStyleTag({path:'/tmp/v107/styles/'+f});
+            await page.evaluate(()=>{
+              window.signed=true;window.reads=0;window.writes=0;
+              window.RutaHDAccesos={authenticated:()=>window.signed};
+              window.RutaHDMenuUsuario={close:()=>{}};
+              window.RutaHDApiCatalogos={branchContext:async()=>{window.reads++;return {contexto_obligatorio:false,aislamiento_completo:false,sucursales:[{id:1,codigo:'S01',nombre:'Casa CI',direccion:'Cunco CI'}],version_contexto:0};},selectBranchContext:async()=>{window.writes++;throw Error('No se debe seleccionar aún');}};
+            });
+            await page.addScriptTag({path:'/tmp/v107/contexto-sucursal-v107.js'});
+            const allowed=await page.evaluate(()=>RutaHDContextoSucursalV107.beforeLogin());
+            if(!allowed||await page.evaluate(()=>window.reads)!==0)throw Error('Login bloqueado o consulta prematura');
+            await page.getByRole('menuitem',{name:'Sucursales autorizadas'}).click();
+            const d=page.locator('dialog[open]');
+            await d.getByText('S01 · Casa CI',{exact:true}).waitFor();
+            if(await d.getByRole('radio').count()!==0||await d.getByRole('button',{name:'Cambiar sucursal'}).count()!==0)throw Error('Contexto activo antes de aislamiento');
+            await d.locator('.hd-doc-modal-footer').getByRole('button',{name:'Cerrar',exact:true}).click();
+            await d.waitFor({state:'detached'});
+            await page.setViewportSize({width:390,height:844});
+            await page.getByRole('menuitem',{name:'Sucursales autorizadas'}).click();
+            await d.getByText('S01 · Casa CI',{exact:true}).waitFor();
+            const close=d.locator('.hd-doc-modal-head button[aria-label="Cerrar"]');
+            const g=await close.evaluate(e=>({w:e.getBoundingClientRect().width,h:e.getBoundingClientRect().height,right:e.getBoundingClientRect().right}));
+            if(g.w!==36||g.h!==36||g.right>390)throw Error(JSON.stringify(g));
+            await page.evaluate(()=>{window.signed=false;document.dispatchEvent(new CustomEvent('rutahd:sesion-finalizada'));});
+            await d.waitFor({state:'detached'});
+            if(await page.evaluate(()=>window.writes)!==0||errors.length)throw Error(JSON.stringify(errors));
+            console.log('V107_UI_OK');
+          }finally{await browser.close();}
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v107-respaldo-previo
+          path: /tmp/v107/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar y verificar bytes
+        run: python /tmp/v107/transport.py publish
+      - name: Verificar referencias publicas y proteccion JWT
+        run: |
+          set -euo pipefail
+          cd /tmp/v107/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage();
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/?v=20261126-v107',{waitUntil:'load',timeout:60000});
+            await page.waitForFunction(()=>window.RutaHDContextoSucursalV107&&window.RutaHDSucursalesV106&&window.RutaHDLogin&&window.RutaHDApiCatalogos?.branchContext,null,{timeout:45000});
+            const result=await page.evaluate(async()=>({catalog:(await fetch('/api/v1/contexto-sucursal',{headers:{Accept:'application/json'}})).status,adjustment:(await fetch('/api/v1/inventario/ajustes-rapidos',{headers:{Accept:'application/json'}})).status,receipts:(await fetch('/api/v1/recepciones-borrador/1',{headers:{Accept:'application/json'}})).status,scripts:[...document.scripts].map(s=>s.src)}));
+            if(response?.status()!==200||result.catalog!==401||result.adjustment!==401||result.receipts!==401||errors.length||!['catalogos-api.js','login-produccion.js','contexto-sucursal-v107.js'].every(n=>result.scripts.some(s=>s.includes(n+'?v=20261126-v107'))))throw Error(JSON.stringify({result,errors}));
+            console.log('V107_PUBLIC_OK');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar originales si falla la publicacion
+        if: failure()
+        run: |
+          if [ -f /tmp/v107/attempted ]; then python /tmp/v107/transport.py rollback; fi

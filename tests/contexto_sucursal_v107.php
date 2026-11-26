@@ -52,4 +52,17 @@ blocked(fn()=>$c->seleccionar(req(2,2,['sucursal_id'=>2,'version_contexto'=>2]))
 DB::table('tokens_acceso')->where('id',2)->update(['expira_en'=>now()->subHour()]);
 blocked(fn()=>$c->estado(req(2,2)),401);
 check(DB::table('registros_auditoria')->count()===2,'Solo selección efectiva auditada');
+// Sucursal única transitoria, sin activar la configuración obligatoria de aislamiento.
+DB::table('sucursales_configuracion')->where('id',1)->update(['contexto_obligatorio'=>0]);
+DB::table('sucursales')->where('id','!=',1)->delete();
+$single=val($c->estado(req(2,3)));
+check($single['modo_sucursal_unica']&&$single['seleccion_habilitada']&&!$single['contexto_obligatorio'],'Selector único independiente de aislamiento');
+blocked(fn()=>$c->seleccionar(req(3,4,['sucursal_id'=>1,'version_contexto'=>0])),403);
+$x=val($c->seleccionar(req(2,3,['sucursal_id'=>1,'version_contexto'=>0])));
+check($x['version_contexto']===1&&(int)$x['sucursal_actual']['id']===1,'Confirmación única JWT');
+check((int)val($c->estado(req(2,3)))['sucursal_actual']['id']===1,'Contexto único persistido');
+DB::table('sucursales')->insert(['id'=>4,'codigo'=>'CI4','nombre'=>'Sucursal CI histórica','activo'=>0]);
+$multi=val($c->estado(req(2,3)));
+check(!$multi['modo_sucursal_unica']&&!$multi['seleccion_habilitada']&&$multi['sucursal_actual']===null,'Segunda sucursal bloquea modo único');
+blocked(fn()=>$c->seleccionar(req(2,3,['sucursal_id'=>1,'version_contexto'=>1])),409);
 echo "V107_CONTEXT_OK\n";

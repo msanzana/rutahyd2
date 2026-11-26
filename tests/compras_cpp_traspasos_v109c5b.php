@@ -198,6 +198,11 @@ DB::table('proveedores')->where('id',1)->update(['correo_electronico'=>'proveedo
 check(config('mail.default')==='log','Correo solo log CI');
 check($con->reenviarSolicitud(req(['verificar_envio'=>true]),(int)$n->id)->getData(true)['estado']==='ENVIADA','Reintento autorizado');
 check($con->reenviarSolicitud(req(['verificar_envio'=>true]),(int)$n->id)->getData(true)['estado']==='ENVIADA'&&(int)DB::table('cola_notificaciones_correo')->value('intentos')===1,'No duplicar correo');
+orderCI(8,'1','200');$direct=draftCI($c,$payload,8,'CI-DIRECTA-TRP','1','1','200','200','238');
+$rv=$c->revisar(req([]),$direct)->getData(true);check($rv['cierre_directo'],'Compra directa con traspaso');
+$c->confirmar(req(confirmPayload($rv)),$direct);
+check((string)DB::table('productos')->value('costo_promedio_ponderado')==='173.33333333','CPP compra directa conserva tránsito interno');
+check((string)DB::table('inventario_traspasos_detalle')->value('costo_cpp_snapshot')==='100.00000000','Costo histórico de despacho intacto');
 DB::table('sesiones_sucursales')->delete();
 reject(fn()=>$con->ver(req([]),$cid),409);
 echo "V109C5B_COMPRAS_CPP_OK\n";

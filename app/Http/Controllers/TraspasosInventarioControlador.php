@@ -29,7 +29,7 @@ final class TraspasosInventarioControlador extends Controller
             $pid=(int)$i['producto_id'];abort_if(isset($out[$pid]),422,'Producto repetido.');
             $p=DB::table('productos')->where('id',$pid)->where('activo',1)->lockForUpdate()->first();abort_unless($p,404,'Producto no disponible.');
             abort_if(DB::table('saldos_inventario as s')->join('presentaciones_productos as pp','pp.id','=','s.presentacion_id')->where('pp.producto_id',$pid)->where('s.cantidad','<>',0)->exists(),409,'Inventario legado pendiente.');
-            abort_if(DB::table('inventario_traspasos_detalle')->where('producto_id',$pid)->whereRaw('cantidad_despachada>cantidad_recibida+cantidad_regularizada')->exists(),409,'Producto con traspasos en camino.');
+            abort_if(DB::table('inventario_traspasos_detalle')->where('producto_id',$pid)->whereRaw('(cantidad_despachada-cantidad_recibida-cantidad_regularizada)>0')->exists(),409,'Producto con traspasos en camino.');
             $s=DB::table('stock')->where('producto_id',$pid)->whereIn('bodega_id',$bids)->orderBy('bodega_id')->lockForUpdate()->get()->keyBy('bodega_id');
             $line=(object)['cantidad_solicitada'=>$i['cantidad'],'cantidad_despachada'=>'0','cantidad_recibida'=>'0','cantidad_regularizada'=>'0'];
             $out[$pid]=(new PlanStockTraspaso())->calcular($m,$line,$modalidad,$this->etapa($modalidad),$i['cantidad'],$s->get($from)??$zero,$s->get($to)??$zero,(string)$p->costo_promedio_ponderado);

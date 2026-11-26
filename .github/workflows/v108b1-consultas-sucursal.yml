@@ -1,0 +1,38 @@
+name: V108B1 - Validar consultas por sucursal
+on:
+  push:
+    branches: [feature/v108b1-consultas-sucursal-20261126]
+    paths:
+      - .github/workflows/v108b1-consultas-sucursal.yml
+      - app/Http/Controllers/ComprasConsultasControlador.php
+      - tests/consultas_sucursal_v108b1.php
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, pdo_sqlite, iconv
+      - name: Consultas, aislamiento y PDF
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/ComprasConsultasControlador.php
+          php -l tests/consultas_sucursal_v108b1.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/consultas_sucursal_v108b1.php | tee /tmp/v108b1.log
+          grep -Fx V108B1_CONSULTAS_OK /tmp/v108b1.log

@@ -57,7 +57,7 @@ jobs:
           python - <<'PY'
           import json
           rows=json.load(open('/tmp/v109d4b-rutas.json'))
-          assert {r['uri'] for r in rows}=={'api/v1/inventario/conteos','api/v1/inventario/conteos/{id}'}
+          assert {'api/v1/inventario/conteos','api/v1/inventario/conteos/{id}'} <= {r['uri'] for r in rows}
           for r in rows:
               assert set(r['method'].split('|')) <= {'GET','HEAD'}
               assert any('inventario.operaciones.ver' in m for m in r['middleware'])

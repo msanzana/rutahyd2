@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Services\ContextoCompras;
 use App\Services\PlanCantidadesTraspaso;
 use App\Services\ComprobanteTraspasoPdf;
+use App\Services\HabilitacionTraspasos;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -32,7 +33,9 @@ final class TraspasosConsultasControlador extends Controller
         $s=trim($v['buscar']??'');
         if($s!=='')$q->where(fn($x)=>$x->where('t.numero_interno','like','%'.$s.'%')->orWhere('bo.nombre','like','%'.$s.'%')->orWhere('bd.nombre','like','%'.$s.'%')->orWhereExists(fn($z)=>$z->selectRaw('1')->from('inventario_traspasos_detalle as d')->join('productos as p','p.id','=','d.producto_id')->whereColumn('d.traspaso_id','t.id')->where(fn($p)=>$p->where('p.sku','like','%'.$s.'%')->orWhere('p.nombre','like','%'.$s.'%'))));
         foreach(['modalidad','estado','bodega_origen_id','bodega_destino_id'] as $key)if(isset($v[$key]))$q->where('t.'.$key,$v[$key]);
-        return response()->json($q->orderByDesc('t.id')->paginate(25,['*'],'page',(int)($v['page']??1)))->header('Cache-Control','no-store');
+        $page=$q->orderByDesc('t.id')->paginate(25,['*'],'page',(int)($v['page']??1))->toArray();
+        $page['escrituras_habilitadas']=(new HabilitacionTraspasos())->pares($sid)!==[];
+        return response()->json($page)->header('Cache-Control','no-store');
     }
     public function bodegas(Request $r){
         $sid=(int)app(ContextoCompras::class)->resolver($r)->id;
@@ -52,7 +55,7 @@ final class TraspasosConsultasControlador extends Controller
                 $o->detalles=DB::table('inventario_operaciones_detalle as d')->join('productos as p','p.id','=','d.producto_id')->where('d.operacion_id',$o->id)->whereIn('d.bodega_id',[$t->bodega_origen_id,$t->bodega_destino_id])->select('d.id','d.producto_id','p.sku','p.nombre as producto','d.bodega_id','d.cantidad','d.delta_disponible','d.delta_transito','d.delta_comprometido','d.delta_fisico','d.costo_unitario_snapshot','d.kardex_id')->orderBy('d.numero_linea')->get();
             }
             $active=$ops->first(fn($o)=>$o->etapa==='RECEPCION'&&in_array($o->estado,['INV_PEND_APROBACION','INV_APROBADA'],true));
-            return ['traspaso'=>$t,'detalles'=>$lines,'operaciones'=>$ops,'recepcion_activa'=>$active?->id,'usuario_actual_id'=>(int)$r->user()->id];
+            return ['traspaso'=>$t,'detalles'=>$lines,'operaciones'=>$ops,'recepcion_activa'=>$active?->id,'usuario_actual_id'=>(int)$r->user()->id,'escrituras_habilitadas'=>$t->guia_despacho_id===null&&(new HabilitacionTraspasos())->permite($sid,(int)$t->bodega_origen_id,(int)$t->bodega_destino_id)];
         },3);
     }
     public function ver(Request $r,int $id){return response()->json($this->datos($r,$id))->header('Cache-Control','no-store');}

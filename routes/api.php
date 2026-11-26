@@ -94,6 +94,10 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     // V104: inventario unificado; habilitar únicamente tras confirmar DDL39-42.
     Route::get('/inventario/catalogos',[\App\Http\Controllers\InventarioOperacionesControlador::class,'catalogos'])->middleware('permiso.rutahd:inventario.catalogos.ver');
     Route::put('/inventario/motivos/{id}',[\App\Http\Controllers\InventarioOperacionesControlador::class,'actualizarMotivo'])->middleware('permiso.rutahd:inventario.catalogos.gestionar')->whereNumber('id');
+    Route::get('/inventario/ajustes',[\App\Http\Controllers\AjustesGeneralesControlador::class,'listar'])->middleware('permiso.rutahd:inventario.operaciones.ver');
+    Route::get('/inventario/ajustes/{id}',[\App\Http\Controllers\AjustesGeneralesControlador::class,'ver'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id');
+    Route::get('/inventario/ajustes/{id}/respaldos/{adjunto}',[\App\Http\Controllers\AjustesGeneralesControlador::class,'respaldo'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber(['id','adjunto']);
+    Route::post('/inventario/ajustes',[\App\Http\Controllers\AjustesGeneralesControlador::class,'crear'])->middleware('permiso.rutahd:inventario.operaciones.gestionar')->middleware('throttle:20,1');
     Route::post('/inventario/ajustes/revision',[\App\Http\Controllers\AjustesGeneralesControlador::class,'revisar'])->middleware('permiso.rutahd:inventario.operaciones.gestionar')->middleware('throttle:60,1');
     Route::get('/inventario/ajustes-rapidos/candidatos',[\App\Http\Controllers\InventarioOperacionesControlador::class,'candidatos'])->middleware('permiso.rutahd:inventario.operaciones.gestionar');
     Route::get('/inventario/ajustes-rapidos/bodegas',[\App\Http\Controllers\InventarioOperacionesControlador::class,'bodegas'])->middleware('permiso.rutahd:inventario.operaciones.gestionar');

@@ -1,0 +1,27 @@
+name: V109D4A - Validar interfaz de conteos
+on:
+  push:
+    branches: [feature/v109a-inventario-contexto-20261126]
+    paths:
+      - .github/workflows/v109d4a-conteos-front.yml
+      - tests/conteos_front_v109d4a.mjs
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validar candidato frontend fijado
+        run: |
+          set -euo pipefail
+          git clone -q --depth=1 --branch feature/v109b4-ajustes-generales-20261126 https://github.com/msanzana/rutahyd2front.git /tmp/v109d4a-front
+          test "$(git -C /tmp/v109d4a-front rev-parse HEAD)" = 4072198fd32b7344eeabbd2d5bd8123a7c72b223
+          for f in catalogos-api inventario-v104 app-produccion; do node --check "/tmp/v109d4a-front/assets/js/$f.js"; done
+          npm install --prefix /tmp/v109d4a-js --no-audit --no-fund jsdom@26.1.0
+          node tests/conteos_front_v109d4a.mjs /tmp/v109d4a-front | tee /tmp/v109d4a.log
+          grep -Fx V109D4A_FRONT_OK /tmp/v109d4a.log

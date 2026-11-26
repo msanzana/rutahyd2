@@ -5,6 +5,7 @@ namespace App\Services;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 
@@ -15,7 +16,14 @@ final class RegularizacionRecepcion
     private function money(BigDecimal $v): string {return (string)$v->toScale(8,(defined(RoundingMode::class.'::HalfUp')?constant(RoundingMode::class.'::HalfUp'):constant(RoundingMode::class.'::HALF_UP')));}
     public function generar(object $c,array $review,int $user,string $motivo): array
     {
+        abort_unless(DB::transactionLevel()>0,500,'Solicitud sin transacción.');
+        $sid=(int)($c->sucursal_id??0);
+        abort_unless($sid>0,409,'Consolidación sin sucursal.');
         $receipts=collect($review['recepciones'])->keyBy('id');
+        foreach($receipts as $rec){
+            abort_unless((int)($rec['sucursal_id']??0)===$sid&&(int)$rec['recepcion_consolidada_id']===(int)$c->id,409,'Recepción sin atribución válida.');
+            abort_unless(DB::table('compras')->where('id',$rec['compra_id'])->where('sucursal_id',$sid)->where('proveedor_id',$c->proveedor_id)->lockForUpdate()->first(),409,'Compra sin atribución válida.');
+        }
         $groups=[];$seen=[];
         foreach($review['diferencias'] as $raw){
             $d=(object)$raw;$r=$receipts->get($d->recepcion_id);abort_unless($r,409,'Diferencia ajena a la consolidación.');
@@ -88,14 +96,22 @@ final class RegularizacionRecepcion
         $objects[2]='<< /Type /Pages /Kids ['.implode(' ',$kids).'] /Count '.count($kids).' >>';ksort($objects);$pdf="%PDF-1.4\n";$offs=[0];foreach($objects as $i=>$obj){$offs[$i]=strlen($pdf);$pdf.="$i 0 obj\n$obj\nendobj\n";}$xref=strlen($pdf);$pdf.="xref\n0 ".count($offs)."\n0000000000 65535 f \n";for($i=1;$i<count($offs);$i++)$pdf.=sprintf("%010d 00000 n \n",$offs[$i]);return $pdf."trailer\n<< /Size ".count($offs)." /Root 1 0 R >>\nstartxref\n$xref\n%%EOF\n";
     }
     /** SMTP is outside the business transaction. No blind retry after ambiguous transport. */
-    public function enviar(int $id,bool $manual=false): string
+    public function enviar(int $id,bool $manual=false,?Request $request=null,?int $sucursal=null): string
     {
-        $claim=DB::transaction(function()use($id,$manual){
+        abort_if($manual&&$request===null,401,'Reenvío requiere sesión.');
+        $claim=DB::transaction(function()use($id,$manual,$request,$sucursal){
+            $sid=$request!==null?(int)app(ContextoCompras::class)->resolver($request,true)->id:$sucursal;
+            abort_unless($sid!==null&&$sid>0,409,'Notificación sin contexto de sucursal.');
             $n=DB::table('cola_notificaciones_correo')->where('id',$id)->lockForUpdate()->first();
             abort_unless($n&&$n->origen_tipo==='SOLICITUD_REGULARIZACION',404,'Notificación no encontrada.');
+            $s=DB::table('solicitudes_regularizacion')->where('id',$n->solicitud_id)->where('estado','<>','NULA')->lockForUpdate()->first();
+            abort_unless($s,404,'Solicitud no encontrada.');
+            $c=DB::table('recepciones_consolidadas')->where('id',$s->recepcion_consolidada_id)->where('sucursal_id',$sid)->lockForUpdate()->first();
+            $r=DB::table('recepciones')->where('id',$s->recepcion_id)->where('sucursal_id',$sid)->where('recepcion_consolidada_id',$s->recepcion_consolidada_id)->lockForUpdate()->first();
+            $p=DB::table('compras')->where('id',$s->compra_id)->where('sucursal_id',$sid)->lockForUpdate()->first();
+            abort_unless($c&&$r&&$p&&(int)$r->compra_id===(int)$p->id&&(int)$r->proveedor_id===(int)$s->proveedor_id&&(int)$c->proveedor_id===(int)$s->proveedor_id&&(int)$p->proveedor_id===(int)$s->proveedor_id&&(int)$n->proveedor_id===(int)$s->proveedor_id&&(int)$n->origen_id===(int)$s->id,404,'Notificación no encontrada.');
             if(!in_array($n->estado,$manual?['PENDIENTE','ERROR']:['PENDIENTE'],true))return null;
             if((int)$n->intentos>=(int)$n->maximo_intentos)return null;
-            $s=DB::table('solicitudes_regularizacion')->where('id',$n->solicitud_id)->where('estado','<>','NULA')->first();abort_unless($s,409,'Solicitud anulada.');
             $email=trim((string)DB::table('proveedores')->where('id',$n->proveedor_id)->value('correo_electronico'));
             if(!filter_var($email,FILTER_VALIDATE_EMAIL)){DB::table('cola_notificaciones_correo')->where('id',$id)->update(['estado'=>'ERROR','ultimo_error'=>'Proveedor sin correo válido.']);return null;}
             $token=(string)Str::uuid();DB::table('cola_notificaciones_correo')->where('id',$id)->update(['estado'=>'PROCESANDO','destinatario'=>$email,'token_procesamiento'=>$token,'procesando_en'=>now(),'ultimo_intento_en'=>now(),'intentos'=>(int)$n->intentos+1]);return [$n,$email,$token,$s];

@@ -16,7 +16,7 @@ jobs:
       - name: Empaquetar controlador validado y referencia base
         run: |
           set -euo pipefail
-          candidate=6313af48cf03691a1a1d2c2750d8463c538ea93b
+          candidate=8f872ea2001ff568970722616262db3d1c401122
           base=de78f242f5b339897563f17b48ff2b92c2ea8c53
           controller=app/Http/Controllers/InventarioOperacionesControlador.php
           mkdir -p paquete/candidato/app/Http/Controllers paquete/referencia/app/Http/Controllers
@@ -28,10 +28,10 @@ jobs:
             sha256sum "candidato/$controller" "referencia/$controller" > SHA256SUMS
             sha256sum -c SHA256SUMS
           )
-          printf '%s\n' 'V109A: paquete de revision, no publicado' "Commit candidato: $candidate" "Commit base de referencia: $base" 'CI SQLite y MariaDB exitosa: https://github.com/msanzana/rutahyd2/actions/runs/45887789622' 'La referencia del repositorio no constituye respaldo productivo.' 'Sin DDL, sin rutas nuevas y sin modificaciones del frontend.' > paquete/ESTADO.txt
+          printf '%s\n' 'V109A-R1: paquete corregido de revision, no publicado; reemplaza el candidato anterior' "Commit candidato: $candidate" "Commit base de referencia: $base" 'CI SQLite y MariaDB exitosa: https://github.com/msanzana/rutahyd2/actions/runs/45890394123' 'La referencia del repositorio no constituye respaldo productivo.' 'Sin DDL, sin rutas nuevas y sin modificaciones del frontend.' > paquete/ESTADO.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: rutahd-v109a-paquete-validado
+          name: rutahd-v109a-r1-paquete-validado
           path: paquete/
           retention-days: 30
           if-no-files-found: error

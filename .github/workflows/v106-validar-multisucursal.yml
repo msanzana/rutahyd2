@@ -36,7 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone -q --depth=1 --branch feature/v106-multisucursal-20261126 https://github.com/msanzana/rutahyd2front.git /tmp/v106-front
-          test "$(git -C /tmp/v106-front rev-parse HEAD)" = "48ed6d2045492b5d018b2b7e500dff4584699c06"
+          test "$(git -C /tmp/v106-front rev-parse HEAD)" = "995847da601defc184d16dcf9dc2e5dc0e8558a2"
           for n in sucursales-v106.js catalogos-api.js app-produccion.js; do node --check "/tmp/v106-front/assets/js/$n"; done
           grep -q 'data-nav="administracion_sucursales"' /tmp/v106-front/index.html
           echo V106_FRONT_SYNTAX_OK

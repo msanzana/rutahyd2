@@ -1,0 +1,105 @@
+name: V109D4A - Validar consultas de conteos
+on:
+  push:
+    branches: [feature/v109a-inventario-contexto-20261126]
+    paths:
+      - .github/workflows/v109d4a-conteos-consultas.yml
+      - app/Http/Controllers/TraspasosInventarioControlador.php
+      - app/Http/Controllers/TraspasosConsultasControlador.php
+      - routes/api.php
+      - app/Http/Controllers/ConteosInventarioControlador.php
+      - app/Services/PlanConteoInventario.php
+      - config/conteos.php
+      - database/espanol/49_conteos_operaciones_ddl.sql
+      - app/Services/HabilitacionTraspasos.php
+      - app/Http/Middleware/AutorizarTraspasoInterno.php
+      - config/traspasos.php
+      - app/Services/PlanStockTraspaso.php
+      - app/Services/LectorBaseValorizadaInventario.php
+      - app/Services/BaseValorizadaInventario.php
+      - routes/api.php
+      - tests/conteos_consultas_v109d4a.php
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, fileinfo, pdo_sqlite, iconv
+      - name: Validar sintaxis y motor aislado
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/ConteosInventarioControlador.php
+          php -l app/Services/PlanConteoInventario.php
+          php -l app/Http/Controllers/TraspasosConsultasControlador.php
+          php -l routes/api.php
+          php -l routes/api.php
+          php -l tests/conteos_consultas_v109d4a.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/conteos_consultas_v109d4a.php | tee /tmp/v109d4a.log
+          grep -Fx V109D4A_CONSULTAS_OK /tmp/v109d4a.log
+          php artisan route:list --path=api/v1/inventario/conteos --json > /tmp/v109d4a-rutas.json
+          python - <<'PY'
+          import json
+          rows=json.load(open('/tmp/v109d4a-rutas.json'))
+          assert {r['uri'] for r in rows}=={'api/v1/inventario/conteos','api/v1/inventario/conteos/{id}'}
+          for r in rows:
+              assert set(r['method'].split('|')) <= {'GET','HEAD'}
+              assert any('inventario.operaciones.ver' in m for m in r['middleware'])
+              assert any('AutenticarToken' in m or 'token.rutahd' in m for m in r['middleware'])
+          PY
+  validar-mariadb:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: temporal_ci_solamente
+          MARIADB_DATABASE: rutahyd_v109d4a_ci
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: rutahyd_v109d4a_ci
+      DB_USERNAME: root
+      DB_PASSWORD: temporal_ci_solamente
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, fileinfo, pdo_mysql, iconv
+      - name: Motor aislado MariaDB
+        run: |
+          set -euo pipefail
+          php -l tests/conteos_consultas_v109d4a.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/conteos_consultas_v109d4a.php | tee /tmp/v109d4a-mariadb.log
+          grep -Fx V109D4A_CONSULTAS_OK /tmp/v109d4a-mariadb.log

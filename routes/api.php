@@ -97,6 +97,7 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     // V109C6A: consultas; escrituras de traspasos pendientes de habilitación integral.
     Route::get('/inventario/traspasos',[\App\Http\Controllers\TraspasosConsultasControlador::class,'listar'])->middleware('permiso.rutahd:inventario.operaciones.ver');
     Route::get('/inventario/traspasos/bodegas',[\App\Http\Controllers\TraspasosConsultasControlador::class,'bodegas'])->middleware('permiso.rutahd:inventario.operaciones.ver');
+    Route::get('/inventario/traspasos/{id}/pdf',[\App\Http\Controllers\TraspasosConsultasControlador::class,'pdf'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id')->middleware('throttle:30,1');
     Route::get('/inventario/traspasos/{id}',[\App\Http\Controllers\TraspasosConsultasControlador::class,'ver'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id');
     Route::get('/inventario/ajustes',[\App\Http\Controllers\AjustesGeneralesControlador::class,'listar'])->middleware('permiso.rutahd:inventario.operaciones.ver');
     Route::get('/inventario/ajustes/{id}',[\App\Http\Controllers\AjustesGeneralesControlador::class,'ver'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id');

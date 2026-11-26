@@ -79,6 +79,16 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::get('/solicitudes-regularizacion/{id}/pdf',[\App\Http\Controllers\ConsolidacionesControlador::class,'solicitudPdf'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
     Route::post('/notificaciones-regularizacion/{id}/reenviar',[\App\Http\Controllers\ConsolidacionesControlador::class,'reenviarSolicitud'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
     Route::get('/documentos-recepcion/{tipo}/{id}/pdf',[\App\Http\Controllers\ComprasConsultasControlador::class,'pdf'])->middleware('permiso.rutahd:compras.gestionar')->where('tipo','recepcion|consolidacion')->whereNumber('id');
+    // V104: inventario unificado; habilitar únicamente tras confirmar DDL39-42.
+    Route::get('/inventario/catalogos',[\App\Http\Controllers\InventarioOperacionesControlador::class,'catalogos'])->middleware('permiso.rutahd:inventario.catalogos.ver');
+    Route::put('/inventario/motivos/{id}',[\App\Http\Controllers\InventarioOperacionesControlador::class,'actualizarMotivo'])->middleware('permiso.rutahd:inventario.catalogos.gestionar')->whereNumber('id');
+    Route::get('/inventario/ajustes-rapidos/origen/{id}',[\App\Http\Controllers\InventarioOperacionesControlador::class,'origen'])->middleware('permiso.rutahd:inventario.operaciones.gestionar')->whereNumber('id');
+    Route::get('/inventario/ajustes-rapidos',[\App\Http\Controllers\InventarioOperacionesControlador::class,'listar'])->middleware('permiso.rutahd:inventario.operaciones.ver');
+    Route::get('/inventario/ajustes-rapidos/{id}',[\App\Http\Controllers\InventarioOperacionesControlador::class,'ver'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id');
+    Route::post('/inventario/ajustes-rapidos',[\App\Http\Controllers\InventarioOperacionesControlador::class,'crear'])->middleware('permiso.rutahd:inventario.operaciones.gestionar')->middleware('throttle:20,1');
+    Route::post('/inventario/ajustes-rapidos/{id}/aprobar',[\App\Http\Controllers\InventarioOperacionesControlador::class,'aprobar'])->middleware('permiso.rutahd:inventario.operaciones.aprobar')->whereNumber('id');
+    Route::post('/inventario/ajustes-rapidos/{id}/anular',[\App\Http\Controllers\InventarioOperacionesControlador::class,'anular'])->middleware('permiso.rutahd:inventario.operaciones.anular')->whereNumber('id');
+    Route::post('/inventario/ajustes-rapidos/{id}/confirmar',[\App\Http\Controllers\InventarioOperacionesControlador::class,'confirmar'])->middleware('permiso.rutahd:inventario.operaciones.confirmar')->whereNumber('id');
     // V66: consultas de compras; sin operaciones de escritura.
     Route::get('/compras-consultas/{modulo}',[\App\Http\Controllers\ComprasConsultasControlador::class,'listar'])
         ->where('modulo','facturas|recepciones|consolidaciones|libro')

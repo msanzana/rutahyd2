@@ -11,6 +11,7 @@ use Brick\Math\RoundingMode;
 final class InventarioOperacionesControlador extends Controller
 {
     private const RAPIDOS=[201,203,207];
+    private const REGLAS=[201=>['CORREGIR_DESPACHO_SKU','HISTORICO'],203=>['CORREGIR_DESPACHO_BODEGA','CONSERVAR'],207=>['DESPACHO_NO_REALIZADO','HISTORICO']];
     private function decimal($x): BigDecimal { return BigDecimal::of((string)$x); }
     private function saldo(BigDecimal $x): string {
         abort_if($x->isNegative()||$x->isGreaterThan('99999999999999999999.99999999'),409,'Saldo fuera de rango.');
@@ -86,7 +87,7 @@ final class InventarioOperacionesControlador extends Controller
     }
     private function motivo(int $codigo) {
         $m=DB::table('inventario_motivos as m')->join('inventario_grupos_motivos as g','g.id','=','m.grupo_id')->join('inventario_tipos_movimiento as t','t.id','=','m.tipo_movimiento_id')->where('m.codigo',$codigo)->where('m.activo',1)->where('g.activo',1)->where('t.activo',1)->where('m.ajuste_rapido',1)->select('m.*')->first();
-        abort_unless($m&&in_array($codigo,self::RAPIDOS,true)&&!$m->requiere_respaldo&&$m->requiere_referencia&&$m->requiere_aprobacion,409,'Motivo no habilitado en el motor rápido.');
+        abort_unless($m&&isset(self::REGLAS[$codigo])&&[$m->regla,$m->politica_cpp]===self::REGLAS[$codigo]&&!$m->requiere_respaldo&&$m->requiere_referencia&&$m->requiere_aprobacion,409,'Motivo no habilitado en el motor rápido.');
         return $m;
     }
     private function plan($k,int $code,?int $product,?int $warehouse): array {
@@ -105,7 +106,7 @@ final class InventarioOperacionesControlador extends Controller
         return $r->validate(['motivo_codigo'=>'required|integer|in:201,203,207','kardex_id'=>'required|integer|min:1','producto_real_id'=>'nullable|integer|min:1','bodega_real_id'=>'nullable|integer|min:1','justificacion'=>'required|string|min:10|max:4000','token_creacion'=>'required|uuid']);
     }
     public function crear(Request $r) {
-        $v=$this->validarPlan($r);$user=$this->usuario($r);
+        $v=$this->validarPlan($r);$user=$this->usuario($r);abort_if(mb_strlen(trim($v['justificacion']))<10,422,'Justificación insuficiente.');
         return response()->json(DB::transaction(function()use($v,$user){
             $old=DB::table('inventario_operaciones')->where('token_creacion',$v['token_creacion'])->lockForUpdate()->first();
             if($old){$target=DB::table('inventario_operaciones_detalle')->where('operacion_id',$old->id)->where('numero_linea',2)->first();$code=(int)$v['motivo_codigo'];abort_unless((int)$old->creado_por===$user&&(int)$old->motivo_codigo_snapshot===$code&&(int)$old->referencia_kardex_id===(int)$v['kardex_id']&&$old->justificacion===trim($v['justificacion'])&&($code!==201||(int)($target->producto_id??0)===(int)($v['producto_real_id']??0))&&($code!==203||(int)($target->bodega_id??0)===(int)($v['bodega_real_id']??0)),409,'Token ya utilizado para otra solicitud.');return ['id'=>$old->id,'numero_interno'=>$old->numero_interno];}
@@ -138,7 +139,7 @@ final class InventarioOperacionesControlador extends Controller
     public function aprobar(Request $r,int $id) {return $this->transicion($r,$id,'INV_PEND_APROBACION','INV_APROBADA','APROBAR');}
     public function anular(Request $r,int $id) {return $this->transicion($r,$id,'INV_PEND_APROBACION','INV_ANULADA','ANULAR');}
     private function transicion(Request $r,int $id,string $from,string $to,string $action) {
-        $v=$r->validate(['version'=>'required|integer|min:1|max:4294967294','motivo'=>'required|string|min:3|max:1000']);$user=$this->usuario($r);
+        $v=$r->validate(['version'=>'required|integer|min:1|max:4294967294','motivo'=>'required|string|min:3|max:1000']);$user=$this->usuario($r);abort_if(mb_strlen(trim($v['motivo']))<3,422,'Motivo insuficiente.');
         return response()->json(DB::transaction(function()use($v,$user,$id,$from,$to,$action){
             $o=DB::table('inventario_operaciones')->where('id',$id)->where('clase','AJUSTE_RAPIDO')->lockForUpdate()->first();abort_unless($o,404);
             $a=(int)$o->estado_id;$b=$this->estado($to);$permitted=$action==='ANULAR'?[$this->estado('INV_PEND_APROBACION'),$this->estado('INV_APROBADA')]:[$this->estado($from)];abort_unless(in_array($a,$permitted,true)&&(int)$o->version===(int)$v['version'],409,'Estado o versión cambió.');
@@ -175,7 +176,7 @@ final class InventarioOperacionesControlador extends Controller
                     $balances[$pid.':'.$s->bodega_id]=$s;$valued[$pid]=$valued[$pid]->plus($a)->plus($c);
                 }
             }
-            $historical=$this->decimal($k->cpp_anterior??0);abort_unless($historical->isPositive(),409,'No existe CPP histórico comprobable para revertir.');
+            $historical=$this->decimal($k->costo_unitario_neto??0);abort_unless($historical->isPositive()&&$historical->isEqualTo($this->decimal($k->cpp_anterior??0)),409,'No existe costo histórico de salida comprobable.');
             foreach($lines as $i=>$l){
                 $x=$expected[$i];$delta=$this->decimal($l->delta_disponible);$n=$this->decimal($l->cantidad);
                 abort_unless((int)$l->producto_id===$x['producto_id']&&(int)$l->bodega_id===$x['bodega_id']&&(int)$l->kardex_referencia_id===(int)$k->id&&$delta->isEqualTo($x['delta_disponible'])&&$n->isEqualTo($x['cantidad'])&&$this->decimal($l->delta_fisico)->isEqualTo($delta)&&$this->decimal($l->delta_transito)->isZero()&&$this->decimal($l->delta_comprometido)->isZero()&&!$l->kardex_id,409,'Detalle alterado.');

@@ -95,7 +95,14 @@ final class SucursalesControlador extends Controller
             $old=DB::table('usuarios_sucursales')->where('usuario_id',$usuario)->where('sucursal_id',$id)->lockForUpdate()->first();
             if($old)DB::table('usuarios_sucursales')->where('usuario_id',$usuario)->where('sucursal_id',$id)->update(['activo'=>(int)$v['activo'],'asignado_por'=>$user,'asignado_en'=>now()]);
             elseif($v['activo'])DB::table('usuarios_sucursales')->insert(['usuario_id'=>$usuario,'sucursal_id'=>$id,'activo'=>1,'asignado_por'=>$user]);
-            if(!$v['activo'])DB::table('sesiones_sucursales')->where('sucursal_id',$id)->whereIn('token_acceso_id',DB::table('tokens_acceso')->where('usuario_id',$usuario)->select('id'))->delete();
+            if(!$v['activo']){
+                // Revocar el JWT ligado a esta sucursal: impide reutilizar versiones antiguas tras reasignar acceso.
+                $tokens=DB::table('sesiones_sucursales as ss')->join('tokens_acceso as ta','ta.id','=','ss.token_acceso_id')->where('ss.sucursal_id',$id)->where('ta.usuario_id',$usuario)->pluck('ta.id');
+                if($tokens->isNotEmpty()){
+                    DB::table('sesiones_sucursales')->whereIn('token_acceso_id',$tokens)->delete();
+                    DB::table('tokens_acceso')->where('usuario_id',$usuario)->whereIn('id',$tokens)->delete();
+                }
+            }
             $this->audit($user,'SUCURSAL_ACCESO',$id,['usuario_id'=>$usuario,'activo'=>(int)($old->activo??0)],['usuario_id'=>$usuario,'activo'=>(int)$v['activo']]);
             return ['usuario_id'=>$usuario,'sucursal_id'=>$id,'activo'=>(int)$v['activo']];
         },3));

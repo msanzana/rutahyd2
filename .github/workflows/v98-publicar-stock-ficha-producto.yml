@@ -103,7 +103,8 @@ jobs:
                   save('after',index,src.encode())
                   parser=Links();parser.feed(src)
                   assert 'assets/css/app.css' in parser.links and 'assets/css/tipos-documentos-v63.css' in parser.links
-                  for i,n in enumerate(parser.links):save('styles',f'{i:03d}.css',get(f,n))
+                  for i,n in enumerate(parser.links):
+                      if n!=css:save('styles',f'{i:03d}.css',get(f,n))
                   print('V98_PRECHECK_OK',len(parser.links))
               elif mode=='publish':
                   verify_before(f)

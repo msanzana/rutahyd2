@@ -98,6 +98,9 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::get('/inventario/ajustes/{id}',[\App\Http\Controllers\AjustesGeneralesControlador::class,'ver'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id');
     Route::get('/inventario/ajustes/{id}/respaldos/{adjunto}',[\App\Http\Controllers\AjustesGeneralesControlador::class,'respaldo'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber(['id','adjunto']);
     Route::post('/inventario/ajustes',[\App\Http\Controllers\AjustesGeneralesControlador::class,'crear'])->middleware('permiso.rutahd:inventario.operaciones.gestionar')->middleware('throttle:20,1');
+    Route::post('/inventario/ajustes/{id}/aprobar',[\App\Http\Controllers\AjustesGeneralesControlador::class,'aprobar'])->middleware('permiso.rutahd:inventario.operaciones.aprobar')->whereNumber('id');
+    Route::post('/inventario/ajustes/{id}/anular',[\App\Http\Controllers\AjustesGeneralesControlador::class,'anular'])->middleware('permiso.rutahd:inventario.operaciones.anular')->whereNumber('id');
+    Route::post('/inventario/ajustes/{id}/confirmar',[\App\Http\Controllers\AjustesGeneralesControlador::class,'confirmar'])->middleware('permiso.rutahd:inventario.operaciones.confirmar')->whereNumber('id');
     Route::post('/inventario/ajustes/revision',[\App\Http\Controllers\AjustesGeneralesControlador::class,'revisar'])->middleware('permiso.rutahd:inventario.operaciones.gestionar')->middleware('throttle:60,1');
     Route::get('/inventario/ajustes-rapidos/candidatos',[\App\Http\Controllers\InventarioOperacionesControlador::class,'candidatos'])->middleware('permiso.rutahd:inventario.operaciones.gestionar');
     Route::get('/inventario/ajustes-rapidos/bodegas',[\App\Http\Controllers\InventarioOperacionesControlador::class,'bodegas'])->middleware('permiso.rutahd:inventario.operaciones.gestionar');

@@ -45,11 +45,11 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/v98/{before,after,browser,styles}
           git clone -q --depth=1 --branch feature/v98-stock-ficha-producto-20261125 https://github.com/msanzana/rutahyd2front.git /tmp/v98/front
-          git -C /tmp/v98/front fetch -q --depth=1 origin f5bf4388024e98267eb54542510ba9efd2d02191
-          git -C /tmp/v98/front show f5bf4388024e98267eb54542510ba9efd2d02191:assets/js/productos-remotos.js > /tmp/v98/new.js
+          git -C /tmp/v98/front fetch -q --depth=1 origin 29672e42be90938f0c41e0262cdf6c75a332ad92
+          git -C /tmp/v98/front show 29672e42be90938f0c41e0262cdf6c75a332ad92:assets/js/productos-remotos.js > /tmp/v98/new.js
           git -C /tmp/v98/front fetch -q --depth=1 origin 03ef772810bf5eb5f4c6e52163ee2c2e9fcc1a7c
           git -C /tmp/v98/front show 03ef772810bf5eb5f4c6e52163ee2c2e9fcc1a7c:assets/js/productos-remotos.js > /tmp/v98/old.js
-          git -C /tmp/v98/front show f5bf4388024e98267eb54542510ba9efd2d02191:assets/css/stock-ficha-v98.css > /tmp/v98/new.css
+          git -C /tmp/v98/front show 29672e42be90938f0c41e0262cdf6c75a332ad92:assets/css/stock-ficha-v98.css > /tmp/v98/new.css
           node --check /tmp/v98/new.js
           cat >/tmp/v98/transport.py <<'PY'
           import os,ssl,ftplib,io,pathlib,re,sys,html
@@ -136,9 +136,9 @@ jobs:
           import {readdirSync} from 'node:fs';
           const browser=await chromium.launch({headless:true});
           try{
-            const page=await browser.newPage({viewport:{width:1440,height:900},reducedMotion:'reduce'});
+            const page=await browser.newPage({viewport:{width:390,height:844},reducedMotion:'reduce'});
             await page.route('**/*',r=>r.abort());
-            await page.setContent('<main id="root"></main>');
+            await page.setContent('<meta name="viewport" content="width=device-width, initial-scale=1"><main id="root"></main>');
             for(const f of readdirSync('/tmp/v98/styles').sort())await page.addStyleTag({path:'/tmp/v98/styles/'+f});
             await page.addScriptTag({path:'/tmp/v98/new.js'});
             await page.addStyleTag({path:'/tmp/v98/new.css'});
@@ -159,7 +159,7 @@ jobs:
             if(await d.locator('.hd98-stock input').count())throw Error('Stock editable');
             await d.getByText('Inventario anterior de la presentación principal: 100.',{exact:false}).waitFor();
             for(const width of [1440,390]){
-              await page.setViewportSize({width,height:844});
+              await page.setViewportSize({width,height:844});await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
               const result=await d.evaluate(e=>({width:e.getBoundingClientRect().width,viewport:innerWidth,scroll:e.querySelector('.hd98-stock .product-detail-table-scroll').clientWidth,table:e.querySelector('.hd98-stock-table').clientWidth}));
               if(result.width>result.viewport+1||result.scroll>result.viewport)throw Error(JSON.stringify(result));
             }
@@ -184,8 +184,9 @@ jobs:
           try{
             const page=await browser.newPage();
             const errors=[];page.on('pageerror',e=>errors.push(e.message));
-            const response=await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:60000});
+            const response=await page.goto('https://rutahyd2.free.nf/?v=20261126-v98r',{waitUntil:'load',timeout:60000});
             await page.waitForFunction(()=>[...document.styleSheets].some(s=>s.href?.includes('stock-ficha-v98.css?v=20261125-v98')&&s.cssRules.length>=10),null,{timeout:45000});
+            await page.waitForFunction(()=>window.RutaHDProductosRemotos&&[...document.scripts].some(s=>s.src.includes('productos-remotos.js?v=20261125-v98')),null,{timeout:45000});
             const result=await page.evaluate(async()=>({auth:(await fetch('/api/v1/productos/1',{headers:{Accept:'application/json'}})).status,density:getComputedStyle(document.documentElement).getPropertyValue('--hd-form-control').trim(),v86:[...document.scripts].some(s=>s.src.includes('productos-remotos.js?v=20261125-v98'))}));
             if(response?.status()!==200||result.density!=='30px'||!result.v86||result.auth!==401||errors.length)throw Error(JSON.stringify({result,errors}));
             console.log('V98_PUBLIC_OK');

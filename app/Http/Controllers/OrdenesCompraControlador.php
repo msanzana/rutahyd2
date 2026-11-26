@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Services\PdfOrdenCompra;
+use App\Services\ContextoCompras;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -39,10 +40,12 @@ final class OrdenesCompraControlador extends Controller
 
     private function base()
     {
-        return DB::table('ordenes_compra as oc')
+        $s=(new ContextoCompras())->resolver(request());
+        return DB::table('ordenes_compra as oc')->where('oc.sucursal_id',$s->id)
+            ->join('sucursales as sc','sc.id','=','oc.sucursal_id')
             ->join('proveedores as prov','prov.id','=','oc.proveedor_id')
             ->join('estados as e','e.id','=','oc.estado_id')
-            ->select('oc.*','e.nombre as estado_nombre','e.codigo as estado_codigo',
+            ->select('oc.*','sc.codigo as sucursal_codigo','sc.nombre as sucursal_nombre','e.nombre as estado_nombre','e.codigo as estado_codigo',
                 'prov.nombre as proveedor_nombre','prov.rut as proveedor_rut',
                 'prov.correo_electronico as proveedor_correo_electronico',
                 'prov.direccion as proveedor_direccion');
@@ -277,9 +280,11 @@ final class OrdenesCompraControlador extends Controller
             abort_unless(config('mail.default')==='smtp',503,'Correo saliente no configurado');
         }
         $new=$id===null;
-        $orderId=DB::transaction(function()use($data,$id,$new): int {
+        $orderId=DB::transaction(function()use($data,$id,$new,$request): int {
+            $contexto=new ContextoCompras();
+            $s=$contexto->resolver($request,true);
             if($id!==null){
-                $actual=DB::table('ordenes_compra')->where('id',$id)->lockForUpdate()->first();
+                $actual=DB::table('ordenes_compra')->where('id',$id)->where('sucursal_id',$s->id)->lockForUpdate()->first();
                 abort_unless($actual,404,'Orden no encontrada');
                 abort_unless((int)$actual->estado_id===$this->estado('ACTIVA'),409,
                     'Solo se permite editar órdenes activas');
@@ -292,13 +297,10 @@ final class OrdenesCompraControlador extends Controller
                 'observaciones'=>$data['observaciones']??null,
             ],$totales);
             if($new){
-                $base+=['numero'=>'PEND-'.bin2hex(random_bytes(12)),
+                $base+=['sucursal_id'=>$s->id,'numero'=>$contexto->numeroOrden($s,(int)date('Y',strtotime($data['solicitada_en']))),
                     'estado'=>'activa','estado_id'=>$this->estado('ACTIVA'),
                     'creado_por'=>request()->user()?->id];
                 $id=(int)DB::table('ordenes_compra')->insertGetId($base);
-                $numero='OC-'.date('Y',strtotime($data['solicitada_en'])).
-                    '-'.str_pad((string)$id,7,'0',STR_PAD_LEFT);
-                DB::table('ordenes_compra')->where('id',$id)->update(['numero'=>$numero]);
             }else{
                 // El estado y los datos de recepción nunca forman parte de la edición.
                 DB::table('ordenes_compra')->where('id',$id)->update($base);
@@ -320,7 +322,7 @@ final class OrdenesCompraControlador extends Controller
         },3);
 
         $documento=$this->documento($orderId);
-        $response=['id'=>$orderId,'numero'=>$documento['numero'],
+        $response=['id'=>$orderId,'numero'=>$documento['numero'],'sucursal_id'=>$documento['sucursal_id'],'sucursal_codigo'=>$documento['sucursal_codigo'],'sucursal_nombre'=>$documento['sucursal_nombre'],
             'estado_nombre'=>$documento['estado_nombre'],
             'subtotal_neto'=>$documento['subtotal_neto'],
             'total_impuestos'=>$documento['total_impuestos'],
@@ -388,7 +390,8 @@ final class OrdenesCompraControlador extends Controller
     public function anular(int $id)
     {
         DB::transaction(function() use ($id): void {
-            $row=DB::table('ordenes_compra')->where('id',$id)->lockForUpdate()->first();
+            $s=(new ContextoCompras())->resolver(request(),true);
+            $row=DB::table('ordenes_compra')->where('id',$id)->where('sucursal_id',$s->id)->lockForUpdate()->first();
             abort_unless($row,404,'Orden de compra no encontrada');
             abort_unless((int)$row->estado_id===$this->estado('ACTIVA'),409,
                 'Solo pueden anularse órdenes activas');

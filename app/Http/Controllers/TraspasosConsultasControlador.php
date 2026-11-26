@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\ContextoCompras;
 use App\Services\PlanCantidadesTraspaso;
+use App\Services\ComprobanteTraspasoPdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -38,8 +39,8 @@ final class TraspasosConsultasControlador extends Controller
         $b=DB::table('bodegas as b')->join('inventario_bodegas_sucursales as bs','bs.bodega_id','=','b.id')->where('bs.sucursal_id',$sid)->where('b.activo',1)->select('b.id','b.nombre')->distinct()->orderBy('b.nombre')->get();
         return response()->json(['bodegas'=>$b])->header('Cache-Control','no-store');
     }
-    public function ver(Request $r,int $id){
-        $data=DB::transaction(function()use($r,$id){
+    private function datos(Request $r,int $id): array {
+        return DB::transaction(function()use($r,$id){
             $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;
             $rows=$this->base($sid)->where('t.id',$id)->get();abort_unless($rows->count()===1,404,'Traspaso no disponible.');
             $t=$rows->first();
@@ -53,6 +54,10 @@ final class TraspasosConsultasControlador extends Controller
             $active=$ops->first(fn($o)=>$o->etapa==='RECEPCION'&&in_array($o->estado,['INV_PEND_APROBACION','INV_APROBADA'],true));
             return ['traspaso'=>$t,'detalles'=>$lines,'operaciones'=>$ops,'recepcion_activa'=>$active?->id,'usuario_actual_id'=>(int)$r->user()->id];
         },3);
-        return response()->json($data)->header('Cache-Control','no-store');
+    }
+    public function ver(Request $r,int $id){return response()->json($this->datos($r,$id))->header('Cache-Control','no-store');}
+    public function pdf(Request $r,int $id){
+        $data=$this->datos($r,$id);$pdf=(new ComprobanteTraspasoPdf())->generar($data);
+        return response($pdf,200,['Content-Type'=>'application/pdf','Content-Disposition'=>'inline; filename="traspaso-'.$id.'.pdf"','Cache-Control'=>'private, no-store','X-Content-Type-Options'=>'nosniff']);
     }
 }

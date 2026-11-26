@@ -1,0 +1,91 @@
+name: V109B - Paquete integrado de Compras e Inventario
+on:
+  push:
+    branches: [feature/v109a-inventario-contexto-20261126]
+    paths: [.github/workflows/v109b-paquete-integrado.yml]
+permissions:
+  contents: read
+jobs:
+  integrar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, fileinfo, pdo_sqlite, iconv
+      - name: Integrar candidatos sin acceso productivo
+        run: |
+          set -euo pipefail
+          compra=5a91a44853c882fed2534146a14c877e5844132c
+          inventario=d35c0b03218182e2da47c8b35b75c332be932200
+          base=de78f242f5b339897563f17b48ff2b92c2ea8c53
+          frontbase=b91579217d339ce7916d5257c655a17de40b1873
+          front=178cc684a7ac9f9c7004fe394bbdcf419cddae98
+          git clone -q --no-checkout https://github.com/msanzana/rutahyd2front.git /tmp/v109b-front
+          for p in app/Http/Controllers/ComprasConsultasControlador.php app/Http/Controllers/RecepcionesBorradorControlador.php app/Http/Controllers/ConsolidacionesControlador.php app/Services/RegularizacionRecepcion.php; do
+            git show "$compra:$p" > "$p"
+          done
+          for p in app/Http/Controllers/AjustesGeneralesControlador.php app/Http/Controllers/InventarioOperacionesControlador.php app/Services/PlanAjusteGeneral.php routes/api.php; do
+            git show "$inventario:$p" | cmp - "$p"
+          done
+          git show "$compra:tests/consultas_sucursal_v108b1.php" > /tmp/consultas.php
+          cp /tmp/consultas.php tests/consultas_sucursal_v108b1.php
+          for p in app/Http/Controllers/ComprasConsultasControlador.php app/Http/Controllers/RecepcionesBorradorControlador.php app/Http/Controllers/ConsolidacionesControlador.php app/Services/RegularizacionRecepcion.php app/Http/Controllers/AjustesGeneralesControlador.php app/Http/Controllers/InventarioOperacionesControlador.php app/Services/PlanAjusteGeneral.php routes/api.php; do
+            php -l "$p"
+            mkdir -p "paquete/candidato/backend/$(dirname "$p")" "paquete/referencia/backend/$(dirname "$p")"
+            cp "$p" "paquete/candidato/backend/$p"
+            if git cat-file -e "$base:$p" 2>/dev/null; then git show "$base:$p" > "paquete/referencia/backend/$p"; fi
+          done
+          for p in assets/js/app-produccion.js assets/js/catalogos-api.js assets/js/compras-consultas-v66.js assets/js/inventario-v104.js index.html; do
+            mkdir -p "paquete/candidato/frontend/$(dirname "$p")" "paquete/referencia/frontend/$(dirname "$p")"
+            git -C /tmp/v109b-front show "$front:$p" > "paquete/candidato/frontend/$p"
+            git -C /tmp/v109b-front show "$frontbase:$p" > "paquete/referencia/frontend/$p"
+          done
+          printf '%s\n' 'V109B: paquete integrado de revision, NO publicado.' "Compras backend: $compra" "Inventario backend: $inventario" "Frontend: $front" "Referencia backend: $base" "Referencia frontend: $frontbase" 'Incluye V108B, V109A-R1 y V109B 101/102/107.' 'Los archivos de referencia no son un respaldo productivo.' 'No sustituir index ni rutas reales sin cotejar deltas; no activar segunda sucursal.' 'Pendiente prueba visual autenticada y cotejo de esquema e historicos reales; sin DDL.' > paquete/ESTADO.txt
+      - name: Regresión sobre conjunto integrado
+        run: |
+          set -euo pipefail
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/consultas_sucursal_v108b1.php | tee /tmp/consultas.log
+          grep -Fx V108B1_CONSULTAS_OK /tmp/consultas.log
+          php tests/inventario_v109a.php | tee /tmp/inventario.log
+          grep -Fx V109A_MOTOR_OK /tmp/inventario.log
+          php tests/ajustes_generales_v109b3.php | tee /tmp/ajustes.log
+          grep -Fx V109B3_CONFIRMACION_OK /tmp/ajustes.log
+          php artisan route:list --path=api/v1/inventario/ajustes --json > /tmp/ajustes-rutas.json
+          python - <<'PY'
+          import json
+          rows=json.load(open('/tmp/ajustes-rutas.json'))
+          expected={'POST':{'revision':'gestionar','{id}/aprobar':'aprobar','{id}/anular':'anular','{id}/confirmar':'confirmar'}}
+          for method, paths in expected.items():
+              for suffix, perm in paths.items():
+                  matches=[r for r in rows if r['uri']=='api/v1/inventario/ajustes/'+suffix and method in r['method'].split('|')]
+                  assert len(matches)==1, (suffix,matches)
+                  assert any('inventario.operaciones.'+perm in x for x in matches[0]['middleware']), matches[0]
+          print('V109B_RUTAS_OK')
+          PY
+          (
+            cd paquete
+            find candidato referencia -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v109b-paquete-integrado
+          path: paquete/
+          retention-days: 30
+          if-no-files-found: error

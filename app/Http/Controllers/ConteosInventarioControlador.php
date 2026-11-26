@@ -323,7 +323,22 @@ final class ConteosInventarioControlador extends Controller
                 if((int)$l->contado_por!==$uid)unset($l->cantidad_contada);
                 if((int)$l->recontado_por!==$uid)unset($l->cantidad_recontada);
             }
-            return ['conteo'=>$c,'detalles'=>$lines,'usuario_actual_id'=>$uid,'escrituras_habilitadas'=>false,'cierre_habilitado'=>false];
+            $review=null;$authorized=false;$prepared=false;$ops=[];
+            if(in_array($c->estado,['EN_REVISION','CONFIRMADO'],true)){
+                $events=DB::table('registros_auditoria')->where('tipo_entidad','inventario_conteos')->where('entidad_id',$id)->whereIn('accion',['CONTEO_REVISION','CONTEO_AUTORIZACION','CONTEO_AJUSTES_PREPARADOS'])->orderBy('id')->get(['accion','usuario_id','valores_nuevos']);
+                $rev=$events->where('accion','CONTEO_REVISION');$auth=$events->where('accion','CONTEO_AUTORIZACION');$prep=$events->where('accion','CONTEO_AJUSTES_PREPARADOS');
+                if($rev->count()===1){
+                    $data=json_decode($rev->first()->valores_nuevos,true,512,JSON_THROW_ON_ERROR);
+                    $review=['usuario_id'=>(int)$rev->first()->usuario_id,'planes'=>$data['planes']??[]];
+                }
+                $authorized=$auth->count()===1;$prepared=$prep->count()===1;
+                $ops=DB::table('inventario_conteos_operaciones as x')->join('inventario_operaciones as o','o.id','=','x.operacion_id')->join('estados as e','e.id','=','o.estado_id')->where('x.conteo_id',$id)->where('o.sucursal_id',$sid)->where('o.clase','CONTEO')->select('o.id','o.numero_interno','o.motivo_codigo_snapshot','o.motivo_nombre_snapshot','e.codigo as estado','e.nombre as estado_nombre')->orderBy('o.id')->get();
+                foreach($ops as $o){
+                    $o->detalles=DB::table('inventario_operaciones_detalle as l')->join('productos as p','p.id','=','l.producto_id')->where('l.operacion_id',$o->id)->where('l.bodega_id',$c->bodega_id)->select('p.sku','p.nombre as producto','l.cantidad','l.delta_disponible','l.costo_unitario_snapshot','l.kardex_id')->orderBy('l.numero_linea')->get();
+                    $o->respaldos=DB::table('inventario_operaciones_adjuntos')->where('operacion_id',$o->id)->orderBy('id')->get(['id','nombre','mime','sha256']);
+                }
+            }
+            return ['conteo'=>$c,'detalles'=>$lines,'usuario_actual_id'=>$uid,'revision'=>$review,'autorizado'=>$authorized,'ajustes_preparados'=>$prepared,'operaciones'=>$ops,'escrituras_habilitadas'=>false,'cierre_habilitado'=>false,'anulacion_habilitada'=>false];
         },3))->header('Cache-Control','no-store');
     }
 }

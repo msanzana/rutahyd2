@@ -235,6 +235,70 @@ final class ConteosInventarioControlador extends Controller
             return ['id'=>$id,'operaciones'=>$links,'repetida'=>false,'movimiento_aplicado'=>false];
         },3))->header('Cache-Control','no-store');
     }
+    public function confirmar(Request $r,int $id){
+        $v=$r->validate(['huella'=>'required|string|size:64|regex:/^[a-f0-9]{64}$/D','token_confirmacion'=>'required|uuid']);
+        $token=strtolower($v['token_confirmacion']);
+        // El ENUM productivo quedó truncado. No asumir su valor final.
+        $final=config('conteos.estado_confirmado');
+        abort_unless($final==='CONFIRMADO',409,'Estado final de conteos pendiente de verificación.');
+        return response()->json(DB::transaction(function()use($r,$v,$id,$token,$final){
+            $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$uid=(int)$r->user()->id;$c=$this->cabecera($id,$sid);
+            $previous=DB::table('registros_auditoria')->where('tipo_entidad','inventario_conteos')->where('entidad_id',$id)->where('accion','CONTEO_CONFIRMACION')->lockForUpdate()->get(['usuario_id','valores_nuevos']);
+            if($previous->isNotEmpty()){
+                $p=json_decode($previous[0]->valores_nuevos,true,512,JSON_THROW_ON_ERROR);
+                abort_unless($previous->count()===1&&$c->estado===$final&&(int)$previous[0]->usuario_id===$uid&&($p['token']??null)===$token&&($p['huella']??null)===$v['huella'],409,'Confirmación previa incompatible.');
+                return ['id'=>$id,'estado'=>$final,'operaciones'=>$p['operaciones'],'movimiento_aplicado'=>count($p['operaciones'])>0,'repetida'=>true];
+            }
+            $plan=$this->prepararAprobacion($c,$sid,$uid);
+            abort_unless($plan['bloqueos']===[]&&hash_equals($plan['huella'],$v['huella']),409,'Conciliación no vigente.');
+            $auth=DB::table('registros_auditoria')->where('tipo_entidad','inventario_conteos')->where('entidad_id',$id)->where('accion','CONTEO_AUTORIZACION')->lockForUpdate()->get(['usuario_id','valores_nuevos']);
+            $prep=DB::table('registros_auditoria')->where('tipo_entidad','inventario_conteos')->where('entidad_id',$id)->where('accion','CONTEO_AJUSTES_PREPARADOS')->lockForUpdate()->get(['usuario_id','valores_nuevos']);
+            abort_unless($auth->count()===1&&$prep->count()===1&&(int)$auth[0]->usuario_id===(int)$prep[0]->usuario_id,409,'Autorización y preparación requeridas.');
+            $approved=json_decode($auth[0]->valores_nuevos,true,512,JSON_THROW_ON_ERROR);$prepared=json_decode($prep[0]->valores_nuevos,true,512,JSON_THROW_ON_ERROR);
+            $links=DB::table('inventario_conteos_operaciones')->where('conteo_id',$id)->orderBy('operacion_id')->lockForUpdate()->pluck('operacion_id')->map(fn($x)=>(int)$x)->all();
+            $groups=array_filter($plan['grupos'],fn($g)=>count($g)>0);
+            abort_unless(($approved['huella']??null)===$plan['huella']&&($approved['grupos']??null)===$plan['grupos']&&($prepared['huella']??null)===$plan['huella']&&($prepared['operaciones']??null)===$links&&count($links)===count($groups),409,'Operaciones no coinciden con la autorización.');
+            $state=$groups?$this->estadoOperacion('INV_APROBADA'):null;$done=$groups?$this->estadoOperacion('INV_CONFIRMADA'):null;
+            $validated=[];$seen=[];
+            foreach($links as $oid){
+                $o=DB::table('inventario_operaciones')->where('id',$oid)->lockForUpdate()->first();
+                abort_unless($o&&$o->clase==='CONTEO'&&(int)$o->sucursal_id===$sid&&(int)$o->estado_id===$state&&(int)$o->version===2&&(int)$o->creado_por===(int)$c->creado_por&&(int)$o->aprobado_por===(int)$auth[0]->usuario_id&&(int)$o->aprobado_por!==(int)$o->creado_por&&$o->confirmado_por===null&&$o->token_confirmacion===null&&$o->justificacion===$approved['motivo'],409,'Operación de conteo no válida.');
+                $code=(int)$o->motivo_codigo_snapshot;$items=$groups[$code]??null;
+                abort_unless($items&&!isset($seen[$code]),409,'Motivo duplicado o no autorizado.');$seen[$code]=true;
+                $m=DB::table('inventario_motivos as m')->join('inventario_grupos_motivos as g','g.id','=','m.grupo_id')->join('inventario_tipos_movimiento as t','t.id','=','m.tipo_movimiento_id')->where('m.codigo',$code)->where('m.activo',1)->where('g.activo',1)->where('t.activo',1)->select('m.*','g.codigo as grupo_codigo','t.naturaleza','t.codigo as tipo_codigo')->lockForUpdate()->first();
+                abort_unless($m&&(int)$m->id===(int)$o->motivo_id&&$m->regla===$o->regla_snapshot&&$m->politica_cpp===$o->politica_cpp_snapshot&&$m->tipo_codigo===$m->naturaleza,409,'Motivo de ajuste modificado.');
+                $files=DB::table('inventario_operaciones_adjuntos')->where('operacion_id',$oid)->orderBy('id')->lockForUpdate()->get();$manifest=[];$total=0;
+                foreach($files as $f){$total+=strlen($f->contenido);abort_unless(strlen($f->contenido)>0&&$total<=2097152&&hash_equals($f->sha256,hash('sha256',$f->contenido))&&in_array($f->mime,['application/pdf','image/png','image/jpeg'],true)&&(new \finfo(FILEINFO_MIME_TYPE))->buffer($f->contenido)===$f->mime,409,'Respaldo alterado.');$manifest[]=['nombre'=>$f->nombre,'mime'=>$f->mime,'sha256'=>$f->sha256];}
+                abort_unless(count($manifest)>=1&&count($manifest)<=3&&$manifest===($prepared['respaldos']??null),409,'Respaldos no coinciden.');
+                $details=DB::table('inventario_operaciones_detalle')->where('operacion_id',$oid)->orderBy('numero_linea')->lockForUpdate()->get();
+                abort_unless($details->count()===count($items),409,'Detalle de ajuste incompleto.');
+                foreach($items as $i=>$item){
+                    $l=$details[$i];abort_unless((int)$l->numero_linea===$i+1&&(int)$l->producto_id===$item['producto_id']&&(int)$l->bodega_id===$item['bodega_id']&&$l->kardex_id===null&&$l->kardex_referencia_id===null,409,'Detalle no autorizado.');
+                    abort_if(DB::table('inventario_traspasos_detalle')->where('producto_id',$item['producto_id'])->whereRaw('(cantidad_despachada-cantidad_recibida-cantidad_regularizada)>0')->exists(),409,'Producto con traspaso pendiente.');
+                    $a=$this->actual($item['producto_id'],(int)$c->bodega_id,$sid);$p=(new PlanAjusteGeneral())->calcular($m,$item['cantidad'],$a['stock'],$a['cpp']);
+                    foreach(['cantidad','delta_disponible','delta_fisico','delta_transito','delta_comprometido','costo_unitario_snapshot'] as $key)abort_unless($l->$key!==null&&BigDecimal::of((string)$l->$key)->isEqualTo($p[$key]),409,'Detalle o costo modificado.');
+                    abort_unless($p['delta_disponible']===$item['delta_disponible']&&$p['cpp_actual']===$item['cpp'],409,'Plan no autorizado.');
+                    $product=DB::table('productos')->where('id',$l->producto_id)->first(['costo_neto']);
+                    $validated[$oid][]=['l'=>$l,'p'=>$p,'s'=>$a['stock'],'cost'=>$product->costo_neto];
+                }
+            }
+            foreach($links as $oid){
+                $o=DB::table('inventario_operaciones')->where('id',$oid)->first();
+                foreach($validated[$oid] as $x){
+                    $l=$x['l'];$p=$x['p'];$s=$x['s'];$stockId=$s->id??null;
+                    if(!$stockId)$stockId=DB::table('stock')->insertGetId(['producto_id'=>$l->producto_id,'bodega_id'=>$l->bodega_id,'disponible'=>0,'transito'=>0,'comprometido'=>0,'cantidad_fisica'=>0]);
+                    $k=DB::table('kardex')->insertGetId(['sucursal_id'=>$sid,'producto_id'=>$l->producto_id,'bodega_id'=>$l->bodega_id,'tipo_documento_id'=>null,'folio_documento'=>$o->numero_interno,'tipo_movimiento'=>(int)$o->motivo_codigo_snapshot===102?2:1,'cantidad_anterior'=>$p['disponible_anterior'],'cantidad_documento'=>$p['cantidad'],'cantidad_actual'=>$p['disponible_actual'],'transito_anterior'=>$p['transito'],'transito_actual'=>$p['transito'],'comprometido_anterior'=>$p['comprometido'],'comprometido_actual'=>$p['comprometido'],'fisico_anterior'=>$p['fisico_anterior'],'fisico_actual'=>$p['fisico_actual'],'costo_unitario_neto'=>$p['costo_unitario_snapshot'],'ultimo_costo_anterior'=>$x['cost'],'ultimo_costo_actual'=>$x['cost'],'cpp_anterior'=>$p['cpp_anterior'],'cpp_actual'=>$p['cpp_actual'],'origen_tipo'=>'AJUSTE_INVENTARIO','origen_detalle_id'=>$l->id,'operacion_codigo'=>$o->regla_snapshot,'token_idempotencia'=>(string)Str::uuid(),'registrado_por'=>$uid,'observaciones'=>$o->numero_interno.' | Conteo '.$id]);
+                    DB::table('stock')->where('id',$stockId)->update(['disponible'=>$p['disponible_actual'],'cantidad_fisica'=>$p['fisico_actual']]);
+                    DB::table('inventario_operaciones_detalle')->where('id',$l->id)->update(['kardex_id'=>$k]);
+                }
+                DB::table('inventario_operaciones')->where('id',$oid)->update(['estado_id'=>$done,'version'=>3,'confirmado_por'=>$uid,'confirmado_en'=>now(),'token_confirmacion'=>(string)Str::uuid()]);
+                DB::table('inventario_operaciones_historial')->insert(['operacion_id'=>$oid,'estado_anterior_id'=>$state,'estado_nuevo_id'=>$done,'usuario_id'=>$uid,'accion'=>'CONFIRMAR','observaciones'=>'Confirmación conjunta de conteo '.$id]);
+            }
+            DB::table('inventario_conteos')->where('id',$id)->update(['estado'=>$final,'operacion_ajuste_id'=>count($links)===1?$links[0]:null]);
+            $this->auditoria($id,$uid,'CONTEO_CONFIRMACION',['estado'=>'EN_REVISION'],['estado'=>$final,'token'=>$token,'huella'=>$plan['huella'],'operaciones'=>$links]);
+            return ['id'=>$id,'estado'=>$final,'operaciones'=>$links,'movimiento_aplicado'=>count($links)>0,'repetida'=>false];
+        },3))->header('Cache-Control','no-store');
+    }
     public function ver(Request $r,int $id){
         return response()->json(DB::transaction(function()use($r,$id){
             $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$uid=(int)$r->user()->id;$c=$this->cabecera($id,$sid);

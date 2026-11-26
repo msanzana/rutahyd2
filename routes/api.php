@@ -79,6 +79,9 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::get('/solicitudes-regularizacion/{id}/pdf',[\App\Http\Controllers\ConsolidacionesControlador::class,'solicitudPdf'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
     Route::post('/notificaciones-regularizacion/{id}/reenviar',[\App\Http\Controllers\ConsolidacionesControlador::class,'reenviarSolicitud'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
     Route::get('/documentos-recepcion/{tipo}/{id}/pdf',[\App\Http\Controllers\ComprasConsultasControlador::class,'pdf'])->middleware('permiso.rutahd:compras.gestionar')->where('tipo','recepcion|consolidacion')->whereNumber('id');
+    // V107: preparar contexto de sesión; no activar hasta completar aislamiento operacional.
+    Route::get('/contexto-sucursal',[\App\Http\Controllers\ContextoSucursalControlador::class,'estado'])->middleware('throttle:60,1');
+    Route::post('/contexto-sucursal',[\App\Http\Controllers\ContextoSucursalControlador::class,'seleccionar'])->middleware('throttle:20,1');
     // V106: núcleo administrativo multisucursal (DDL44-45 requeridos).
     Route::get('/sucursales',[\App\Http\Controllers\SucursalesControlador::class,'listar'])->middleware('permiso.rutahd:inventario.sucursales.gestionar');
     Route::post('/sucursales',[\App\Http\Controllers\SucursalesControlador::class,'crear'])->middleware('permiso.rutahd:inventario.sucursales.gestionar');

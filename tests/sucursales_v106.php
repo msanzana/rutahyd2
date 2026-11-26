@@ -46,6 +46,7 @@ DB::table('tokens_acceso')->insert([['id'=>1,'usuario_id'=>2],['id'=>2,'usuario_
 DB::table('sesiones_sucursales')->insert([['token_acceso_id'=>1,'sucursal_id'=>$a],['token_acceso_id'=>2,'sucursal_id'=>$b]]);
 $c->acceso(req(['activo'=>false]),$a,2);
 check(DB::table('sesiones_sucursales')->count()===1&&DB::table('sesiones_sucursales')->value('sucursal_id')==$b,'Revocación selectiva de contexto');
+check(!DB::table('tokens_acceso')->where('id',1)->exists()&&DB::table('tokens_acceso')->where('id',2)->exists(),'Revocación selectiva JWT');
 check(val($c->listar(req()))['total']===2,'Listado');
 check(val($c->bodegas(req(),$a))['total']===1,'Bodegas');
 check(val($c->usuarios(req(),$a))['total']===2,'Usuarios');

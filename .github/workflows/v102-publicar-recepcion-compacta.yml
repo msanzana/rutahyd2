@@ -70,7 +70,8 @@ jobs:
                   assert src.count('</head>')==1 and 'paginadores-v96.css?v=20261125-v96' in src and 'compras-consultas-v66.js?v=20261125-v100' in src and 'carga-global-v42.js?v=20261126-v99r' in src and 'stock-ficha-v98.css?v=20261125-v98' in src
                   assert read('before',js)==(p/'old.js').read_bytes(),'JS productivo diferente a la base auditada'
                   save('after',js,(p/'new.js').read_bytes())
-                  src=src.replace('compras-consultas-v66.js?v=20261125-v97','compras-consultas-v66.js?v=20261126-v102',1)
+                  src=src.replace('compras-consultas-v66.js?v=20261125-v100','compras-consultas-v66.js?v=20261126-v102',1)
+                  assert 'compras-consultas-v66.js?v=20261126-v102' in src
                   assert absent(f,css)
                   save('after',css,(p/'new.css').read_bytes())
                   src=src.replace('</head>','  <link rel="stylesheet" href="assets/css/recepciones-compactas-v102.css?v=20261126-v102">\n</head>',1)

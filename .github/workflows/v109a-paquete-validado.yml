@@ -1,0 +1,37 @@
+name: V109A - Preparar paquete de version validada
+on:
+  push:
+    branches: [feature/v109a-inventario-contexto-20261126]
+    paths: [.github/workflows/v109a-paquete-validado.yml]
+permissions:
+  contents: read
+jobs:
+  paquete:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Empaquetar controlador validado y referencia base
+        run: |
+          set -euo pipefail
+          candidate=6313af48cf03691a1a1d2c2750d8463c538ea93b
+          base=de78f242f5b339897563f17b48ff2b92c2ea8c53
+          controller=app/Http/Controllers/InventarioOperacionesControlador.php
+          mkdir -p paquete/candidato/app/Http/Controllers paquete/referencia/app/Http/Controllers
+          git show "$candidate:$controller" > "paquete/candidato/$controller"
+          git show "$base:$controller" > "paquete/referencia/$controller"
+          cmp "paquete/candidato/$controller" "$controller"
+          (
+            cd paquete
+            sha256sum "candidato/$controller" "referencia/$controller" > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          printf '%s\n' 'V109A: paquete de revision, no publicado' "Commit candidato: $candidate" "Commit base de referencia: $base" 'CI SQLite y MariaDB exitosa: https://github.com/msanzana/rutahyd2/actions/runs/45887789622' 'La referencia del repositorio no constituye respaldo productivo.' 'Sin DDL, sin rutas nuevas y sin modificaciones del frontend.' > paquete/ESTADO.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v109a-paquete-validado
+          path: paquete/
+          retention-days: 30
+          if-no-files-found: error

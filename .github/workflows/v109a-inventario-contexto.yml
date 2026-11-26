@@ -36,3 +36,43 @@ jobs:
           composer install --no-interaction --prefer-dist --no-progress
           php tests/inventario_v109a.php | tee /tmp/v109a.log
           grep -Fx V109A_MOTOR_OK /tmp/v109a.log
+  validar-mariadb:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: temporal_ci_solamente
+          MARIADB_DATABASE: rutahyd_v109a_ci
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: rutahyd_v109a_ci
+      DB_USERNAME: root
+      DB_PASSWORD: temporal_ci_solamente
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, pdo_mysql, iconv
+      - name: Motor aislado MariaDB
+        run: |
+          set -euo pipefail
+          php -l tests/inventario_v109a.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/inventario_v109a.php | tee /tmp/v109a-mariadb.log
+          grep -Fx V109A_MOTOR_OK /tmp/v109a-mariadb.log

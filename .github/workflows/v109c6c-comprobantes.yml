@@ -103,7 +103,9 @@ jobs:
       - name: Validar interfaz y cliente PDF
         run: |
           set -euo pipefail
-          git clone -q --depth=1 --branch feature/v109b4-ajustes-generales-20261126 https://github.com/msanzana/rutahyd2front.git /tmp/v109c6c-front
+          git init -q /tmp/v109c6c-front
+          git -C /tmp/v109c6c-front fetch -q --depth=1 https://github.com/msanzana/rutahyd2front.git f6816596859d9d9d2f72ff98cd4c4371329fd461
+          git -C /tmp/v109c6c-front checkout -q --detach FETCH_HEAD
           test "$(git -C /tmp/v109c6c-front rev-parse HEAD)" = f6816596859d9d9d2f72ff98cd4c4371329fd461
           for f in catalogos-api inventario-v104 app-produccion; do node --check "/tmp/v109c6c-front/assets/js/$f.js"; done
           npm install --prefix /tmp/v109c6c-js --no-audit --no-fund jsdom@26.1.0

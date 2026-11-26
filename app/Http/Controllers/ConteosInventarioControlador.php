@@ -110,6 +110,60 @@ final class ConteosInventarioControlador extends Controller
             return ['id'=>$id,'estado'=>'EN_REVISION','planes'=>$plans,'movimiento_aplicado'=>false];
         },3))->header('Cache-Control','no-store');
     }
+    private function revisionRegistrada(int $id): object {
+        $rows=DB::table('registros_auditoria')->where('tipo_entidad','inventario_conteos')->where('entidad_id',$id)->where('accion','CONTEO_REVISION')->lockForUpdate()->get(['usuario_id','valores_nuevos']);
+        abort_unless($rows->count()===1,409,'No hay una revisión única verificable.');
+        return $rows->first();
+    }
+    private function prepararAprobacion(object $c,int $sid,int $uid): array {
+        abort_unless($c->estado==='EN_REVISION'&&$c->operacion_ajuste_id===null,409,'Conteo no disponible para autorización.');
+        $review=$this->revisionRegistrada((int)$c->id);$saved=json_decode($review->valores_nuevos,true,512,JSON_THROW_ON_ERROR);
+        $snap=$this->corte($c);
+        $lines=DB::table('inventario_conteos_detalle')->where('conteo_id',$c->id)->orderBy('producto_id')->lockForUpdate()->get();
+        abort_unless($lines->count()===count($snap)&&$lines->count()>0&&$lines->pluck('producto_id')->unique()->count()===$lines->count(),409,'Detalle inconsistente.');
+        $plans=[];$groups=[101=>[],102=>[]];$blocked=[];
+        foreach($lines as $l){
+            abort_unless($l->cantidad_contada!==null&&$l->contado_por!==null&&(int)$l->contado_por!==$uid,409,'Autorización independiente de los contadores.');
+            if($l->cantidad_recontada!==null)abort_unless($l->recontado_por!==null&&(int)$l->recontado_por!==$uid&&(int)$l->recontado_por!==(int)$l->contado_por,409,'Autorización independiente del reconteo.');
+            if(!BigDecimal::of((string)$l->cantidad_contada)->isEqualTo((string)$l->saldo_corte))abort_unless($l->cantidad_recontada!==null,409,'Reconteo pendiente.');
+            $a=$this->vigente($c,$l,$snap,$sid);
+            $p=(new PlanConteoInventario())->calcular($a['stock'],(string)($l->cantidad_recontada??$l->cantidad_contada),$a['cpp']);
+            $plans[]=['producto_id'=>(int)$l->producto_id]+$p;
+            if(!$p['requiere_ajuste'])continue;
+            if(!$p['ajuste_calculable']){$blocked[]=['producto_id'=>(int)$l->producto_id,'bloqueos'=>$p['bloqueos']];continue;}
+            // El motivo está en cabecera de operación, no en el detalle.
+            // Agrupar sin crear operaciones ni asumir un vínculo que no existe.
+            $groups[$p['motivo_sugerido']][]=['producto_id'=>(int)$l->producto_id,'conteo_detalle_id'=>(int)$l->id,'bodega_id'=>(int)$c->bodega_id,'cantidad'=>(string)BigDecimal::of($p['diferencia'])->abs()->toScale(8),'delta_disponible'=>$p['diferencia'],'cpp'=>$p['snapshot']['cpp']];
+        }
+        abort_unless(isset($saved['planes'])&&$saved['planes']===$plans,409,'La revisión registrada no coincide con el corte vigente.');
+        $data=['conteo_id'=>(int)$c->id,'sucursal_id'=>$sid,'bodega_id'=>(int)$c->bodega_id,'revisor_id'=>(int)$review->usuario_id,'planes'=>$plans,'grupos'=>$groups,'bloqueos'=>$blocked];
+        return $data+['huella'=>hash('sha256',json_encode($data,JSON_THROW_ON_ERROR))];
+    }
+    public function previsualizarAprobacion(Request $r,int $id){
+        return response()->json(DB::transaction(function()use($r,$id){
+            $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;
+            $c=$this->cabecera($id,$sid);$plan=$this->prepararAprobacion($c,$sid,(int)$r->user()->id);
+            return $plan+['puede_autorizar'=>$plan['bloqueos']===[],'movimiento_aplicado'=>false];
+        },3))->header('Cache-Control','no-store');
+    }
+    public function autorizarDiferencias(Request $r,int $id){
+        $v=$r->validate(['huella'=>'required|string|size:64|regex:/^[a-f0-9]{64}$/D','motivo'=>'required|string|min:10|max:1000']);
+        $obs=trim($v['motivo']);abort_if(mb_strlen($obs)<10,422,'Justificación insuficiente.');
+        return response()->json(DB::transaction(function()use($r,$id,$v,$obs){
+            $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$uid=(int)$r->user()->id;$c=$this->cabecera($id,$sid);
+            $plan=$this->prepararAprobacion($c,$sid,$uid);
+            abort_unless(hash_equals($plan['huella'],$v['huella'])&&$plan['bloqueos']===[],409,'Plan modificado o con diferencias no ajustables.');
+            $old=DB::table('registros_auditoria')->where('tipo_entidad','inventario_conteos')->where('entidad_id',$id)->where('accion','CONTEO_AUTORIZACION')->lockForUpdate()->get(['usuario_id','valores_nuevos']);
+            if($old->isNotEmpty()){
+                $first=$old->first();$a=json_decode($first->valores_nuevos,true,512,JSON_THROW_ON_ERROR);
+                abort_unless($old->count()===1&&(int)$first->usuario_id===$uid&&($a['huella']??null)===$plan['huella']&&($a['motivo']??null)===$obs,409,'Ya existe autorización registrada.');
+                return ['id'=>$id,'estado'=>'EN_REVISION','autorizado'=>true,'repetida'=>true,'movimiento_aplicado'=>false];
+            }
+            $this->auditoria($id,$uid,'CONTEO_AUTORIZACION',['estado'=>'EN_REVISION'],['estado'=>'EN_REVISION','huella'=>$plan['huella'],'motivo'=>$obs,'grupos'=>$plan['grupos']]);
+            // No se altera el estado hasta confirmar ENUM final y relación de ajustes.
+            return ['id'=>$id,'estado'=>'EN_REVISION','autorizado'=>true,'repetida'=>false,'movimiento_aplicado'=>false];
+        },3))->header('Cache-Control','no-store');
+    }
     public function ver(Request $r,int $id){
         return response()->json(DB::transaction(function()use($r,$id){
             $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$uid=(int)$r->user()->id;$c=$this->cabecera($id,$sid);

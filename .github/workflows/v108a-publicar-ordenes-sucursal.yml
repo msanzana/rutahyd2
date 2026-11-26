@@ -1,0 +1,171 @@
+name: V108A - Ordenes de compra por sucursal
+on:
+  push:
+    branches: [feature/v108a-ordenes-sucursal-20261126]
+    paths: [.github/workflows/v108a-publicar-ordenes-sucursal.yml]
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  orders:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: temporal_ci_solamente
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ptemporal_ci_solamente --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, intl, xml, dom, curl, pdo_mysql, openssl, fileinfo
+      - name: PHP estático
+        run: |
+          set -euo pipefail
+          php -l app/Services/ContextoCompras.php
+          php -l app/Http/Controllers/OrdenesCompraControlador.php
+          php -l tests/integracion_ordenes_compra_v108a.php
+      - name: MySQL8 efímero, catálogo y DDL38
+        run: |
+          set -euo pipefail
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente < database/espanol/01_esquema_completo_34_tablas_es.sql
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente < database/espanol/05_semillas_es.sql
+          for f in 12_tokens_acceso_opcional.sql 13_catalogos_comerciales_aditivos.sql 14_productos_clasificacion_campos.sql 16_permisos_modulos_producto.sql 18_recuperacion_contrasenas.sql 19_rut_usuarios.sql 20_proveedores_productos_codigos_barras_ddl.sql 21_catalogos_referencia_semillas.sql 23_preferencias_usuarios_permisos_submodulos_ddl.sql 24_listas_precios_sin_triggers.sql 25_productos_fotos_ddl_sin_triggers.sql;do
+            mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local < "database/espanol/$f"
+          done
+          mysql -h 127.0.0.1 -uroot -ptemporal_ci_solamente rutahyd2_es_local \
+            < database/espanol/38_estados_modulos_oc_productos_ddl.sql
+      - name: Laravel real JWT con Mail mock, sin red ni datos productivos
+        env:
+          APP_NAME: RutaHD2_CI
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          RUTAHD_JWT_SECRET: 'CI_ONLY_JWT_TEST_SIGNING_KEY_DO_NOT_USE_IN_PRODUCTION_2026'
+          APP_URL: http://127.0.0.1
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_DATABASE: rutahyd2_es_local
+          DB_USERNAME: root
+          DB_PASSWORD: temporal_ci_solamente
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          MAIL_MAILER: smtp
+        run: |
+          set -euo pipefail
+          composer install --no-interaction --prefer-dist --no-progress
+          php artisan route:list --path=api/v1/ordenes-compra
+          php tests/integracion_ordenes_compra_v108a.php
+          echo V108A_API_JWT_MYSQL_OK
+      - name: Respaldar y comprobar codigo productivo
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v108a/{before,after,browser}
+          cat >/tmp/v108a/transport.py <<'PY'
+          import os,ssl,ftplib,io,pathlib,subprocess,sys
+          p=pathlib.Path('/tmp/v108a')
+          oc='app/Http/Controllers/OrdenesCompraControlador.php'
+          svc='app/Services/ContextoCompras.php'
+          changed=[oc]
+          new=[svc]
+          guards={'routes.guard':'/htdocs/api-v2/routes/api.php','context.guard':'/htdocs/api-v2/app/Http/Controllers/ContextoSucursalControlador.php','admin.guard':'/htdocs/api-v2/app/Http/Controllers/SucursalesControlador.php','recepcion.guard':'/htdocs/api-v2/app/Http/Controllers/RecepcionesBorradorControlador.php','consolidacion.guard':'/htdocs/api-v2/app/Http/Controllers/ConsolidacionesControlador.php','consultas.guard':'/htdocs/api-v2/app/Http/Controllers/ComprasConsultasControlador.php','libro.guard':'/htdocs/api-v2/app/Services/LibroComprasInterno.php','kardex.guard':'/htdocs/api-v2/app/Http/Controllers/InventarioOperacionesControlador.php','pdf.guard':'/htdocs/api-v2/app/Services/PdfOrdenCompra.php','index.guard':'/htdocs/index.html','selector.guard':'/htdocs/assets/js/contexto-sucursal-v107.js','api.guard':'/htdocs/assets/js/catalogos-api.js','login.guard':'/htdocs/assets/js/login-produccion.js','compras.guard':'/htdocs/assets/js/compras-consultas-v66.js','productos.guard':'/htdocs/assets/js/productos-remotos.js','ajustes.guard':'/htdocs/assets/js/inventario-v104.js'}
+          def remote(n):return guards.get(n,'/htdocs/api-v2/'+n)
+          def get(f,n):
+              b=io.BytesIO();f.retrbinary('RETR '+remote(n),b.write);return b.getvalue()
+          def absent(f,n):
+              try:get(f,n);return False
+              except ftplib.error_perm as e:
+                  if str(e).startswith('550'):return True
+                  raise
+          def save(area,n,b):
+              d=p/area/n;d.parent.mkdir(parents=True,exist_ok=True);d.write_bytes(b)
+          def read(area,n):return (p/area/n).read_bytes()
+          def put(f,n,b):f.storbinary('STOR '+remote(n),io.BytesIO(b))
+          def verify_before(f):
+              for n in new:assert absent(f,n),n
+              for n in [*changed,*guards]:assert get(f,n)==read('before',n),n
+          f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=45)
+          f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
+          with f:
+              mode=sys.argv[1]
+              if mode=='prepare':
+                  assert absent(f,svc),'Servicio ya existe'
+                  for n in [*changed,*guards]:save('before',n,get(f,n))
+                  for n,repo in [(oc,oc),('context.guard','app/Http/Controllers/ContextoSucursalControlador.php'),('pdf.guard','app/Services/PdfOrdenCompra.php')]:
+                      base=subprocess.check_output(['git','show','c5565faca9ae4196eedb7923e5a76ddd3e359503:'+repo])
+                      assert read('before',n)==base,'Archivo productivo difiere: '+n
+                  assert b'/ordenes-compra' in read('before','routes.guard')
+                  assert b'contexto-sucursal-v107.js?v=20261126-v107s' in read('before','index.guard')
+                  for n in [*changed,*new]:save('after',n,pathlib.Path(n).read_bytes())
+                  print('V108A_PRECHECK_OK')
+              elif mode=='publish':
+                  verify_before(f);(p/'attempted').touch()
+                  for n in [svc,oc]:
+                      with (p/'attempted').open('a') as log:log.write(n+'\n')
+                      put(f,n,read('after',n))
+                  for n in [*changed,*new]:assert get(f,n)==read('after',n),n
+                  for n in guards:assert get(f,n)==read('before',n),n
+                  print('V108A_FTPS_BYTES_OK')
+              elif mode=='rollback':
+                  for n in reversed((p/'attempted').read_text().splitlines()):
+                      if n in new:
+                          if not absent(f,n):f.delete(remote(n))
+                      else:put(f,n,read('before',n))
+                  verify_before(f);print('V108A_ROLLBACK_OK')
+          PY
+          python /tmp/v108a/transport.py prepare
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v108a-respaldo-previo
+          path: /tmp/v108a/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Preparar navegador de verificacion
+        run: |
+          set -euo pipefail
+          cd /tmp/v108a/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Publicar solamente motor OC y servicio
+        run: python /tmp/v108a/transport.py publish
+      - name: Verificar acceso publico y rutas JWT
+        run: |
+          set -euo pipefail
+          cd /tmp/v108a/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage();
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/?v=20261126-v108a',{waitUntil:'load',timeout:60000});
+            await page.waitForFunction(()=>window.RutaHDContextoSucursalV107&&window.RutaHDLogin&&window.RutaHDApiCatalogos,null,{timeout:45000});
+            const result=await page.evaluate(async()=>{
+              const paths=['/api/v1/ordenes-compra','/api/v1/ordenes-compra/1/pdf','/api/v1/contexto-sucursal','/api/v1/recepciones-borrador/1','/api/v1/inventario/ajustes-rapidos'];
+              return Promise.all(paths.map(async p=>(await fetch(p,{headers:{Accept:'application/json'},cache:'no-store'})).status));
+            });
+            if(response?.status()!==200||result.some(x=>x!==401)||errors.length)throw Error(JSON.stringify({result,errors}));
+            console.log('V108A_PUBLIC_OK');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar originales si falla la publicacion
+        if: failure()
+        run: |
+          if [ -f /tmp/v108a/attempted ]; then python /tmp/v108a/transport.py rollback; fi

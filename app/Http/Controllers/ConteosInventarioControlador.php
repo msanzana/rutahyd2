@@ -299,6 +299,20 @@ final class ConteosInventarioControlador extends Controller
             return ['id'=>$id,'estado'=>$final,'operaciones'=>$links,'movimiento_aplicado'=>count($links)>0,'repetida'=>false];
         },3))->header('Cache-Control','no-store');
     }
+    public function listar(Request $r){
+        $v=$r->validate(['buscar'=>'nullable|string|max:120','page'=>'nullable|integer|min:1','bodega_id'=>'nullable|integer|min:1','estado'=>'nullable|in:BORRADOR,EN_CONTEO,EN_REVISION,CONFIRMADO']);
+        $sid=(int)app(ContextoCompras::class)->resolver($r)->id;
+        $q=DB::table('inventario_conteos as c')->join('bodegas as b','b.id','=','c.bodega_id')->where('c.sucursal_id',$sid)
+          ->whereExists(fn($q)=>$q->selectRaw('1')->from('inventario_bodegas_sucursales as bs')->whereColumn('bs.bodega_id','c.bodega_id')->where('bs.sucursal_id',$sid))
+          ->whereIn('c.estado',['BORRADOR','EN_CONTEO','EN_REVISION','CONFIRMADO'])
+          ->select('c.id','c.numero_interno','c.bodega_id','b.nombre as bodega','c.alcance','c.estado','c.conteo_ciego','c.fecha_corte','c.creado_en');
+        $term=trim($v['buscar']??'');
+        if($term!=='')$q->where(fn($x)=>$x->where('c.numero_interno','like','%'.$term.'%')->orWhere('b.nombre','like','%'.$term.'%')->orWhereExists(fn($y)=>$y->selectRaw('1')->from('inventario_conteos_detalle as l')->join('productos as p','p.id','=','l.producto_id')->whereColumn('l.conteo_id','c.id')->where(fn($z)=>$z->where('p.sku','like','%'.$term.'%')->orWhere('p.nombre','like','%'.$term.'%'))));
+        foreach(['estado','bodega_id'] as $k)if(isset($v[$k]))$q->where('c.'.$k,$v[$k]);
+        $page=$q->orderByDesc('c.id')->paginate(25,['*'],'page',(int)($v['page']??1))->toArray();
+        $page['escrituras_habilitadas']=false;
+        return response()->json($page)->header('Cache-Control','no-store');
+    }
     public function ver(Request $r,int $id){
         return response()->json(DB::transaction(function()use($r,$id){
             $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$uid=(int)$r->user()->id;$c=$this->cabecera($id,$sid);
@@ -309,7 +323,7 @@ final class ConteosInventarioControlador extends Controller
                 if((int)$l->contado_por!==$uid)unset($l->cantidad_contada);
                 if((int)$l->recontado_por!==$uid)unset($l->cantidad_recontada);
             }
-            return ['conteo'=>$c,'detalles'=>$lines];
+            return ['conteo'=>$c,'detalles'=>$lines,'usuario_actual_id'=>$uid,'escrituras_habilitadas'=>false,'cierre_habilitado'=>false];
         },3))->header('Cache-Control','no-store');
     }
 }

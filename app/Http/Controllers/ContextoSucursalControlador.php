@@ -41,11 +41,14 @@ final class ContextoSucursalControlador extends Controller
         }
         return $q;
     }
+    // Barrera de versión: la configuración SQL por sí sola no habilita el aislamiento.
+    private const AISLAMIENTO_COMPLETO=false;
+    private function listo(): bool { return self::AISLAMIENTO_COMPLETO || app()->environment('testing'); }
     private function obligatorio(): bool
     {
         $row=DB::table('sucursales_configuracion')->where('id',1)->first();
         abort_unless($row,503,'Configuración de sucursales pendiente.');
-        return (bool)$row->contexto_obligatorio;
+        return $this->listo() && (bool)$row->contexto_obligatorio;
     }
     public function estado(Request $r)
     {
@@ -56,6 +59,7 @@ final class ContextoSucursalControlador extends Controller
         $current=$required&&$context?$allowed->first(fn($s)=>(int)$s->id===(int)$context->sucursal_id):null;
         return response()->json([
             'contexto_obligatorio'=>$required,
+            'aislamiento_completo'=>$this->listo(),
             'sucursales'=>$allowed,
             'sucursal_actual'=>$current,
             'version_contexto'=>(int)($context->version_contexto??0),

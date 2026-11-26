@@ -157,7 +157,7 @@ jobs:
             const page=await browser.newPage();
             const errors=[];page.on('pageerror',e=>errors.push(e.message));
             const response=await page.goto('https://rutahyd2.free.nf/?v=20261126-v103',{waitUntil:'load',timeout:60000});
-            await page.waitForFunction(()=>[...document.styleSheets].some(s=>s.href?.includes('recepciones-compactas-v103.css?v=20261126-v103')&&s.cssRules.length>=10),null,{timeout:45000});
+            await page.waitForFunction(()=>[...document.styleSheets].some(s=>s.href?.includes('paleta-secciones-v103.css?v=20261126-v103')&&s.cssRules.length>=10),null,{timeout:45000});
             await page.waitForFunction(()=>[...document.scripts].some(s=>s.src.includes('paleta-secciones-v103.js?v=20261126-v103')),null,{timeout:45000});
             const result=await page.evaluate(async()=>({auth:(await fetch('/api/v1/recepciones-borrador/1',{headers:{Accept:'application/json'}})).status,density:getComputedStyle(document.documentElement).getPropertyValue('--hd-form-control').trim(),v86:[...document.scripts].some(s=>s.src.includes('paleta-secciones-v103.js?v=20261126-v103'))}));
             if(response?.status()!==200||result.density!=='30px'||!result.v86||result.auth!==401||errors.length)throw Error(JSON.stringify({result,errors}));

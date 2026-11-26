@@ -95,9 +95,28 @@ jobs:
                   for n in new:assert absent(f,n),'Unexpected new file '+n
                   for n in [index,*changed,*guards]:save('before',n,get(f,n))
                   for n in [api,app]:assert read('before',n)==front('ed3b6cbf1d44c597b3de582fadba4b5d9a7fddd9',n),'Baseline mismatch '+n
-                  assert read('before',routes)==subprocess.check_output(['git','show','8b956062a7ebaa1a873b82d446cbfc4e708db1ed:'+routes]),'API routes baseline mismatch'
+                  # Aplicar solo el bloque V104 sobre las rutas reales, sin reemplazar ninguna ruta ajena.
+                  live=read('before',routes)
+                  reference=subprocess.check_output(['git','show','8b956062a7ebaa1a873b82d446cbfc4e708db1ed:'+routes])
+                  proposed=pathlib.Path(routes).read_bytes()
+                  anchor=b'    // V66: consultas de compras; sin operaciones de escritura.'
+                  start=b'    // V104: inventario unificado;'
+                  group=b"Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {"
+                  assert proposed.count(start)==1 and proposed.count(anchor)==1
+                  block=proposed[proposed.index(start):proposed.index(anchor)]
+                  assert proposed.replace(block,b'',1)==reference,'El delta de rutas no es exclusivamente V104'
+                  # Admitir CRLF en el servidor, sin cambiar sus terminaciones de linea.
+                  newline=b'\r\n' if b'\r\n' in live else b'\n'
+                  block=block.replace(b'\r\n',b'\n').replace(b'\n',newline)
+                  assert live.count(anchor)==1 and live.count(group)==1 and live.index(group)<live.index(anchor)
+                  assert b'InventarioOperacionesControlador' not in live and b'/inventario/ajustes-rapidos' not in live and b'/inventario/catalogos' not in live and b'/inventario/motivos/' not in live,'Posible colision de rutas'
+                  merged=live.replace(anchor,block+anchor,1)
+                  assert merged.replace(block,b'',1)==live and merged.count(start)==1
+                  save('after',routes,merged)
+                  subprocess.run(['php','-l',str(p/'after'/routes)],check=True)
+                  print('V104_ROUTES_DELTA_OK',len(block.splitlines())-1)
                   for n in [api,app,js]:save('after',n,(p/pathlib.Path(n).name).read_bytes())
-                  for n in [controller,routes]:save('after',n,pathlib.Path(n).read_bytes())
+                  save('after',controller,pathlib.Path(controller).read_bytes())
                   src=read('before',index).decode()
                   for required in ['compras-consultas-v66.js?v=20261126-v102','recepciones-compactas-v102.css?v=20261126-v102','paleta-secciones-v103.css?v=20261126-v103','paleta-secciones-v103.js?v=20261126-v103','carga-global-v42.js?v=20261126-v99r','stock-ficha-v98.css?v=20261125-v98']:
                       assert required in src,required
@@ -135,6 +154,55 @@ jobs:
                   verify_before(f);print('V104_ROLLBACK_OK')
           PY
           python /tmp/v104/transport.py prepare
+      - name: Verificar registro de rutas reales y middleware
+        env:
+          APP_ENV: testing
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          MAIL_MAILER: log
+        run: |
+          set -euo pipefail
+          cp routes/api.php /tmp/v104/routes-repo.php
+          trap 'cp /tmp/v104/routes-repo.php routes/api.php' EXIT
+          cp /tmp/v104/before/routes/api.php routes/api.php
+          php artisan route:list --json > /tmp/v104/routes-before.json
+          cp /tmp/v104/after/routes/api.php routes/api.php
+          php artisan route:list --json > /tmp/v104/routes-after.json
+          python - <<'PY'
+          import json
+          def read(p):
+              with open('/tmp/v104/routes-'+p+'.json') as f:return json.load(f)
+          before=read('before');after=read('after')
+          def key(r):return (r['method'],r['uri'],r.get('domain'))
+          old={key(r):r for r in before};new={key(r):r for r in after}
+          assert len(old)==len(before) and len(new)==len(after),'Rutas duplicadas'
+          assert all(new.get(k)==v for k,v in old.items()),'Una ruta anterior cambió'
+          expected={
+              ('GET|HEAD','api/v1/inventario/catalogos'):'inventario.catalogos.ver',
+              ('PUT','api/v1/inventario/motivos/{id}'):'inventario.catalogos.gestionar',
+              ('GET|HEAD','api/v1/inventario/ajustes-rapidos/candidatos'):'inventario.operaciones.gestionar',
+              ('GET|HEAD','api/v1/inventario/ajustes-rapidos/bodegas'):'inventario.operaciones.gestionar',
+              ('GET|HEAD','api/v1/inventario/ajustes-rapidos/origen/{id}'):'inventario.operaciones.gestionar',
+              ('GET|HEAD','api/v1/inventario/ajustes-rapidos'):'inventario.operaciones.ver',
+              ('GET|HEAD','api/v1/inventario/ajustes-rapidos/{id}'):'inventario.operaciones.ver',
+              ('POST','api/v1/inventario/ajustes-rapidos'):'inventario.operaciones.gestionar',
+              ('POST','api/v1/inventario/ajustes-rapidos/{id}/aprobar'):'inventario.operaciones.aprobar',
+              ('POST','api/v1/inventario/ajustes-rapidos/{id}/anular'):'inventario.operaciones.anular',
+              ('POST','api/v1/inventario/ajustes-rapidos/{id}/confirmar'):'inventario.operaciones.confirmar'
+          }
+          added=[v for k,v in new.items() if k not in old]
+          assert len(added)==len(expected),'Número inesperado de rutas nuevas'
+          for r in added:
+              perm=expected[(r['method'],r['uri'])]
+              mid=' '.join(r['middleware'])
+              assert ('token.rutahd' in mid or 'Autenticar' in mid or 'Token' in mid) and perm in mid, (r['uri'],mid)
+              assert 'InventarioOperacionesControlador' in r['action'],r['uri']
+          print('V104_ROUTES_AUTH_OK',len(added))
+          PY
       - name: Pruebas UI aisladas de catalogo y ajuste rapido
         run: |
           set -euo pipefail

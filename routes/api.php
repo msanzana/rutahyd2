@@ -79,6 +79,15 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::get('/solicitudes-regularizacion/{id}/pdf',[\App\Http\Controllers\ConsolidacionesControlador::class,'solicitudPdf'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
     Route::post('/notificaciones-regularizacion/{id}/reenviar',[\App\Http\Controllers\ConsolidacionesControlador::class,'reenviarSolicitud'])->middleware('permiso.rutahd:compras.gestionar')->whereNumber('id');
     Route::get('/documentos-recepcion/{tipo}/{id}/pdf',[\App\Http\Controllers\ComprasConsultasControlador::class,'pdf'])->middleware('permiso.rutahd:compras.gestionar')->where('tipo','recepcion|consolidacion')->whereNumber('id');
+    // V106: núcleo administrativo multisucursal (DDL44-45 requeridos).
+    Route::get('/sucursales',[\App\Http\Controllers\SucursalesControlador::class,'listar'])->middleware('permiso.rutahd:inventario.sucursales.gestionar');
+    Route::post('/sucursales',[\App\Http\Controllers\SucursalesControlador::class,'crear'])->middleware('permiso.rutahd:inventario.sucursales.gestionar');
+    Route::put('/sucursales/{id}',[\App\Http\Controllers\SucursalesControlador::class,'actualizar'])->middleware('permiso.rutahd:inventario.sucursales.gestionar')->whereNumber('id');
+    Route::patch('/sucursales/{id}/estado',[\App\Http\Controllers\SucursalesControlador::class,'estado'])->middleware('permiso.rutahd:inventario.sucursales.gestionar')->whereNumber('id');
+    Route::get('/sucursales/{id}/bodegas',[\App\Http\Controllers\SucursalesControlador::class,'bodegas'])->middleware('permiso.rutahd:inventario.sucursales.gestionar')->whereNumber('id');
+    Route::put('/sucursales/{id}/bodegas/{bodega}',[\App\Http\Controllers\SucursalesControlador::class,'asignarBodega'])->middleware('permiso.rutahd:inventario.sucursales.gestionar')->whereNumber(['id','bodega']);
+    Route::get('/sucursales/{id}/usuarios',[\App\Http\Controllers\SucursalesControlador::class,'usuarios'])->middleware('permiso.rutahd:sucursales.accesos.gestionar')->whereNumber('id');
+    Route::put('/sucursales/{id}/usuarios/{usuario}',[\App\Http\Controllers\SucursalesControlador::class,'acceso'])->middleware('permiso.rutahd:sucursales.accesos.gestionar')->whereNumber(['id','usuario']);
     // V104: inventario unificado; habilitar únicamente tras confirmar DDL39-42.
     Route::get('/inventario/catalogos',[\App\Http\Controllers\InventarioOperacionesControlador::class,'catalogos'])->middleware('permiso.rutahd:inventario.catalogos.ver');
     Route::put('/inventario/motivos/{id}',[\App\Http\Controllers\InventarioOperacionesControlador::class,'actualizarMotivo'])->middleware('permiso.rutahd:inventario.catalogos.gestionar')->whereNumber('id');

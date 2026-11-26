@@ -1,0 +1,34 @@
+name: V109D1 - Validar cálculo de conteos
+on:
+  push:
+    branches: [feature/v109a-inventario-contexto-20261126]
+    paths:
+      - .github/workflows/v109d1-conteos.yml
+      - app/Services/PlanConteoInventario.php
+      - tests/plan_conteo_v109d1.php
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, pdo_sqlite, iconv
+      - name: Validar núcleo sin escrituras
+        run: |
+          set -euo pipefail
+          php -l app/Services/PlanConteoInventario.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/plan_conteo_v109d1.php | tee /tmp/v109d1.log
+          grep -Fx V109D1_CONTEO_OK /tmp/v109d1.log

@@ -1,0 +1,42 @@
+name: V106 - Validacion aislada multisucursal
+on:
+  push:
+    branches: [feature/v106-multisucursal-20261126]
+    paths: [.github/workflows/v106-validar-multisucursal.yml]
+permissions: {contents: read}
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, pdo_sqlite, iconv
+      - name: Validar controlador y rutas sin acceso a produccion
+        env:
+          APP_ENV: testing
+          APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          MAIL_MAILER: log
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/SucursalesControlador.php
+          php -l routes/api.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/sucursales_v106.php | tee /tmp/v106-admin.log
+          grep -Fx V106_ADMIN_OK /tmp/v106-admin.log
+      - name: Validar recursos de interfaz
+        run: |
+          set -euo pipefail
+          git clone -q --depth=1 --branch feature/v106-multisucursal-20261126 https://github.com/msanzana/rutahyd2front.git /tmp/v106-front
+          test "$(git -C /tmp/v106-front rev-parse HEAD)" = "48ed6d2045492b5d018b2b7e500dff4584699c06"
+          for n in sucursales-v106.js catalogos-api.js app-produccion.js; do node --check "/tmp/v106-front/assets/js/$n"; done
+          grep -q 'data-nav="administracion_sucursales"' /tmp/v106-front/index.html
+          echo V106_FRONT_SYNTAX_OK

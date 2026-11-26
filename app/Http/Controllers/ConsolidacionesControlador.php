@@ -121,11 +121,11 @@ final class ConsolidacionesControlador
           ->whereColumn('s.proveedor_id','p.proveedor_id')->whereColumn('s.proveedor_id','r.proveedor_id')->first(['s.*']);
         abort_unless($s,404,'Solicitud no encontrada.');return $s;
     }
-    public function solicitudPdf(Request $r,int $id){$this->solicitudContexto($id,$this->contexto($r));$pdf=(new RegularizacionRecepcion())->pdf($id);return response($pdf,200,['Content-Type'=>'application/pdf','Content-Disposition'=>'inline; filename="solicitud-'.$id.'.pdf"','Cache-Control'=>'private, no-store']);}
+    public function solicitudPdf(Request $r,int $id){$pdf=DB::transaction(function()use($r,$id){$this->solicitudContexto($id,$this->contexto($r,true));return (new RegularizacionRecepcion())->pdf($id);},3);return response($pdf,200,['Content-Type'=>'application/pdf','Content-Disposition'=>'inline; filename="solicitud-'.$id.'.pdf"','Cache-Control'=>'private, no-store']);}
     public function reenviarSolicitud(Request $r,int $id){$this->usuario($r);$r->validate(['verificar_envio'=>'accepted']);$sid=$this->contexto($r);
         $n=DB::table('cola_notificaciones_correo')->where('id',$id)->where('origen_tipo','SOLICITUD_REGULARIZACION')->first();
         abort_unless($n,404,'Notificación no encontrada.');$s=$this->solicitudContexto((int)$n->solicitud_id,$sid);
-        abort_unless((int)$n->proveedor_id===(int)$s->proveedor_id&&(int)$n->origen_id===(int)$s->id,409,'Notificación inconsistente.');$estado=(new RegularizacionRecepcion())->enviar($id,true);return response()->json(['estado'=>$estado,'mensaje'=>'Estado de envío: '.$estado]);}
+        abort_unless((int)$n->proveedor_id===(int)$s->proveedor_id&&(int)$n->origen_id===(int)$s->id,409,'Notificación inconsistente.');$estado=(new RegularizacionRecepcion())->enviar($id,true,$r);return response()->json(['estado'=>$estado,'mensaje'=>'Estado de envío: '.$estado]);}
     public function ver(Request $r,int $id){return response()->json($this->current($id,$this->contexto($r)));}
     public function crear(Request $r){return $this->guardar($r,null);}
     public function actualizar(Request $r,int $id){return $this->guardar($r,$id);}
@@ -264,7 +264,7 @@ final class ConsolidacionesControlador
         },3);
         $result['correos']=[];
         // Un primer intento fuera de la transacción. La cola persiste aunque falle SMTP.
-        foreach(array_slice($result['notificaciones']??[],0,3) as $nid){try{$result['correos'][]=['id'=>$nid,'estado'=>(new RegularizacionRecepcion())->enviar($nid)];}catch(\Throwable $e){$result['correos'][]=['id'=>$nid,'estado'=>'PENDIENTE_VERIFICACION'];}}
+        foreach(array_slice($result['notificaciones']??[],0,3) as $nid){try{$result['correos'][]=['id'=>$nid,'estado'=>(new RegularizacionRecepcion())->enviar($nid,false,$r)];}catch(\Throwable $e){$result['correos'][]=['id'=>$nid,'estado'=>'PENDIENTE_VERIFICACION'];}}
         $result['correos_pendientes']=max(0,count($result['notificaciones']??[])-count($result['correos']));
         if(!empty($result['notificaciones']))$result['mensaje'].=' Revise las solicitudes y el estado de sus correos.';
         return response()->json($result);

@@ -1,0 +1,26 @@
+name: V108B4 - Validar frontend de compras por sucursal
+on:
+  push:
+    branches: [feature/v108b1-consultas-sucursal-20261126]
+    paths:
+      - .github/workflows/v108b4-compras-front.yml
+      - tests/compras_front_sucursal_v108b4.mjs
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verificar JS real del candidato
+        run: |
+          set -euo pipefail
+          git clone -q --depth=1 --branch feature/v108b4-compras-sucursal-20261126 https://github.com/msanzana/rutahyd2front.git /tmp/v108b4-front
+          test "$(git -C /tmp/v108b4-front rev-parse HEAD)" = fa998f143b803b14c160be52deb232dfba3fd979
+          node --check /tmp/v108b4-front/assets/js/compras-consultas-v66.js
+          node tests/compras_front_sucursal_v108b4.mjs /tmp/v108b4-front/assets/js/compras-consultas-v66.js | tee /tmp/v108b4.log
+          grep -Fx V108B4_FRONT_CATALOGOS_OK /tmp/v108b4.log

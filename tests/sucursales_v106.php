@@ -9,7 +9,7 @@ use App\Http\Controllers\SucursalesControlador;
 function check(bool $ok,string $m):void{if(!$ok)throw new RuntimeException($m);}
 check(config('app.env')==='testing'&&DB::getDatabaseName()===':memory:','Solo CI aislado');
 foreach([
-'CREATE TABLE sucursales(id INTEGER PRIMARY KEY,codigo TEXT UNIQUE,nombre TEXT,ciudad_id INTEGER,activo INTEGER)',
+'CREATE TABLE sucursales(id INTEGER PRIMARY KEY,codigo TEXT UNIQUE,nombre TEXT,ciudad_id INTEGER,direccion TEXT,activo INTEGER)',
 'CREATE TABLE ciudades(id INTEGER PRIMARY KEY,nombre TEXT,activo INTEGER)',
 'CREATE TABLE bodegas(id INTEGER PRIMARY KEY,codigo TEXT,nombre TEXT,activo INTEGER)',
 'CREATE TABLE inventario_bodegas_sucursales(bodega_id INTEGER PRIMARY KEY,sucursal_id INTEGER)',
@@ -31,10 +31,11 @@ function val($r):array{return $r->getData(true);}
 function blocked(callable $f,int $code):void{try{$f();}catch(\Symfony\Component\HttpKernel\Exception\HttpException $e){check($e->getStatusCode()===$code,'código rechazo');return;}throw new RuntimeException('No bloqueado');}
 $c=$app->make(SucursalesControlador::class);
 blocked(fn()=>$c->listar(req([],false)),403);
-$a=val($c->crear(req(['codigo'=>'CI1','nombre'=>'Sucursal CI A','ciudad_id'=>1])))['id'];
+$a=val($c->crear(req(['codigo'=>'CI1','nombre'=>'Sucursal CI A','ciudad_id'=>1,'direccion'=>'Casa CI'])))['id'];
 $b=val($c->crear(req(['codigo'=>'CI2','nombre'=>'Sucursal CI B'])))['id'];
 $c->actualizar(req(['nombre'=>'Sucursal CI A editada','ciudad_id'=>1]),$a);
 check(DB::table('sucursales')->where('id',$a)->value('codigo')==='CI1','Código estable');
+check(DB::table('sucursales')->where('id',$a)->value('direccion')==='Casa CI','Dirección preservada');
 $c->asignarBodega(req(),$a,1);$c->asignarBodega(req(),$a,1);
 blocked(fn()=>$c->asignarBodega(req(),$b,1),409);
 blocked(fn()=>$c->estado(req(['activo'=>false]),$a),409);

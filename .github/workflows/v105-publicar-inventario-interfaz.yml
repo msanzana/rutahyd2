@@ -1,0 +1,165 @@
+name: V105 - Interfaz de inventario
+on:
+  push:
+    branches: [deploy/v105-inventario-interfaz-20261126]
+    paths: [.github/workflows/v105-publicar-inventario-interfaz.yml]
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preparar respaldo y delta exclusivo de interfaz
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v105/{before,after,browser,styles}
+          git clone -q --depth=1 --branch feature/v105-inventario-interfaz-20261126 https://github.com/msanzana/rutahyd2front.git /tmp/v105/front
+          git -C /tmp/v105/front fetch -q --depth=1 origin b33ec45ec5c7f0ea82c19493b70e68cff0f9b910
+          git -C /tmp/v105/front fetch -q --depth=1 origin 9aea5adfecb7c0167f9bf6a7521a58ef92174116
+          git -C /tmp/v105/front show b33ec45ec5c7f0ea82c19493b70e68cff0f9b910:assets/js/inventario-v104.js >/tmp/v105/inventario-v104.js
+          git -C /tmp/v105/front show 9aea5adfecb7c0167f9bf6a7521a58ef92174116:assets/js/inventario-v104.js >/tmp/v105/old.js
+          node --check /tmp/v105/inventario-v104.js
+          cat >/tmp/v105/transport.py <<'PY'
+          import os,ssl,ftplib,io,pathlib,re,sys
+          from html.parser import HTMLParser
+          p=pathlib.Path('/tmp/v105')
+          index='index.html';js='assets/js/inventario-v104.js'
+          guards={'routes.guard':'/htdocs/api-v2/routes/api.php','inv.guard':'/htdocs/api-v2/app/Http/Controllers/InventarioOperacionesControlador.php','api-js.guard':'/htdocs/assets/js/catalogos-api.js','app-js.guard':'/htdocs/assets/js/app-produccion.js','compras.guard':'/htdocs/assets/js/compras-consultas-v66.js','recepcion-css.guard':'/htdocs/assets/css/recepciones-compactas-v102.css','paleta-css.guard':'/htdocs/assets/css/paleta-secciones-v103.css','paleta-js.guard':'/htdocs/assets/js/paleta-secciones-v103.js','preload-js.guard':'/htdocs/assets/js/carga-global-v42.js','preload-css.guard':'/htdocs/assets/css/carga-global-v42.css','productos.guard':'/htdocs/assets/js/productos-remotos.js','stock-css.guard':'/htdocs/assets/css/stock-ficha-v98.css','recepcion.guard':'/htdocs/api-v2/app/Http/Controllers/RecepcionesBorradorControlador.php','stock.guard':'/htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php','root.guard':'/htdocs/.htaccess','api.guard':'/htdocs/api/.htaccess','private.guard':'/htdocs/api-v2/.htaccess','gateway.guard':'/htdocs/api/index.php'}
+          def remote(n):return guards.get(n,'/htdocs/'+n)
+          def get(f,n):
+              b=io.BytesIO();f.retrbinary('RETR '+remote(n),b.write);return b.getvalue()
+          def put(f,n,b):f.storbinary('STOR '+remote(n),io.BytesIO(b))
+          def save(area,n,b):
+              d=p/area/n;d.parent.mkdir(parents=True,exist_ok=True);d.write_bytes(b)
+          def read(area,n):return (p/area/n).read_bytes()
+          def verify_before(f):
+              for n in [index,js,*guards]:assert get(f,n)==read('before',n),n
+          class Links(HTMLParser):
+              def __init__(self):super().__init__();self.links=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='link' and a.get('rel')=='stylesheet':self.links.append(a.get('href',''))
+          f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=45)
+          f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
+          with f:
+              mode=sys.argv[1]
+              if mode=='prepare':
+                  for n in [index,js,*guards]:save('before',n,get(f,n))
+                  assert read('before',js)==(p/'old.js').read_bytes(),'JS anterior diferente'
+                  src=read('before',index).decode()
+                  for required in ['catalogos-api.js?v=20261126-v104','app-produccion.js?v=20261126-v104','compras-consultas-v66.js?v=20261126-v102','paleta-secciones-v103.css?v=20261126-v103','carga-global-v42.js?v=20261126-v99r','stock-ficha-v98.css?v=20261125-v98']:
+                      assert required in src,required
+                  old=js+'?v=20261126-v104';assert src.count(old)==1
+                  src=src.replace(old,js+'?v=20261126-v105',1)
+                  save('after',index,src.encode());save('after',js,(p/'inventario-v104.js').read_bytes())
+                  parser=Links();parser.feed(src)
+                  for i,link in enumerate(parser.links):
+                      n=link.split('?')[0].lstrip('/')
+                      if re.fullmatch(r'assets/css/[A-Za-z0-9_.-]+\.css',n):save('styles',f'{i:03d}.css',get(f,n))
+                  print('V105_PRECHECK_OK')
+              elif mode=='publish':
+                  verify_before(f);(p/'attempted').touch()
+                  for n in [js,index]:
+                      with (p/'attempted').open('a') as log:log.write(n+'\n')
+                      put(f,n,read('after',n))
+                  for n in [js,index]:assert get(f,n)==read('after',n),n
+                  for n in guards:assert get(f,n)==read('before',n),n
+                  print('V105_FTPS_BYTES_OK')
+              elif mode=='rollback':
+                  for n in reversed((p/'attempted').read_text().splitlines()):put(f,n,read('before',n))
+                  verify_before(f);print('V105_ROLLBACK_OK')
+          PY
+          python /tmp/v105/transport.py prepare
+      - name: Pruebas UI aisladas de catalogo y ajuste rapido
+        run: |
+          set -euo pipefail
+          cd /tmp/v105/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import {readdirSync} from 'node:fs';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({viewport:{width:1440,height:900},reducedMotion:'reduce'});
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            await page.route('https://ci.invalid/**',r=>r.fulfill({contentType:'text/html',body:'<meta name="viewport" content="width=device-width, initial-scale=1"><main id="workspaceContent"></main>'}));
+            await page.goto('https://ci.invalid/');
+            for(const f of readdirSync('/tmp/v105/styles').sort())await page.addStyleTag({path:'/tmp/v105/styles/'+f});
+            await page.evaluate(()=>{
+              window.RutaHDAccesos={isAdmin:()=>true,has:()=>true};
+              window.RutaHDListUI={renderPager:()=>{},action:(name,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=name;b.onclick=fn;return b;}};
+              const m={id:203,codigo:203,grupo:'Errores',nombre:'Bodega equivocada',naturaleza:'MIXTO',politica_cpp:'CONSERVAR',habilitado_motor:true,activo:1,regla:'CORREGIR_DESPACHO_BODEGA',requiere_referencia:1,requiere_aprobacion:1};
+              const k={id:7,producto_id:1,producto:'Producto CI',bodega_id:1,bodega:'Casa',cantidad:'1.00000000',folio:'CI'};
+              window.RutaHDApiCatalogos={inventoryCatalogs:async()=>({data:[m],total:1,current_page:1,last_page:1,grupos:[],tipos:[],indicadores_sii:[],referencias_sii:[]}),inventoryAdjustments:async()=>({data:[],total:0,last_page:1}),inventoryWarehouses:async()=>[{id:1,nombre:'Casa'},{id:2,nombre:'Vehículo'}],inventoryCandidates:async()=>({data:[k],total:1,last_page:1}),inventoryOrigin:async()=>k,inventoryCreateAdjustment:async()=>{throw Error('No debe guardar en prueba de previsualización');}};
+            });
+            await page.addScriptTag({path:'/tmp/v105/inventario-v104.js'});
+            await page.evaluate(()=>RutaHDInventarioV104.catalogs(document.getElementById('workspaceContent')));
+            await page.getByRole('cell',{name:'Bodega equivocada',exact:true}).waitFor();
+            await page.evaluate(()=>RutaHDInventarioV104.adjustments(document.getElementById('workspaceContent')));
+            const nuevo=page.getByRole('button',{name:'+ Nuevo ajuste',exact:true});
+            await nuevo.waitFor();
+            const geometry=await nuevo.evaluate(e=>({right:e.getBoundingClientRect().right,toolbar:e.parentElement.getBoundingClientRect().right,primary:e.classList.contains('primary')}));
+            if(!geometry.primary||Math.abs(geometry.right-geometry.toolbar)>2)throw Error(JSON.stringify(geometry));
+            await nuevo.click();
+            const d=page.locator('dialog[open]');
+            await d.getByRole('button',{name:'Seleccionar salida 7'}).click();
+            await d.getByLabel('Motivo',{exact:true}).selectOption('203');
+            await d.getByLabel('Bodega real de salida').selectOption('2');
+            await d.getByRole('cell',{name:'−1',exact:true}).waitFor();
+            await d.getByRole('cell',{name:'+1',exact:true}).waitFor();
+            const close=d.locator('.hd-doc-modal-head button[aria-label="Cerrar"]');
+            const g=await close.evaluate(e=>({w:e.getBoundingClientRect().width,h:e.getBoundingClientRect().height,r:getComputedStyle(e).borderRadius}));
+            if(g.w!==36||g.h!==36||parseFloat(g.r)<9)throw Error(JSON.stringify(g));
+            await close.click();await d.waitFor({state:'detached'});
+            await nuevo.click();await d.waitFor({state:'visible'});
+            await d.locator('.hd-doc-modal-footer').getByRole('button',{name:'Cerrar',exact:true}).click();await d.waitFor({state:'detached'});
+            await page.setViewportSize({width:390,height:844});
+            await nuevo.click();await d.waitFor({state:'visible'});
+            const mobile=await close.evaluate(e=>({w:e.getBoundingClientRect().width,h:e.getBoundingClientRect().height,x:e.getBoundingClientRect().x,right:e.getBoundingClientRect().right}));
+            if(mobile.w!==36||mobile.h!==36||mobile.x<0||mobile.right>390)throw Error(JSON.stringify(mobile));
+            await close.click();await d.waitFor({state:'detached'});
+            if(errors.length)throw Error(JSON.stringify(errors));
+            console.log('V105_UI_OK');
+          }finally{await browser.close();}
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v105-respaldo-previo
+          path: /tmp/v105/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar y verificar bytes
+        run: python /tmp/v105/transport.py publish
+      - name: Verificar referencias publicas y proteccion JWT
+        run: |
+          set -euo pipefail
+          cd /tmp/v105/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage();
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/?v=20261126-v105',{waitUntil:'load',timeout:60000});
+            await page.waitForFunction(()=>window.RutaHDInventarioV104&&window.RutaHDApiCatalogos?.inventoryAdjustments&&[...document.scripts].some(s=>s.src.includes('inventario-v104.js?v=20261126-v105')),null,{timeout:45000});
+            const result=await page.evaluate(async()=>({catalog:(await fetch('/api/v1/inventario/catalogos',{headers:{Accept:'application/json'}})).status,adjustment:(await fetch('/api/v1/inventario/ajustes-rapidos',{headers:{Accept:'application/json'}})).status,receipts:(await fetch('/api/v1/recepciones-borrador/1',{headers:{Accept:'application/json'}})).status,scripts:[...document.scripts].map(s=>s.src)}));
+            if(response?.status()!==200||result.catalog!==401||result.adjustment!==401||result.receipts!==401||errors.length||!['catalogos-api.js','app-produccion.js'].every(n=>result.scripts.some(s=>s.includes(n+'?v=20261126-v104')))||!result.scripts.some(s=>s.includes('inventario-v104.js?v=20261126-v105')))throw Error(JSON.stringify({result,errors}));
+            console.log('V105_PUBLIC_OK');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar originales si falla la publicacion
+        if: failure()
+        run: |
+          if [ -f /tmp/v105/attempted ]; then python /tmp/v105/transport.py rollback; fi

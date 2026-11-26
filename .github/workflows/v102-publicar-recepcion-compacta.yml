@@ -1,0 +1,191 @@
+name: V102 - Detalle compacto de recepción
+on:
+  push:
+    branches: [deploy/v102-recepcion-compacta-20261126]
+    paths: [.github/workflows/v102-publicar-recepcion-compacta.yml]
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preparar respaldo y delta exclusivo de interfaz
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v102/{before,after,browser,styles}
+          git clone -q --depth=1 --branch feature/v102-recepcion-compacta-20261126 https://github.com/msanzana/rutahyd2front.git /tmp/v102/front
+          git -C /tmp/v102/front fetch -q --depth=1 origin 93ebf9e9ca895bd18d5f5beb50e989d6cd9b6a5b
+          git -C /tmp/v102/front show 93ebf9e9ca895bd18d5f5beb50e989d6cd9b6a5b:assets/js/compras-consultas-v66.js > /tmp/v102/new.js
+          git -C /tmp/v102/front fetch -q --depth=1 origin 9eccc47d0994261f6a9b3bcaf334b689b652225b
+          git -C /tmp/v102/front show 9eccc47d0994261f6a9b3bcaf334b689b652225b:assets/js/compras-consultas-v66.js > /tmp/v102/old.js
+          git -C /tmp/v102/front show 93ebf9e9ca895bd18d5f5beb50e989d6cd9b6a5b:assets/css/recepciones-compactas-v102.css > /tmp/v102/new.css
+          node --check /tmp/v102/new.js
+          cat >/tmp/v102/transport.py <<'PY'
+          import os,ssl,ftplib,io,pathlib,re,sys,html
+          from html.parser import HTMLParser
+          p=pathlib.Path('/tmp/v102')
+          index='index.html'
+          js='assets/js/compras-consultas-v66.js'
+          css='assets/css/recepciones-compactas-v102.css'
+          guards={'preload-js.guard':'/htdocs/assets/js/carga-global-v42.js','preload-css.guard':'/htdocs/assets/css/carga-global-v42.css','productos.guard':'/htdocs/assets/js/productos-remotos.js','stock-css.guard':'/htdocs/assets/css/stock-ficha-v98.css','recepcion.guard':'/htdocs/api-v2/app/Http/Controllers/RecepcionesBorradorControlador.php','stock.guard':'/htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php','pdf.guard':'/htdocs/api-v2/app/Services/PdfRecepcionCompra.php','root.guard':'/htdocs/.htaccess','api.guard':'/htdocs/api/.htaccess','private.guard':'/htdocs/api-v2/.htaccess','gateway.guard':'/htdocs/api/index.php'}
+          def remote(n):return guards.get(n,'/htdocs/'+n)
+          def get(f,n):
+              b=io.BytesIO();f.retrbinary('RETR '+remote(n),b.write);return b.getvalue()
+          def absent(f,n):
+              try:get(f,n);return False
+              except ftplib.error_perm as e:
+                  if str(e).startswith('550'):return True
+                  raise
+          def put(f,n,b):f.storbinary('STOR '+remote(n),io.BytesIO(b))
+          def save(area,n,b):
+              d=p/area/n;d.parent.mkdir(parents=True,exist_ok=True);d.write_bytes(b)
+          def read(area,n):return (p/area/n).read_bytes()
+          def verify_before(f):
+              assert absent(f,css),'CSS V102 ya existente'
+              for n in [index,js,*guards]:assert get(f,n)==read('before',n),n
+          class Links(HTMLParser):
+              def __init__(self):super().__init__();self.links=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='link' and a.get('rel')=='stylesheet':
+                      href=a.get('href','').split('?')[0].lstrip('/')
+                      if re.fullmatch(r'assets/css/[A-Za-z0-9_.-]+\.css',href):self.links.append(href)
+          f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=45)
+          f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
+          with f:
+              mode=sys.argv[1]
+              if mode=='prepare':
+                  for n in [index,js,*guards]:save('before',n,get(f,n))
+                  src=read('before',index).decode()
+                  assert src.count('</head>')==1 and 'paginadores-v96.css?v=20261125-v96' in src and 'compras-consultas-v66.js?v=20261125-v100' in src and 'carga-global-v42.js?v=20261126-v99r' in src and 'stock-ficha-v98.css?v=20261125-v98' in src
+                  assert read('before',js)==(p/'old.js').read_bytes(),'JS productivo diferente a la base auditada'
+                  save('after',js,(p/'new.js').read_bytes())
+                  src=src.replace('compras-consultas-v66.js?v=20261125-v97','compras-consultas-v66.js?v=20261126-v102',1)
+                  assert absent(f,css)
+                  save('after',css,(p/'new.css').read_bytes())
+                  src=src.replace('</head>','  <link rel="stylesheet" href="assets/css/recepciones-compactas-v102.css?v=20261126-v102">\n</head>',1)
+                  save('after',index,src.encode())
+                  parser=Links();parser.feed(src)
+                  assert 'assets/css/app.css' in parser.links and 'assets/css/tipos-documentos-v63.css' in parser.links
+                  for i,n in enumerate(parser.links):save('styles',f'{i:03d}.css',(p/'new.css').read_bytes() if n==css else get(f,n))
+                  print('V102_PRECHECK_OK',len(parser.links))
+              elif mode=='publish':
+                  verify_before(f)
+                  (p/'attempted').touch()
+                  for n in [css,js,index]:
+                      with (p/'attempted').open('a') as log:log.write(n+'\n')
+                      put(f,n,read('after',n))
+                  for n in [css,js,index]:assert get(f,n)==read('after',n),n
+                  for n in guards:assert get(f,n)==read('before',n),n
+                  print('V102_FTPS_BYTES_OK')
+              elif mode=='rollback':
+                  for n in reversed((p/'attempted').read_text().splitlines()):
+                      if n==css:
+                          if not absent(f,n):f.delete(remote(n))
+                      else:put(f,n,read('before',n))
+                  verify_before(f)
+                  print('V102_ROLLBACK_OK')
+          PY
+          python /tmp/v102/transport.py prepare
+      - name: Validar detalle de productos, edición y ancho del panel
+        run: |
+          set -euo pipefail
+          cd /tmp/v102/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import {readdirSync} from 'node:fs';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({viewport:{width:1440,height:900},reducedMotion:'reduce'});
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            await page.route('**/*',r=>r.abort());
+            await page.setContent('<meta name="viewport" content="width=device-width, initial-scale=1"><main id="root"></main>');
+            for(const f of readdirSync('/tmp/v102/styles').sort())await page.addStyleTag({path:'/tmp/v102/styles/'+f});
+            await page.addScriptTag({path:'/tmp/v102/new.js'});
+            await page.evaluate(()=>{
+              window.empty=false;
+              window.RutaHDApiCatalogos={
+                purchaseConsultation:async()=>({data:[],total:0,last_page:1,bodegas:[]}),
+                orderStates:async()=>({items:[{id:1,codigo:'ACTIVA'}]}),
+                purchaseOrders:async()=>({data:window.empty?[]:[{id:2,numero:'OC-CI-2',proveedor_nombre:'Proveedor CI',solicitada_en:'2026-11-25',estado_codigo:'ACTIVA',subtotal_neto:'500.00000000',total_bruto:'595.00000000'},{id:1,numero:'OC-CI-1',proveedor_nombre:'Proveedor CI',solicitada_en:'2026-11-25',estado_codigo:'ACTIVA',subtotal_neto:'2500.25000000',total_bruto:'2975.30000000'}],total:window.empty?0:2,last_page:1}),
+                getPurchaseOrder:async()=>({id:2,numero:'OC-CI-2',proveedor_nombre:'Proveedor CI',estado_codigo:'ACTIVA',solicitada_en:'2026-11-25',detalles:[{id:1,sku:'SKU-CI-0001',nombre:'Producto con nombre descriptivo de prueba',cantidad:'5.000',costo_unitario_neto:'500.0000',subtotal_neto:'2500.00'}]}),
+                documentTypes:async()=>({data:[],last_page:1}),
+                resources:async()=>({data:[],last_page:1})
+              };
+              window.RutaHDComprasConsultas.mount(document.getElementById('root'),'recepciones');
+            });
+            await page.getByRole('button',{name:'+ Nueva recepción',exact:true}).click();
+            const d=page.locator('dialog[data-hd-receipt-window="editor"][open]'), table=d.locator('table[data-hd-oc-selector="recepcion"]');
+            try{
+              await d.waitFor({state:'visible',timeout:10000});
+              await table.waitFor({state:'visible',timeout:10000});
+              await table.locator('tbody tr').filter({hasText:'OC-CI-2'}).waitFor({state:'visible',timeout:10000});
+            }catch(e){throw Error(JSON.stringify({message:e.message,errors,dialogs:await page.locator('dialog').count(),body:(await page.locator('body').innerText()).slice(0,1500)}));}
+            const headers=await table.locator('thead th').allTextContents();
+            if(JSON.stringify(headers)!==JSON.stringify(['Orden de compra','Proveedor','Fecha','Total neto','Total bruto','Acciones']))throw Error(JSON.stringify(headers));
+            const row=table.getByRole('row').filter({hasText:'OC-CI-2'});
+            const cells=await row.getByRole('cell').allTextContents();
+            if(cells.length!==6||cells[3]!=='$500'||cells[4]!=='$595')throw Error(JSON.stringify(cells));
+            const next=await table.getByRole('row').filter({hasText:'OC-CI-1'}).getByRole('cell').allTextContents();
+            if(next[3]!=='$2.500,25'||next[4]!=='$2.975,3')throw Error(JSON.stringify(next));
+            await table.getByRole('button',{name:'Seleccionar orden OC-CI-2'}).click();
+            const lines=d.locator('table[data-hd-receipt-lines]'),line=lines.locator('tbody tr').first();
+            await line.waitFor({state:'visible'});
+            if(await line.locator('td').count()!==10)throw Error('Se perdieron columnas');
+            const doc=line.getByLabel('Cantidad documentada SKU-CI-0001'),qty=line.getByLabel('Cantidad recibida SKU-CI-0001'),cost=line.getByLabel('Costo documento SKU-CI-0001');
+            await doc.fill('5');await qty.fill('5');await cost.fill('500');
+            if(await line.locator('td').nth(8).textContent()!=='2500')throw Error('Subtotal incorrecto');
+            for(const width of [1440,1024,390]){
+              await page.setViewportSize({width,height:900});
+              await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+              const layout=await lines.evaluate(e=>({width:e.getBoundingClientRect().width,container:e.parentElement.clientWidth,scroll:e.parentElement.scrollWidth,inputs:[...e.querySelectorAll('input[type=number]')].every(i=>i.getBoundingClientRect().width<=i.closest('td').clientWidth+1),mobile:getComputedStyle(e.querySelector('tbody tr')).display}));
+              if(layout.width>layout.container+2||layout.scroll>layout.container+2||!layout.inputs||(width===390&&layout.mobile!=='grid'))throw Error(JSON.stringify({width,layout}));
+            }
+            if(await qty.inputValue()!=='5'||await cost.inputValue()!=='500')throw Error('Valores alterados');
+            if(errors.length)throw Error(JSON.stringify(errors));
+            console.log('V102_UI_OK');
+          }finally{await browser.close();}
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v102-respaldo-previo
+          path: /tmp/v102/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar y cotejar bytes
+        run: python /tmp/v102/transport.py publish
+      - name: Verificar detalle compacto V102
+        run: |
+          set -euo pipefail
+          cd /tmp/v102/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage();
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/?v=20261126-v102',{waitUntil:'load',timeout:60000});
+            await page.waitForFunction(()=>[...document.styleSheets].some(s=>s.href?.includes('recepciones-compactas-v102.css?v=20261126-v102')&&s.cssRules.length>=10),null,{timeout:45000});
+            await page.waitForFunction(()=>window.RutaHDComprasConsultas&&[...document.scripts].some(s=>s.src.includes('compras-consultas-v66.js?v=20261126-v102')),null,{timeout:45000});
+            const result=await page.evaluate(async()=>({auth:(await fetch('/api/v1/recepciones-borrador/1',{headers:{Accept:'application/json'}})).status,density:getComputedStyle(document.documentElement).getPropertyValue('--hd-form-control').trim(),v86:[...document.scripts].some(s=>s.src.includes('compras-consultas-v66.js?v=20261126-v102'))}));
+            if(response?.status()!==200||result.density!=='30px'||!result.v86||result.auth!==401||errors.length)throw Error(JSON.stringify({result,errors}));
+            console.log('V102_PUBLIC_OK');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar originales si falla la publicación
+        if: failure()
+        run: |
+          if [ -f /tmp/v102/attempted ]; then python /tmp/v102/transport.py rollback; fi

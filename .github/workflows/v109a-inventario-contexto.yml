@@ -1,0 +1,38 @@
+name: V109A - Validar contexto de inventario
+on:
+  push:
+    branches: [feature/v109a-inventario-contexto-20261126]
+    paths:
+      - .github/workflows/v109a-inventario-contexto.yml
+      - app/Http/Controllers/InventarioOperacionesControlador.php
+      - tests/inventario_v109a.php
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, pdo_sqlite, iconv
+      - name: Validar sintaxis y motor aislado
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/InventarioOperacionesControlador.php
+          php -l tests/inventario_v109a.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/inventario_v109a.php | tee /tmp/v109a.log
+          grep -Fx V109A_MOTOR_OK /tmp/v109a.log

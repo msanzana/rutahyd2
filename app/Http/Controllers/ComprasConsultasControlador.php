@@ -8,20 +8,60 @@ use Illuminate\Support\Facades\DB;
 /** Consultas operativas sin escrituras ni duplicación de importes. */
 final class ComprasConsultasControlador
 {
-    public function pdf(string $tipo,int $id)
+    private function sucursal(Request $request): int
     {
-        $pdf=(new \App\Services\PdfRecepcionCompra())->generar($tipo,$id);
+        return (int)app(\App\Services\ContextoCompras::class)->resolver($request)->id;
+    }
+    private function bodegas(int $sid)
+    {
+        return DB::table('bodegas as b')->join('inventario_bodegas_sucursales as bs','bs.bodega_id','=','b.id')
+            ->where('bs.sucursal_id',$sid)->where('b.activo',1)->orderBy('b.nombre')->get(['b.id','b.nombre']);
+    }
+    private function limitarBodega($query,string $column,int $sid): void
+    {
+        $query->whereExists(fn($x)=>$x->selectRaw('1')->from('inventario_bodegas_sucursales as bs')
+            ->whereColumn('bs.bodega_id',$column)->where('bs.sucursal_id',$sid));
+    }
+    public function pdf(Request $request,string $tipo,int $id)
+    {
+        abort_unless(in_array($tipo,['recepcion','consolidacion'],true),404);
+        $pdf=DB::transaction(function()use($request,$tipo,$id){
+            $sid=(int)app(\App\Services\ContextoCompras::class)->resolver($request,true)->id;
+            $table=$tipo==='recepcion'?'recepciones':'recepciones_consolidadas';
+            $doc=DB::table($table)->where('id',$id)->where('sucursal_id',$sid)->lockForUpdate()->first();
+            abort_unless($doc,404,'Documento no encontrado.');
+            abort_unless(DB::table('inventario_bodegas_sucursales')->where('bodega_id',$doc->bodega_id)->where('sucursal_id',$sid)->lockForUpdate()->first(),404,'Documento no encontrado.');
+            if($doc->orden_compra_id!==null){
+                abort_unless(DB::table('ordenes_compra')->where('id',$doc->orden_compra_id)->where('sucursal_id',$sid)->lockForUpdate()->first(),409,'Documento con referencias sin atribución válida.');
+            }
+            $receipts=$tipo==='recepcion'?collect([$doc]):DB::table('recepciones')->where('recepcion_consolidada_id',$id)->orderBy('id')->lockForUpdate()->get();
+            foreach($receipts as $rec){
+                abort_unless((int)$rec->sucursal_id===$sid&&(int)$rec->bodega_id===(int)$doc->bodega_id,409,'Recepción vinculada sin atribución válida.');
+                abort_unless(DB::table('compras')->where('id',$rec->compra_id)->where('sucursal_id',$sid)->lockForUpdate()->first(),409,'Compra vinculada sin atribución válida.');
+            }
+            if($tipo==='consolidacion'){
+                $ids=$receipts->pluck('id')->all();
+                $foreign=DB::table('solicitudes_regularizacion')->where('recepcion_consolidada_id',$id)
+                    ->where(fn($q)=>$q->whereNull('recepcion_id')->orWhereNotIn('recepcion_id',$ids))->exists();
+                abort_if($foreign,409,'Solicitud vinculada sin recepción válida.');
+            }
+            return (new \App\Services\PdfRecepcionCompra())->generar($tipo,$id);
+        },3);
         return response($pdf,200,['Content-Type'=>'application/pdf','Content-Disposition'=>'inline; filename="'.$tipo.'-'.$id.'.pdf"','Cache-Control'=>'private, no-store']);
     }
     public function listar(Request $request, string $modulo)
     {
         $v=$request->validate(['page'=>'sometimes|integer|min:1','exportar'=>'nullable|in:1','buscar'=>'nullable|string|max:120','producto_id'=>'nullable|integer|min:1','bodega_id'=>'nullable|integer|min:1','estado'=>'nullable|in:ACTIVA,PENDIENTE,RECEPCIONADA,DESCUADRADA,FINALIZADA,CONSOLIDADA','proveedor'=>'nullable|string|max:120','orden_compra'=>'nullable|string|max:80','desde'=>'nullable|date_format:Y-m-d','hasta'=>'nullable|date_format:Y-m-d|after_or_equal:desde']);
+        $sid=$this->sucursal($request);
+        if(!empty($v['bodega_id'])&&in_array($modulo,['stock','kardex','recepciones','consolidaciones'],true)){
+            abort_unless(DB::table('inventario_bodegas_sucursales')->where('bodega_id',$v['bodega_id'])->where('sucursal_id',$sid)->exists(),404,'Bodega no disponible.');
+        }
         if($modulo==='kardex'){
             if(!$request->filled('producto_id')){
                 $q=DB::table('productos')->select('id','sku','nombre as producto');
                 if(!empty($v['buscar']))$q->where(fn($w)=>$w->where('sku','like','%'.$v['buscar'].'%')->orWhere('nombre','like','%'.$v['buscar'].'%'));
                 $data=$q->orderBy('nombre')->orderBy('id')->paginate(25)->toArray();
-                $data['bodegas']=DB::table('bodegas')->orderBy('nombre')->get(['id','nombre']);
+                $data['bodegas']=$this->bodegas($sid);
                 return response()->json($data);
             }
             abort_unless(!empty($v['bodega_id']),422,'Seleccione una bodega.');
@@ -47,6 +87,19 @@ final class ComprasConsultasControlador
                 ->select('l.id','l.periodo_tributario','l.folio','l.fecha_documento','oc.numero as orden_compra','td.nombre as documento','l.rut_emisor','l.razon_social_emisor','l.monto_neto','l.monto_exento','l.monto_iva_recuperable','l.monto_iva_no_recuperable','l.monto_iva_uso_comun','l.monto_impuestos_adicionales','l.monto_retenciones','l.monto_total','l.signo_contable','l.estado_rcv'),
             default=>abort(404)
         };
+        if(in_array($modulo,['facturas','libro'],true))$q->where('c.sucursal_id',$sid);
+        if(in_array($modulo,['recepciones','consolidaciones'],true)){
+            $q->where('r.sucursal_id',$sid);
+            $this->limitarBodega($q,'r.bodega_id',$sid);
+        }
+        if($modulo==='stock')$this->limitarBodega($q,'s.bodega_id',$sid);
+        if($modulo==='kardex'){
+            $q->where('k.sucursal_id',$sid);
+            $this->limitarBodega($q,'k.bodega_id',$sid);
+        }
+        // No presentar número de OC no atribuida como si fuera de la sucursal.
+        if(in_array($modulo,['facturas','libro','recepciones','consolidaciones'],true))
+            $q->where(fn($w)=>$w->whereNull('oc.id')->orWhere('oc.sucursal_id',$sid));
         if($modulo==='recepciones')$q->selectSub(DB::table('solicitudes_regularizacion')->whereColumn('recepcion_id','r.id')->where('estado','<>','NULA')->selectRaw('COUNT(*)'),'solicitudes_count');
         if($modulo==='consolidaciones')$q->selectSub(DB::table('solicitudes_regularizacion')->whereColumn('recepcion_consolidada_id','r.id')->where('estado','<>','NULA')->selectRaw('COUNT(*)'),'solicitudes_count');
         if($modulo==='kardex')$q->where('k.producto_id',$v['producto_id'])->where('k.bodega_id',$v['bodega_id']);
@@ -89,7 +142,7 @@ final class ComprasConsultasControlador
             return response()->json(['data'=>$rows,'total'=>$rows->count()])->header('Cache-Control','private, no-store');
         }
         $data=$q->orderByDesc($alias.'.id')->paginate(25)->toArray();
-        if(in_array($modulo,['recepciones','consolidaciones','stock'],true))$data['bodegas']=DB::table('bodegas')->where('activo',1)->orderBy('nombre')->get(['id','nombre']);
+        if(in_array($modulo,['recepciones','consolidaciones','stock'],true))$data['bodegas']=$this->bodegas($sid);
         return response()->json($data);
     }
 }

@@ -1,4 +1,4 @@
-name: V108CR2 - Selector de sucursal autónomo
+name: V108D - Correcciones visuales
 on:
   push:
     branches: [feature/v108c-selector-interfaz-20261126]
@@ -24,13 +24,13 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/v108c/{before,after,browser,styles,visual}
           git clone -q --depth=1 --branch feature/v108c-selector-interfaz-20261126 https://github.com/msanzana/rutahyd2front.git /tmp/v108c/front
+          git -C /tmp/v108c/front fetch -q --depth=1 origin b91579217d339ce7916d5257c655a17de40b1873
           git -C /tmp/v108c/front fetch -q --depth=1 origin 1b272a332cb20201a50d6845803dbc38b80ddbfc
-          git -C /tmp/v108c/front fetch -q --depth=1 origin 3b5bb3a26caad8bc0791d3be1c893998f0465b91
           for n in contexto-sucursal-v107.js; do
-            git -C /tmp/v108c/front show 1b272a332cb20201a50d6845803dbc38b80ddbfc:assets/js/$n >/tmp/v108c/$n
+            git -C /tmp/v108c/front show b91579217d339ce7916d5257c655a17de40b1873:assets/js/$n >/tmp/v108c/$n
             node --check /tmp/v108c/$n
           done
-          git -C /tmp/v108c/front show 1b272a332cb20201a50d6845803dbc38b80ddbfc:assets/css/selector-sucursal-v108c.css >/tmp/v108c/selector-sucursal-v108c.css
+          git -C /tmp/v108c/front show b91579217d339ce7916d5257c655a17de40b1873:assets/css/selector-sucursal-v108c.css >/tmp/v108c/selector-sucursal-v108c.css
           cat >/tmp/v108c/transport.py <<'PY'
           import os,ssl,ftplib,io,pathlib,re,sys,subprocess
           from html.parser import HTMLParser
@@ -43,8 +43,8 @@ jobs:
           admin='app/Http/Controllers/SucursalesControlador.php'
           routes='routes/api.php'
           css='assets/css/selector-sucursal-v108c.css'
-          changed=[js]
-          new=[css]
+          changed=[js,css]
+          new=[]
           guards={'context.guard':'/htdocs/api-v2/app/Http/Controllers/ContextoSucursalControlador.php','oc.guard':'/htdocs/api-v2/app/Http/Controllers/OrdenesCompraControlador.php','oc-context.guard':'/htdocs/api-v2/app/Services/ContextoCompras.php','api-js.guard':'/htdocs/assets/js/catalogos-api.js','login-js.guard':'/htdocs/assets/js/login-produccion.js','routes.guard':'/htdocs/api-v2/routes/api.php','admin.guard':'/htdocs/api-v2/app/Http/Controllers/SucursalesControlador.php','ajustes-js.guard':'/htdocs/assets/js/inventario-v104.js','ajustes-back.guard':'/htdocs/api-v2/app/Http/Controllers/InventarioOperacionesControlador.php','sucursales-js.guard':'/htdocs/assets/js/sucursales-v106.js','app-js.guard':'/htdocs/assets/js/app-produccion.js','sesion.guard':'/htdocs/api-v2/app/Http/Controllers/SesionControlador.php','compras.guard':'/htdocs/assets/js/compras-consultas-v66.js','recepcion-css.guard':'/htdocs/assets/css/recepciones-compactas-v102.css','paleta-css.guard':'/htdocs/assets/css/paleta-secciones-v103.css','paleta-js.guard':'/htdocs/assets/js/paleta-secciones-v103.js','preload-js.guard':'/htdocs/assets/js/carga-global-v42.js','preload-css.guard':'/htdocs/assets/css/carga-global-v42.css','productos.guard':'/htdocs/assets/js/productos-remotos.js','stock-css.guard':'/htdocs/assets/css/stock-ficha-v98.css','recepcion.guard':'/htdocs/api-v2/app/Http/Controllers/RecepcionesBorradorControlador.php','stock.guard':'/htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php','pdf.guard':'/htdocs/api-v2/app/Services/PdfRecepcionCompra.php','root.guard':'/htdocs/.htaccess','api.guard':'/htdocs/api/.htaccess','private.guard':'/htdocs/api-v2/.htaccess','gateway.guard':'/htdocs/api/index.php'}
           def remote(n):return guards.get(n,('/htdocs/api-v2/' if n in (controller,routes,admin) else '/htdocs/')+n)
           def get(f,n):
@@ -75,7 +75,8 @@ jobs:
               if mode=='prepare':
                   for n in new:assert absent(f,n),'Unexpected new file '+n
                   for n in [index,*changed,*guards]:save('before',n,get(f,n))
-                  assert read('before',js)==front('3b5bb3a26caad8bc0791d3be1c893998f0465b91',js),'Selector productivo no coincide'
+                  assert read('before',js)==front('1b272a332cb20201a50d6845803dbc38b80ddbfc',js),'Selector productivo no coincide'
+                  assert read('before',css)==front('1b272a332cb20201a50d6845803dbc38b80ddbfc',css),'CSS productivo no coincide'
                   assert read('before','context.guard')==subprocess.check_output(['git','show','c5565faca9ae4196eedb7923e5a76ddd3e359503:app/Http/Controllers/ContextoSucursalControlador.php'])
                   assert read('before','oc.guard')==subprocess.check_output(['git','show','de78f242f5b339897563f17b48ff2b92c2ea8c53:app/Http/Controllers/OrdenesCompraControlador.php'])
                   assert read('before','oc-context.guard')==subprocess.check_output(['git','show','de78f242f5b339897563f17b48ff2b92c2ea8c53:app/Services/ContextoCompras.php'])
@@ -83,14 +84,15 @@ jobs:
                   src=read('before',index).decode()
                   for required in ['inventario-v104.js?v=20261126-v105','catalogos-api.js?v=20261126-v107','login-produccion.js?v=20261126-v107','sucursales-v106.js?v=20261126-v106','app-produccion.js?v=20261126-v106','compras-consultas-v66.js?v=20261126-v102','recepciones-compactas-v102.css?v=20261126-v102','paleta-secciones-v103.css?v=20261126-v103','paleta-secciones-v103.js?v=20261126-v103','carga-global-v42.js?v=20261126-v99r','stock-ficha-v98.css?v=20261125-v98']:
                       assert required in src,required
-                  old='src="'+js+'?v=20261126-v107s"'
+                  old='src="'+js+'?v=20261126-v108cr2"'
                   assert src.count(old)==1
-                  src=src.replace(old,'src="'+js+'?v=20261126-v108cr2"',1)
-                  assert css not in src and src.count('</head>')==1
-                  src=src.replace('</head>','  <link rel="stylesheet" href="'+css+'?v=20261126-v108cr2">\n</head>',1)
+                  src=src.replace(old,'src="'+js+'?v=20261126-v108d"',1)
+                  old_css=css+'?v=20261126-v108cr2'
+                  assert src.count(old_css)==1
+                  src=src.replace(old_css,css+'?v=20261126-v108d',1)
                   parser=Links();parser.feed(src)
-                  assert js+'?v=20261126-v108cr2' in parser.scripts and css+'?v=20261126-v108cr2' in parser.links
-                  assert parser.scripts.index(js+'?v=20261126-v108cr2')<parser.scripts.index(app+'?v=20261126-v107')
+                  assert js+'?v=20261126-v108d' in parser.scripts and css+'?v=20261126-v108d' in parser.links
+                  assert parser.scripts.index(js+'?v=20261126-v108d')<parser.scripts.index(app+'?v=20261126-v107')
                   save('after',index,src.encode())
                   for i,link in enumerate(parser.links):
                       n=link.split('?')[0].lstrip('/')
@@ -150,7 +152,7 @@ jobs:
             const after=await card.evaluate(e=>({bg:getComputedStyle(e).backgroundColor,border:getComputedStyle(e).borderColor}));
             if(before.bg===after.bg||before.border===after.border)throw Error('Selección sin contraste');
             await page.screenshot({path:'/tmp/v108c/visual/02-escritorio-seleccionado.png'});
-            const bounds=await d.boundingBox(),button=await enter.boundingBox();console.log('V108CR2_DESKTOP',JSON.stringify({bounds,button}));if(bounds.width>421||bounds.height>370||button.width>180||button.height>48)throw Error(JSON.stringify({bounds,button}));
+            const bounds=await d.boundingBox(),button=await enter.boundingBox();console.log('V108D_DESKTOP',JSON.stringify({bounds,button}));if(bounds.width>421||bounds.height>370||button.width>180||button.height>48)throw Error(JSON.stringify({bounds,button}));
             await enter.click();await d.waitFor({state:'detached'});
             if(!await page.evaluate(()=>window.pending)||await page.evaluate(()=>window.writes)!==1)throw Error('Confirmación no guardada');
             await page.evaluate(()=>{window.signed=true;document.dispatchEvent(new CustomEvent('rutahd:permisos-actualizados'));});
@@ -164,26 +166,26 @@ jobs:
             await card.waitFor();
             if(await page.locator('#hdBranchCurrent').isVisible())throw Error('Sucursal visible sin sesión');
             await page.screenshot({path:'/tmp/v108c/visual/03-movil-oscuro.png'});
-            const mobile=await d.boundingBox(),mobileButton=await enter.boundingBox();console.log('V108CR2_MOBILE',JSON.stringify({mobile,mobileButton}));if(mobile.width>363||mobile.x<0||mobile.height>370||mobileButton.height<44||mobileButton.width>180)throw Error(JSON.stringify({mobile,mobileButton}));
+            const mobile=await d.boundingBox(),mobileButton=await enter.boundingBox();console.log('V108D_MOBILE',JSON.stringify({mobile,mobileButton}));if(mobile.width>363||mobile.x<0||mobile.height>370||mobileButton.height<44||mobileButton.width>180)throw Error(JSON.stringify({mobile,mobileButton}));
             await d.getByRole('radio').focus();await page.keyboard.press('Space');
             if(!await d.getByRole('radio').isChecked())throw Error('Selección teclado');
             if(await enter.isDisabled())throw Error('Selección teclado no habilita ingreso');
             await page.screenshot({path:'/tmp/v108c/visual/04-movil-oscuro-seleccionado.png'});
             await d.getByRole('button',{name:'Cerrar sesión'}).click();await d.waitFor({state:'detached'});
             if(await page.evaluate(()=>window.pending)||await page.evaluate(()=>window.writes)!==1||errors.length)throw Error(JSON.stringify(errors));
-            console.log('V108CR2_UI_OK');
+            console.log('V108D_UI_OK');
           }finally{await browser.close();}
           JS
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: rutahd-v108cr2-capturas-ui-aislada
+          name: rutahd-v108d-capturas-ui-aislada
           path: /tmp/v108c/visual/
           retention-days: 14
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
-          name: rutahd-v108cr2-respaldo-previo
+          name: rutahd-v108d-respaldo-previo
           path: /tmp/v108c/before/
           retention-days: 30
           if-no-files-found: error
@@ -199,11 +201,11 @@ jobs:
           try{
             const page=await browser.newPage();
             const errors=[];page.on('pageerror',e=>errors.push(e.message));
-            const response=await page.goto('https://rutahyd2.free.nf/?v=20261126-v108cr2',{waitUntil:'load',timeout:60000});
+            const response=await page.goto('https://rutahyd2.free.nf/?v=20261126-v108d',{waitUntil:'load',timeout:60000});
             await page.waitForFunction(()=>window.RutaHDContextoSucursalV107&&window.RutaHDSucursalesV106&&window.RutaHDLogin&&window.RutaHDApiCatalogos?.branchContext,null,{timeout:45000});
             const result=await page.evaluate(async()=>({catalog:(await fetch('/api/v1/contexto-sucursal',{headers:{Accept:'application/json'}})).status,adjustment:(await fetch('/api/v1/inventario/ajustes-rapidos',{headers:{Accept:'application/json'}})).status,receipts:(await fetch('/api/v1/recepciones-borrador/1',{headers:{Accept:'application/json'}})).status,scripts:[...document.scripts].map(s=>s.src),styles:[...document.querySelectorAll('link[rel=stylesheet]')].map(s=>s.href)}));
-            if(response?.status()!==200||result.catalog!==401||result.adjustment!==401||result.receipts!==401||errors.length||!['catalogos-api.js','login-produccion.js'].every(n=>result.scripts.some(s=>s.includes(n+'?v=20261126-v107')))||!result.scripts.some(s=>s.includes('contexto-sucursal-v107.js?v=20261126-v108cr2'))||!result.styles.some(s=>s.includes('selector-sucursal-v108c.css?v=20261126-v108cr2')))throw Error(JSON.stringify({result,errors}));
-            console.log('V108CR2_PUBLIC_OK');
+            if(response?.status()!==200||result.catalog!==401||result.adjustment!==401||result.receipts!==401||errors.length||!['catalogos-api.js','login-produccion.js'].every(n=>result.scripts.some(s=>s.includes(n+'?v=20261126-v107')))||!result.scripts.some(s=>s.includes('contexto-sucursal-v107.js?v=20261126-v108d'))||!result.styles.some(s=>s.includes('selector-sucursal-v108c.css?v=20261126-v108d')))throw Error(JSON.stringify({result,errors}));
+            console.log('V108D_PUBLIC_OK');
           }finally{await browser.close();}
           JS
       - name: Restaurar originales si falla la publicacion

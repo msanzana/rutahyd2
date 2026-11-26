@@ -24,7 +24,7 @@ foreach([
  'CREATE TABLE stock(id INTEGER PRIMARY KEY,producto_id INTEGER,bodega_id INTEGER,disponible TEXT,transito TEXT,comprometido TEXT,cantidad_fisica TEXT,UNIQUE(producto_id,bodega_id))',
  'CREATE TABLE saldos_inventario(id INTEGER PRIMARY KEY,presentacion_id INTEGER,cantidad NUMERIC)',
  'CREATE TABLE presentaciones_productos(id INTEGER PRIMARY KEY,producto_id INTEGER)',
- 'CREATE TABLE inventario_traspasos_detalle(id INTEGER PRIMARY KEY,traspaso_id INTEGER,producto_id INTEGER,cantidad_solicitada DECIMAL(28,8),cantidad_despachada DECIMAL(28,8),cantidad_recibida DECIMAL(28,8),cantidad_regularizada DECIMAL(28,8),costo_cpp_snapshot DECIMAL(28,8))',
+ 'CREATE TABLE inventario_traspasos_detalle(id INTEGER PRIMARY KEY,traspaso_id INTEGER,producto_id INTEGER,cantidad_solicitada TEXT,cantidad_despachada TEXT,cantidad_recibida TEXT,cantidad_regularizada TEXT,costo_cpp_snapshot TEXT)',
  'CREATE TABLE inventario_traspasos(id INTEGER PRIMARY KEY,numero_interno TEXT UNIQUE,bodega_origen_id INTEGER,bodega_destino_id INTEGER,sucursal_origen_id INTEGER,sucursal_destino_id INTEGER,modalidad TEXT,estado TEXT,creado_por INTEGER,creado_en TEXT DEFAULT CURRENT_TIMESTAMP,guia_despacho_id INTEGER)',
  'CREATE TABLE inventario_traspasos_operaciones(traspaso_id INTEGER,operacion_id INTEGER,etapa TEXT,PRIMARY KEY(traspaso_id,operacion_id))',
  'CREATE TABLE kardex(id INTEGER PRIMARY KEY,sucursal_id INTEGER,producto_id INTEGER,bodega_id INTEGER,tipo_documento_id INTEGER,folio_documento TEXT,tipo_movimiento INTEGER,cantidad_anterior TEXT,cantidad_documento TEXT,cantidad_actual TEXT,transito_anterior TEXT,transito_actual TEXT,comprometido_anterior TEXT,comprometido_actual TEXT,fisico_anterior TEXT,fisico_actual TEXT,costo_unitario_neto TEXT,ultimo_costo_anterior TEXT,ultimo_costo_actual TEXT,cpp_anterior TEXT,cpp_actual TEXT,origen_tipo TEXT,origen_detalle_id INTEGER,operacion_codigo TEXT,token_idempotencia TEXT UNIQUE,movimiento_reversado_id INTEGER,registrado_por INTEGER,observaciones TEXT,fecha_movimiento TEXT DEFAULT CURRENT_TIMESTAMP)',
@@ -46,7 +46,7 @@ foreach([
    $sql=str_replace('INTEGER PRIMARY KEY','BIGINT PRIMARY KEY AUTO_INCREMENT',$sql);
    $sql=preg_replace('/\\b(fecha_movimiento|creado_en) TEXT DEFAULT CURRENT_TIMESTAMP\\b/','$1 DATETIME DEFAULT CURRENT_TIMESTAMP',$sql);
    $sql=preg_replace('/\\b(expira_en|aprobado_en|confirmado_en|anulado_en) TEXT\\b/','$1 DATETIME NULL',$sql);
-   $sql=preg_replace('/\\b(disponible|transito|comprometido|cantidad_fisica|cantidad|delta_disponible|delta_fisico|delta_transito|delta_comprometido|cantidad_anterior|cantidad_documento|cantidad_actual|transito_anterior|transito_actual|comprometido_anterior|comprometido_actual|fisico_anterior|fisico_actual|costo_unitario_neto|costo_neto|costo_promedio_ponderado|ultimo_costo_anterior|ultimo_costo_actual|cpp_anterior|cpp_actual|costo_unitario_snapshot) TEXT\\b/','$1 DECIMAL(28,8)',$sql);
+   $sql=preg_replace('/\\b(disponible|transito|comprometido|cantidad_fisica|cantidad|delta_disponible|delta_fisico|delta_transito|delta_comprometido|cantidad_anterior|cantidad_documento|cantidad_actual|transito_anterior|transito_actual|comprometido_anterior|comprometido_actual|fisico_anterior|fisico_actual|costo_unitario_neto|costo_neto|costo_promedio_ponderado|ultimo_costo_anterior|ultimo_costo_actual|cpp_anterior|cpp_actual|costo_unitario_snapshot|cantidad_solicitada|cantidad_despachada|cantidad_recibida|cantidad_regularizada|costo_cpp_snapshot) TEXT\\b/','$1 DECIMAL(28,8)',$sql);
    $sql=str_replace('NUMERIC','DECIMAL(28,8)',$sql);
    $sql=preg_replace('/\\b(numero_interno|token_creacion|token_confirmacion|token_idempotencia) TEXT UNIQUE\\b/','$1 VARCHAR(100) UNIQUE',$sql);
  }
@@ -74,13 +74,14 @@ DB::table('inventario_grupos_motivos')->insert(['id'=>7,'codigo'=>700,'nombre'=>
 DB::table('inventario_tipos_movimiento')->insert(['id'=>5,'codigo'=>'TRASLADO','nombre'=>'Traslado','naturaleza'=>'TRASLADO','activo'=>1]);
 DB::table('inventario_motivos')->insert(['id'=>62,'codigo'=>709,'grupo_id'=>7,'tipo_movimiento_id'=>5,'nombre'=>'Traspaso interno entre bodegas','regla'=>'TRASPASO_INTERNO','politica_cpp'=>'CONSERVAR','activo'=>1,'ajuste_rapido'=>0,'requiere_referencia'=>0,'requiere_aprobacion'=>1,'requiere_respaldo'=>0,'revision_tributaria'=>0,'evaluar_aviso_sii'=>0,'indicador_traslado_sii'=>5]);
 $c=$app->make(\App\Http\Controllers\TraspasosInventarioControlador::class);
-$payload=['bodega_origen_id'=>1,'bodega_destino_id'=>2,'modalidad'=>'INMEDIATO','items'=>[['producto_id'=>1,'cantidad'=>'1.125'],['producto_id'=>2,'cantidad'=>'2.25']],'justificacion'=>'Solicitud de traspaso CI','token_creacion'=>(string)Str::uuid()];
+$payload=['bodega_origen_id'=>1,'bodega_destino_id'=>2,'modalidad'=>'INMEDIATO','items'=>[['producto_id'=>1,'cantidad'=>'1.12345678'],['producto_id'=>2,'cantidad'=>'2.25']],'justificacion'=>'Solicitud de traspaso CI','token_creacion'=>(string)Str::uuid()];
 $before=DB::table('stock')->orderBy('id')->get()->toJson();$moves=DB::table('kardex')->count();
 $x=val($c->crear(req($payload)));$id=$x['id'];$op=$x['operacion_id'];
 check(!$x['repetida']&&val($c->crear(req($payload)))['repetida'],'Idempotencia creación');
 blocked(fn()=>$c->crear(req(array_replace($payload,['modalidad'=>'DESPACHO_RECEPCION']))));
 $t=DB::table('inventario_traspasos')->where('id',$id)->first();$o=DB::table('inventario_operaciones')->where('id',$op)->first();
 check($t->estado==='BORRADOR'&&(int)$t->sucursal_origen_id===1&&(int)$t->sucursal_destino_id===1&&$o->clase==='TRASPASO'&&(int)$o->estado_id===2,'Cabeceras');
+check(BigDecimal::of(DB::table('inventario_traspasos_detalle')->where('traspaso_id',$id)->where('producto_id',1)->value('cantidad_solicitada'))->isEqualTo('1.12345678'),'Decimal exacto persistido');
 check(DB::table('inventario_traspasos_detalle')->where('traspaso_id',$id)->count()===2&&DB::table('inventario_operaciones_detalle')->where('operacion_id',$op)->count()===4,'Detalle multi SKU');
 check(DB::table('inventario_traspasos_operaciones')->where('traspaso_id',$id)->value('etapa')==='INMEDIATO','Etapa');
 $approval=['version'=>1,'motivo'=>'Autorizado CI'];

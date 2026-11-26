@@ -55,6 +55,7 @@ try{
     DB::statement('CREATE TABLE sucursales_configuracion(id TINYINT PRIMARY KEY,contexto_obligatorio TINYINT DEFAULT 0)');
     DB::statement('CREATE TABLE sucursales_correlativos(sucursal_id BIGINT UNSIGNED,tipo_documento_interno VARCHAR(40),periodo SMALLINT,ultimo_numero BIGINT UNSIGNED DEFAULT 0,PRIMARY KEY(sucursal_id,tipo_documento_interno,periodo))');
     DB::statement('ALTER TABLE ordenes_compra ADD sucursal_id BIGINT UNSIGNED NULL');
+    DB::statement('CREATE TABLE IF NOT EXISTS recepciones(id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,orden_compra_id BIGINT UNSIGNED NULL,estado_id BIGINT UNSIGNED NULL)');
     DB::table('sucursales')->insert(['id'=>1,'codigo'=>'S01','nombre'=>'Casa CI','activo'=>1]);
     DB::table('sucursales_configuracion')->insert(['id'=>1,'contexto_obligatorio'=>0]);
     expectOC(409,callOC('GET','/api/v1/ordenes-compra',[],$token),'Sin contexto seleccionado');

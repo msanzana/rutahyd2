@@ -4,12 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Services\ContextoCompras;
 use App\Services\PlanStockTraspaso;
+use App\Services\LectorBaseValorizadaInventario;
 use Brick\Math\BigDecimal;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
-/** V109C4: solicitudes, aprobación, anulación y traspaso inmediato interno. */
+/** V109C5C1: solicitudes, aprobación, anulación y ejecución inicial de traspasos. */
 final class TraspasosInventarioControlador extends Controller
 {
     private function estado(string $code): int {
@@ -141,32 +142,42 @@ final class TraspasosInventarioControlador extends Controller
             return ['id'=>$id,'estado_operacion'=>'INV_ANULADA','version'=>(int)$o->version+1,'movimiento_aplicado'=>false];
         },3))->header('Cache-Control','no-store');
     }
-    public function confirmar(Request $r,int $id){
+    public function confirmar(Request $r,int $id){return $this->ejecutarInicial($r,$id,false);}
+    public function despachar(Request $r,int $id){return $this->ejecutarInicial($r,$id,true);}
+    private function ejecutarInicial(Request $r,int $id,bool $despacho){
         $v=$r->validate(['version'=>'required|integer|min:1|max:4294967294','token_confirmacion'=>'required|uuid']);$token=strtolower($v['token_confirmacion']);
-        return response()->json(DB::transaction(function()use($r,$id,$v,$token){
+        return response()->json(DB::transaction(function()use($r,$id,$v,$token,$despacho){
             $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$uid=(int)$r->user()->id;
             [$t,$o]=$this->cargar($id,$sid);$approved=$this->estado('INV_APROBADA');$done=$this->estado('INV_CONFIRMADA');
-            if((int)$o->estado_id===$done&&$t->estado==='RECIBIDO'&&$o->token_confirmacion===$token&&(int)$o->confirmado_por===$uid)return ['id'=>$id,'estado_operacion'=>'INV_CONFIRMADA','estado_traspaso'=>'RECIBIDO','version'=>(int)$o->version];
-            abort_unless($t->modalidad==='INMEDIATO'&&$t->estado==='BORRADOR'&&$t->guia_despacho_id===null,409,'Solo traspaso inmediato interno sin guía vinculada. Despacho con tránsito aún no habilitado.');
+            $modalidad=$despacho?'DESPACHO_RECEPCION':'INMEDIATO';$estadoFinal=$despacho?'DESPACHADO':'RECIBIDO';
+            abort_unless($t->modalidad===$modalidad,409,'Modalidad incompatible con esta acción.');
+            if((int)$o->estado_id===$done&&$t->estado===$estadoFinal&&$o->token_confirmacion===$token&&(int)$o->confirmado_por===$uid)return ['id'=>$id,'estado_operacion'=>'INV_CONFIRMADA','estado_traspaso'=>$estadoFinal,'version'=>(int)$o->version];
+            abort_unless($t->estado==='BORRADOR'&&$t->guia_despacho_id===null,409,'Traspaso no ejecutable sin validar su documentación.');
             abort_unless((int)$o->estado_id===$approved&&(int)$o->version===(int)$v['version']&&$o->aprobado_por&&(int)$o->aprobado_por!==(int)$o->creado_por,409,'Se requiere aprobación y versión vigente.');
             abort_if(DB::table('inventario_operaciones')->where('token_confirmacion',$token)->exists(),409,'Token utilizado.');
             [$items,$details,$plans]=$this->revisarGuardado($t,$o,$sid);
+            $bases=[];$lector=new LectorBaseValorizadaInventario();
             foreach($items->sortBy('producto_id') as $l){
                 $pid=(int)$l->producto_id;$plan=$plans[$pid];$p=DB::table('productos')->where('id',$pid)->lockForUpdate()->first();
+                if($despacho)$bases[$pid]=$lector->leer($pid,DB::table('stock')->where('producto_id',$pid)->orderBy('bodega_id')->lockForUpdate()->get())['stock_valorizado'];
                 foreach([[$t->bodega_origen_id,'origen'],[$t->bodega_destino_id,'destino']] as [$bid,$side]){
                     $b=(int)$bid;$d=$details->first(fn($d)=>(int)$d->producto_id===$pid&&(int)$d->bodega_id===$b);$s=$plan[$side];
                     $stock=DB::table('stock')->where('producto_id',$pid)->where('bodega_id',$b)->lockForUpdate()->first();
                     $stockId=$stock->id??DB::table('stock')->insertGetId(['producto_id'=>$pid,'bodega_id'=>$b,'disponible'=>0,'transito'=>0,'comprometido'=>0,'cantidad_fisica'=>0]);
-                    $k=DB::table('kardex')->insertGetId(['sucursal_id'=>$sid,'producto_id'=>$pid,'bodega_id'=>$b,'tipo_documento_id'=>null,'folio_documento'=>$t->numero_interno,'tipo_movimiento'=>$side==='origen'?2:1,'cantidad_anterior'=>$s['disponible']['anterior'],'cantidad_documento'=>$plan['cantidades']['cantidad_movimiento'],'cantidad_actual'=>$s['disponible']['posterior'],'transito_anterior'=>$s['transito']['anterior'],'transito_actual'=>$s['transito']['posterior'],'comprometido_anterior'=>$s['comprometido']['anterior'],'comprometido_actual'=>$s['comprometido']['posterior'],'fisico_anterior'=>$s['cantidad_fisica']['anterior'],'fisico_actual'=>$s['cantidad_fisica']['posterior'],'costo_unitario_neto'=>$plan['costo_cpp_snapshot'],'ultimo_costo_anterior'=>$p->costo_neto,'ultimo_costo_actual'=>$p->costo_neto,'cpp_anterior'=>$plan['cpp_anterior'],'cpp_actual'=>$plan['cpp_actual'],'origen_tipo'=>'AJUSTE_INVENTARIO','origen_detalle_id'=>$d->id,'operacion_codigo'=>'TRASPASO_INTERNO','token_idempotencia'=>(string)Str::uuid(),'registrado_por'=>$uid,'observaciones'=>$t->numero_interno.' | '.$o->justificacion]);
-                    DB::table('stock')->where('id',$stockId)->update(['disponible'=>$s['disponible']['posterior'],'cantidad_fisica'=>$s['cantidad_fisica']['posterior']]);
+                    $k=DB::table('kardex')->insertGetId(['sucursal_id'=>$sid,'producto_id'=>$pid,'bodega_id'=>$b,'tipo_documento_id'=>null,'folio_documento'=>$t->numero_interno,'tipo_movimiento'=>$side==='origen'?2:($despacho?3:1),'cantidad_anterior'=>$s['disponible']['anterior'],'cantidad_documento'=>$plan['cantidades']['cantidad_movimiento'],'cantidad_actual'=>$s['disponible']['posterior'],'transito_anterior'=>$s['transito']['anterior'],'transito_actual'=>$s['transito']['posterior'],'comprometido_anterior'=>$s['comprometido']['anterior'],'comprometido_actual'=>$s['comprometido']['posterior'],'fisico_anterior'=>$s['cantidad_fisica']['anterior'],'fisico_actual'=>$s['cantidad_fisica']['posterior'],'costo_unitario_neto'=>$plan['costo_cpp_snapshot'],'ultimo_costo_anterior'=>$p->costo_neto,'ultimo_costo_actual'=>$p->costo_neto,'cpp_anterior'=>$plan['cpp_anterior'],'cpp_actual'=>$plan['cpp_actual'],'origen_tipo'=>'AJUSTE_INVENTARIO','origen_detalle_id'=>$d->id,'operacion_codigo'=>$despacho?'TRASPASO_DESPACHO':'TRASPASO_INTERNO','token_idempotencia'=>(string)Str::uuid(),'registrado_por'=>$uid,'observaciones'=>$t->numero_interno.' | '.$o->justificacion]);
+                    DB::table('stock')->where('id',$stockId)->update(['disponible'=>$s['disponible']['posterior'],'transito'=>$s['transito']['posterior'],'cantidad_fisica'=>$s['cantidad_fisica']['posterior']]);
                     DB::table('inventario_operaciones_detalle')->where('id',$d->id)->update(['kardex_id'=>$k]);
                 }
-                DB::table('inventario_traspasos_detalle')->where('id',$l->id)->update(['cantidad_despachada'=>$l->cantidad_solicitada,'cantidad_recibida'=>$l->cantidad_solicitada]);
+                DB::table('inventario_traspasos_detalle')->where('id',$l->id)->update(['cantidad_despachada'=>$l->cantidad_solicitada,'cantidad_recibida'=>$despacho?'0.00000000':$l->cantidad_solicitada]);
             }
-            DB::table('inventario_traspasos')->where('id',$id)->update(['estado'=>'RECIBIDO']);
+            DB::table('inventario_traspasos')->where('id',$id)->update(['estado'=>$estadoFinal]);
             DB::table('inventario_operaciones')->where('id',$o->id)->update(['estado_id'=>$done,'version'=>$o->version+1,'confirmado_por'=>$uid,'confirmado_en'=>now(),'token_confirmacion'=>$token]);
-            $this->historial((int)$o->id,$approved,$done,$uid,'CONFIRMAR','Traspaso inmediato interno; CPP conservado, sin emisión de DTE.');
-            return ['id'=>$id,'estado_operacion'=>'INV_CONFIRMADA','estado_traspaso'=>'RECIBIDO','version'=>(int)$o->version+1];
+            if($despacho)foreach($bases as $pid=>$base){
+                $actual=$lector->leer((int)$pid,DB::table('stock')->where('producto_id',$pid)->orderBy('bodega_id')->lockForUpdate()->get());
+                abort_unless(BigDecimal::of($actual['stock_valorizado'])->isEqualTo($base),409,'El despacho alteró la base valorizada.');
+            }
+            $this->historial((int)$o->id,$approved,$done,$uid,'CONFIRMAR',$despacho?'Despacho interno confirmado; tránsito valorizado y CPP conservado.':'Traspaso inmediato interno; CPP conservado, sin emisión de DTE.');
+            return ['id'=>$id,'estado_operacion'=>'INV_CONFIRMADA','estado_traspaso'=>$estadoFinal,'version'=>(int)$o->version+1];
         },3))->header('Cache-Control','no-store');
     }
 }

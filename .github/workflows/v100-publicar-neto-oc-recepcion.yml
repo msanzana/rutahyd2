@@ -1,0 +1,164 @@
+name: V100 - Total neto OC en recepción
+on:
+  push:
+    branches: [deploy/v100-neto-oc-recepcion-20261125]
+    paths: [.github/workflows/v100-publicar-neto-oc-recepcion.yml]
+permissions: {contents: read}
+concurrency:
+  group: rutahd2-ftps-staging
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FTP_HOST: ftpupload.net
+      FTP_USER: if0_43460400
+      FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preparar respaldo y delta exclusivo de interfaz
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v100/{before,after,browser,styles}
+          git clone -q --depth=1 --branch feature/v100-neto-oc-recepcion-20261125 https://github.com/msanzana/rutahyd2front.git /tmp/v100/front
+          git -C /tmp/v100/front fetch -q --depth=1 origin 69563c14b1f8542f821d82e159701a8fe93bc156
+          git -C /tmp/v100/front show 69563c14b1f8542f821d82e159701a8fe93bc156:assets/js/compras-consultas-v66.js > /tmp/v100/new.js
+          git -C /tmp/v100/front fetch -q --depth=1 origin 03ef772810bf5eb5f4c6e52163ee2c2e9fcc1a7c
+          git -C /tmp/v100/front show 03ef772810bf5eb5f4c6e52163ee2c2e9fcc1a7c:assets/js/compras-consultas-v66.js > /tmp/v100/old.js
+          node --check /tmp/v100/new.js
+          cat >/tmp/v100/transport.py <<'PY'
+          import os,ssl,ftplib,io,pathlib,re,sys,html
+          from html.parser import HTMLParser
+          p=pathlib.Path('/tmp/v100')
+          index='index.html'
+          js='assets/js/compras-consultas-v66.js'
+          guards={'preload-js.guard':'/htdocs/assets/js/carga-global-v42.js','preload-css.guard':'/htdocs/assets/css/carga-global-v42.css','productos.guard':'/htdocs/assets/js/productos-remotos.js','recepcion.guard':'/htdocs/api-v2/app/Http/Controllers/RecepcionesBorradorControlador.php','stock.guard':'/htdocs/api-v2/app/Http/Controllers/ProductoComercialControlador.php','pdf.guard':'/htdocs/api-v2/app/Services/PdfRecepcionCompra.php','root.guard':'/htdocs/.htaccess','api.guard':'/htdocs/api/.htaccess','private.guard':'/htdocs/api-v2/.htaccess','gateway.guard':'/htdocs/api/index.php'}
+          def remote(n):return guards.get(n,'/htdocs/'+n)
+          def get(f,n):
+              b=io.BytesIO();f.retrbinary('RETR '+remote(n),b.write);return b.getvalue()
+          def absent(f,n):
+              try:get(f,n);return False
+              except ftplib.error_perm as e:
+                  if str(e).startswith('550'):return True
+                  raise
+          def put(f,n,b):f.storbinary('STOR '+remote(n),io.BytesIO(b))
+          def save(area,n,b):
+              d=p/area/n;d.parent.mkdir(parents=True,exist_ok=True);d.write_bytes(b)
+          def read(area,n):return (p/area/n).read_bytes()
+          def verify_before(f):
+              for n in [index,js,*guards]:assert get(f,n)==read('before',n),n
+          class Links(HTMLParser):
+              def __init__(self):super().__init__();self.links=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='link' and a.get('rel')=='stylesheet':
+                      href=a.get('href','').split('?')[0].lstrip('/')
+                      if re.fullmatch(r'assets/css/[A-Za-z0-9_.-]+\.css',href):self.links.append(href)
+          f=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=45)
+          f.connect(os.environ['FTP_HOST']);f.login(os.environ['FTP_USER'],os.environ['FTP_PASSWORD']);f.prot_p()
+          with f:
+              mode=sys.argv[1]
+              if mode=='prepare':
+                  for n in [index,js,*guards]:save('before',n,get(f,n))
+                  src=read('before',index).decode()
+                  assert src.count('</head>')==1 and 'paginadores-v96.css?v=20261125-v96' in src and 'compras-consultas-v66.js?v=20261125-v97' in src
+                  assert read('before',js)==(p/'old.js').read_bytes(),'JS productivo diferente a la base auditada'
+                  save('after',js,(p/'new.js').read_bytes())
+                  src=src.replace('compras-consultas-v66.js?v=20261125-v97','compras-consultas-v66.js?v=20261125-v100',1)
+                  save('after',index,src.encode())
+                  parser=Links();parser.feed(src)
+                  assert 'assets/css/app.css' in parser.links and 'assets/css/tipos-documentos-v63.css' in parser.links
+                  for i,n in enumerate(parser.links):save('styles',f'{i:03d}.css',get(f,n))
+                  print('V100_PRECHECK_OK',len(parser.links))
+              elif mode=='publish':
+                  verify_before(f)
+                  (p/'attempted').touch()
+                  for n in [js,index]:
+                      with (p/'attempted').open('a') as log:log.write(n+'\n')
+                      put(f,n,read('after',n))
+                  for n in [js,index]:assert get(f,n)==read('after',n),n
+                  for n in guards:assert get(f,n)==read('before',n),n
+                  print('V100_FTPS_BYTES_OK')
+              elif mode=='rollback':
+                  for n in reversed((p/'attempted').read_text().splitlines()):
+                      put(f,n,read('before',n))
+                  verify_before(f)
+                  print('V100_ROLLBACK_OK')
+          PY
+          python /tmp/v100/transport.py prepare
+      - name: Validar neto, bruto y filas vacías del selector
+        run: |
+          set -euo pipefail
+          cd /tmp/v100/browser
+          npm init -y >/dev/null
+          npm install -q --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import {readdirSync} from 'node:fs';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage({viewport:{width:1440,height:900},reducedMotion:'reduce'});
+            await page.route('**/*',r=>r.abort());
+            await page.setContent('<main id="root"></main>');
+            for(const f of readdirSync('/tmp/v100/styles').sort())await page.addStyleTag({path:'/tmp/v100/styles/'+f});
+            await page.addScriptTag({path:'/tmp/v100/new.js'});
+            await page.evaluate(()=>{
+              window.empty=false;
+              window.RutaHDApiCatalogos={
+                purchaseConsultation:async()=>({data:[],total:0,last_page:1,bodegas:[]}),
+                orderStates:async()=>({items:[{id:1,codigo:'ACTIVA'}]}),
+                purchaseOrders:async()=>({data:window.empty?[]:[{id:2,numero:'OC-CI-2',proveedor_nombre:'Proveedor CI',solicitada_en:'2026-11-25',estado_codigo:'ACTIVA',subtotal_neto:'500.00000000',total_bruto:'595.00000000'},{id:1,numero:'OC-CI-1',proveedor_nombre:'Proveedor CI',solicitada_en:'2026-11-25',estado_codigo:'ACTIVA',subtotal_neto:'2500.25000000',total_bruto:'2975.30000000'}],total:window.empty?0:2,last_page:1}),
+                documentTypes:async()=>({data:[],last_page:1}),
+                resources:async()=>({data:[],last_page:1})
+              };
+              window.RutaHDComprasConsultas.mount(document.getElementById('root'),'recepciones');
+            });
+            await page.getByRole('button',{name:'+ Nueva recepción',exact:true}).click();
+            const d=page.locator('dialog[open]'), table=d.locator('table').first();
+            await table.getByRole('columnheader',{name:'Total neto',exact:true}).waitFor();
+            await table.getByRole('columnheader',{name:'Total bruto',exact:true}).waitFor();
+            const row=table.getByRole('row').filter({hasText:'OC-CI-2'});
+            const cells=await row.getByRole('cell').allTextContents();
+            if(cells.length!==6||cells[3]!=='$500'||cells[4]!=='$595')throw Error(JSON.stringify(cells));
+            const next=await table.getByRole('row').filter({hasText:'OC-CI-1'}).getByRole('cell').allTextContents();
+            if(next[3]!=='$2.500,25'||next[4]!=='$2.975,3')throw Error(JSON.stringify(next));
+            await page.evaluate(()=>window.empty=true);
+            await d.getByRole('button',{name:'Buscar',exact:true}).click();
+            await table.getByText('No hay órdenes activas para esta búsqueda.').waitFor();
+            if(await table.locator('tbody td').getAttribute('colspan')!=='6')throw Error('Columnas desalineadas');
+            console.log('V100_UI_OK');
+          }finally{await browser.close();}
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v100-respaldo-previo
+          path: /tmp/v100/before/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar y cotejar bytes
+        run: python /tmp/v100/transport.py publish
+      - name: Verificar carga del selector V100
+        run: |
+          set -euo pipefail
+          cd /tmp/v100/browser
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          try{
+            const page=await browser.newPage();
+            const errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://rutahyd2.free.nf/',{waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForFunction(()=>[...document.styleSheets].some(s=>s.href?.includes('paginadores-v96.css?v=20261125-v96')&&s.cssRules.length>=7),null,{timeout:45000});
+            const result=await page.evaluate(async()=>({auth:(await fetch('/api/v1/recepciones-borrador/1',{headers:{Accept:'application/json'}})).status,density:getComputedStyle(document.documentElement).getPropertyValue('--hd-form-control').trim(),v86:[...document.scripts].some(s=>s.src.includes('compras-consultas-v66.js?v=20261125-v100'))}));
+            if(response?.status()!==200||result.density!=='30px'||!result.v86||result.auth!==401||errors.length)throw Error(JSON.stringify({result,errors}));
+            console.log('V100_PUBLIC_OK');
+          }finally{await browser.close();}
+          JS
+      - name: Restaurar originales si falla la publicación
+        if: failure()
+        run: |
+          if [ -f /tmp/v100/attempted ]; then python /tmp/v100/transport.py rollback; fi

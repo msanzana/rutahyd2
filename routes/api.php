@@ -95,6 +95,9 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::get('/inventario/catalogos',[\App\Http\Controllers\InventarioOperacionesControlador::class,'catalogos'])->middleware('permiso.rutahd:inventario.catalogos.ver');
     Route::put('/inventario/motivos/{id}',[\App\Http\Controllers\InventarioOperacionesControlador::class,'actualizarMotivo'])->middleware('permiso.rutahd:inventario.catalogos.gestionar')->whereNumber('id');
     // V109C6A: consultas; escrituras de traspasos pendientes de habilitación integral.
+    // V109D4A: consultas de conteos; sin rutas de escritura hasta integrar permisos y cierre.
+    Route::get('/inventario/conteos',[\App\Http\Controllers\ConteosInventarioControlador::class,'listar'])->middleware('permiso.rutahd:inventario.operaciones.ver');
+    Route::get('/inventario/conteos/{id}',[\App\Http\Controllers\ConteosInventarioControlador::class,'ver'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id');
     Route::get('/inventario/traspasos',[\App\Http\Controllers\TraspasosConsultasControlador::class,'listar'])->middleware('permiso.rutahd:inventario.operaciones.ver');
     Route::get('/inventario/traspasos/bodegas',[\App\Http\Controllers\TraspasosConsultasControlador::class,'bodegas'])->middleware('permiso.rutahd:inventario.operaciones.ver');
     Route::get('/inventario/traspasos/{id}/pdf',[\App\Http\Controllers\TraspasosConsultasControlador::class,'pdf'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id')->middleware('throttle:30,1');

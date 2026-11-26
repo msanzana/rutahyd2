@@ -20,19 +20,19 @@ final class SucursalesControlador extends Controller
         $q=DB::table('sucursales as s')->leftJoin('ciudades as c','c.id','=','s.ciudad_id')->select('s.*','c.nombre as ciudad')
           ->selectSub(DB::table('inventario_bodegas_sucursales as bs')->selectRaw('COUNT(*)')->whereColumn('bs.sucursal_id','s.id'),'bodegas_count')
           ->selectSub(DB::table('usuarios_sucursales as us')->selectRaw('COUNT(*)')->whereColumn('us.sucursal_id','s.id')->where('us.activo',1),'usuarios_count');
-        if(!empty($v['buscar'])){$term=trim($v['buscar']);$q->where(fn($x)=>$x->where('s.codigo','like','%'.$term.'%')->orWhere('s.nombre','like','%'.$term.'%')->orWhere('c.nombre','like','%'.$term.'%'));}
+        if(!empty($v['buscar'])){$term=trim($v['buscar']);$q->where(fn($x)=>$x->where('s.codigo','like','%'.$term.'%')->orWhere('s.nombre','like','%'.$term.'%')->orWhere('c.nombre','like','%'.$term.'%')->orWhere('s.direccion','like','%'.$term.'%'));}
         return response()->json($q->orderBy('s.nombre')->orderBy('s.id')->paginate(25))->header('Cache-Control','no-store');
     }
     public function crear(Request $r){return $this->guardar($r,null);}
     public function actualizar(Request $r,int $id){return $this->guardar($r,$id);}
     private function guardar(Request $r,?int $id){
         $user=$this->admin($r);
-        $v=$r->validate(['codigo'=>$id?['prohibited']:['required','string','max:30','regex:/^[A-Z0-9][A-Z0-9_-]*$/D',Rule::unique('sucursales','codigo')],'nombre'=>'required|string|max:130','ciudad_id'=>'nullable|integer|min:1']);
+        $v=$r->validate(['codigo'=>$id?['prohibited']:['required','string','max:30','regex:/^[A-Z0-9][A-Z0-9_-]*$/D',Rule::unique('sucursales','codigo')],'nombre'=>'required|string|max:130','ciudad_id'=>'nullable|integer|min:1','direccion'=>'nullable|string|max:200']);
         $name=trim($v['nombre']);abort_if($name==='',422,'Ingrese el nombre de la sucursal.');
         return response()->json(DB::transaction(function()use($v,$id,$user,$name){
             $city=$v['ciudad_id']??null;
             if($city!==null)abort_unless(DB::table('ciudades')->where('id',$city)->where('activo',1)->exists(),422,'Ciudad no disponible.');
-            $fields=['nombre'=>$name,'ciudad_id'=>$city];
+            $fields=['nombre'=>$name,'ciudad_id'=>$city];if(array_key_exists('direccion',$v))$fields['direccion']=trim((string)$v['direccion'])?:null;
             if($id===null){
                 $id=DB::table('sucursales')->insertGetId($fields+['codigo'=>$v['codigo'],'activo'=>1]);
                 $this->audit($user,'SUCURSAL_CREAR',(int)$id,null,$fields+['codigo'=>$v['codigo']]);

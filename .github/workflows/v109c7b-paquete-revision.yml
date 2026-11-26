@@ -1,0 +1,83 @@
+name: V109C7B - Paquete de revisión integrado
+on:
+  push:
+    branches: [feature/v109a-inventario-contexto-20261126]
+    paths: [.github/workflows/v109c7b-paquete-revision.yml]
+permissions:
+  contents: read
+jobs:
+  integrar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, fileinfo, pdo_sqlite, iconv
+      - name: Preparar archivos de revisión sin acceso productivo
+        run: |
+          set -euo pipefail
+          candidato=30817d82b71dc8c8ba3c98b617a7ad32e0997836
+          base=de78f242f5b339897563f17b48ff2b92c2ea8c53
+          front=f6816596859d9d9d2f72ff98cd4c4371329fd461
+          frontbase=b91579217d339ce7916d5257c655a17de40b1873
+          git clone -q --no-checkout https://github.com/msanzana/rutahyd2front.git /tmp/v109c-front
+          for p in app/Http/Controllers/ComprasConsultasControlador.php app/Http/Controllers/RecepcionesBorradorControlador.php app/Http/Controllers/ConsolidacionesControlador.php app/Services/RegularizacionRecepcion.php app/Http/Controllers/AjustesGeneralesControlador.php app/Http/Controllers/InventarioOperacionesControlador.php app/Services/PlanAjusteGeneral.php app/Http/Controllers/InventarioControlador.php app/Http/Controllers/TraspasosInventarioControlador.php app/Http/Controllers/TraspasosConsultasControlador.php app/Services/PlanCantidadesTraspaso.php app/Services/PlanStockTraspaso.php app/Services/BaseValorizadaInventario.php app/Services/LectorBaseValorizadaInventario.php app/Services/ComprobanteTraspasoPdf.php routes/api.php; do
+            git show "$candidato:$p" | cmp - "$p"
+            php -l "$p"
+            mkdir -p "paquete/candidato/backend/$(dirname "$p")" "paquete/referencia/backend/$(dirname "$p")"
+            cp "$p" "paquete/candidato/backend/$p"
+            if git cat-file -e "$base:$p" 2>/dev/null; then git show "$base:$p" > "paquete/referencia/backend/$p"; fi
+          done
+          for p in assets/js/app-produccion.js assets/js/catalogos-api.js assets/js/compras-consultas-v66.js assets/js/inventario-v104.js index.html; do
+            mkdir -p "paquete/candidato/frontend/$(dirname "$p")" "paquete/referencia/frontend/$(dirname "$p")"
+            git -C /tmp/v109c-front show "$front:$p" > "paquete/candidato/frontend/$p"
+            git -C /tmp/v109c-front show "$frontbase:$p" > "paquete/referencia/frontend/$p"
+          done
+          printf '%s\n' 'V109C7B: paquete de revisión, NO publicar.' "Backend: $candidato" "Frontend: $front" "Referencia backend: $base" "Referencia frontend: $frontbase" 'Incluye V108B, V109A, V109B y V109C hasta C7A.' 'Solo rutas GET de traspasos. Las escrituras están deshabilitadas; bloqueo de traslado legado solo en candidato.' 'Comprobante interno no DTE. Pendiente verificar ENUM completo y contrato de guías, permisos, prueba visual autenticada y esquema productivo.' 'Las referencias no son respaldos productivos. Sin DDL ni credenciales ni acceso remoto.' > paquete/ESTADO.txt
+      - name: Validar conjunto integrado y ausencia de escrituras de traspasos
+        run: |
+          set -euo pipefail
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/inventario_v109a.php | tee /tmp/v109c-inv.log
+          grep -Fx V109A_MOTOR_OK /tmp/v109c-inv.log
+          php tests/ajustes_generales_v109b3.php | tee /tmp/v109c-aj.log
+          grep -Fx V109B3_CONFIRMACION_OK /tmp/v109c-aj.log
+          php tests/traspasos_pdf_v109c6c.php | tee /tmp/v109c-trp.log
+          grep -Fx V109C6C_PDF_OK /tmp/v109c-trp.log
+          php artisan route:list --path=api/v1/inventario/traspasos --json > /tmp/v109c-rutas.json
+          python - <<'PY'
+          import json
+          rows=json.load(open('/tmp/v109c-rutas.json'))
+          expected={'api/v1/inventario/traspasos','api/v1/inventario/traspasos/bodegas','api/v1/inventario/traspasos/{id}','api/v1/inventario/traspasos/{id}/pdf'}
+          assert {r['uri'] for r in rows}==expected, rows
+          for r in rows:
+              assert set(r['method'].split('|'))<= {'GET','HEAD'}, r
+              assert any('inventario.operaciones.ver' in m for m in r['middleware']),r
+              assert any('AutenticarToken' in m or 'token.rutahd' in m for m in r['middleware']),r
+          print('V109C7B_SOLO_CONSULTA_OK')
+          PY
+          (
+            cd paquete
+            find candidato referencia -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-v109c7b-paquete-revision
+          path: paquete/
+          retention-days: 30
+          if-no-files-found: error

@@ -313,8 +313,8 @@ final class ConteosInventarioControlador extends Controller
         $page['escrituras_habilitadas']=false;
         return response()->json($page)->header('Cache-Control','no-store');
     }
-    public function ver(Request $r,int $id){
-        return response()->json(DB::transaction(function()use($r,$id){
+    private function datos(Request $r,int $id): array {
+        return DB::transaction(function()use($r,$id){
             $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$uid=(int)$r->user()->id;$c=$this->cabecera($id,$sid);
             $lines=DB::table('inventario_conteos_detalle as l')->join('productos as p','p.id','=','l.producto_id')->where('l.conteo_id',$id)->orderBy('l.id')->select('l.*','p.sku','p.nombre as producto')->get();
             if((bool)$c->conteo_ciego&&$c->estado==='EN_CONTEO')foreach($lines as $l){
@@ -339,6 +339,25 @@ final class ConteosInventarioControlador extends Controller
                 }
             }
             return ['conteo'=>$c,'detalles'=>$lines,'usuario_actual_id'=>$uid,'revision'=>$review,'autorizado'=>$authorized,'ajustes_preparados'=>$prepared,'operaciones'=>$ops,'escrituras_habilitadas'=>false,'cierre_habilitado'=>false,'anulacion_habilitada'=>false];
-        },3))->header('Cache-Control','no-store');
+        },3);
+    }
+    public function ver(Request $r,int $id){return response()->json($this->datos($r,$id))->header('Cache-Control','no-store');}
+    public function pdf(Request $r,int $id){
+        $data=$this->datos($r,$id);
+        abort_unless(in_array($data['conteo']->estado,['EN_REVISION','CONFIRMADO'],true)&&$data['revision']!==null,409,'El acta estará disponible después de la revisión.');
+        $data['bodega']=DB::table('bodegas')->where('id',$data['conteo']->bodega_id)->value('nombre')??'Bodega '.$data['conteo']->bodega_id;
+        $pdf=(new \App\Services\ActaConteoPdf())->generar($data);
+        return response($pdf,200,['Content-Type'=>'application/pdf','Content-Disposition'=>'inline; filename="conteo-'.$id.'.pdf"','Cache-Control'=>'private, no-store','X-Content-Type-Options'=>'nosniff']);
+    }
+    public function respaldo(Request $r,int $id,int $op,int $aid){
+        return DB::transaction(function()use($r,$id,$op,$aid){
+            $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$c=$this->cabecera($id,$sid);
+            abort_unless(in_array($c->estado,['EN_REVISION','CONFIRMADO'],true),404);
+            $a=DB::table('inventario_conteos_operaciones as x')->join('inventario_operaciones as o','o.id','=','x.operacion_id')->join('inventario_operaciones_adjuntos as a','a.operacion_id','=','o.id')->where('x.conteo_id',$id)->where('o.id',$op)->where('o.clase','CONTEO')->where('o.sucursal_id',$sid)->where('a.id',$aid)->select('a.nombre','a.mime','a.contenido','a.sha256')->first();
+            abort_unless($a,404,'Respaldo no disponible.');
+            $ext=match($a->mime){'application/pdf'=>'pdf','image/png'=>'png','image/jpeg'=>'jpg',default=>null};
+            abort_unless($ext&&strlen($a->contenido)>0&&strlen($a->contenido)<=2097152&&hash_equals($a->sha256,hash('sha256',$a->contenido))&&(new \finfo(FILEINFO_MIME_TYPE))->buffer($a->contenido)===$a->mime,409,'Respaldo inválido.');
+            return response($a->contenido,200,['Content-Type'=>$a->mime,'Content-Disposition'=>'attachment; filename="respaldo-'.$aid.'.'.$ext.'"','Cache-Control'=>'private, no-store','X-Content-Type-Options'=>'nosniff']);
+        },3);
     }
 }

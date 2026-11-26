@@ -26,23 +26,38 @@ final class ConsolidacionesControlador
     }
     private function codigo(int $id): string {return (string)DB::table('estados')->where('id',$id)->value('codigo');}
     private function usuario(Request $r): int {$u=(int)($r->user()?->id??0);abort_unless($u>0,401);return $u;}
-    private function orden(int $id,bool $lock=false): object {
-        $q=DB::table('ordenes_compra')->where('id',$id);if($lock)$q->lockForUpdate();
+    private function contexto(Request $r,bool $lock=false): int {
+        return (int)app(\App\Services\ContextoCompras::class)->resolver($r,$lock)->id;
+    }
+    private function bodega(int $id,int $sid,bool $lock=false): void {
+        $q=DB::table('inventario_bodegas_sucursales')->where('bodega_id',$id)->where('sucursal_id',$sid);
+        if($lock)$q->lockForUpdate();
+        abort_unless($q->first(),404,'Bodega no disponible en la sucursal.');
+    }
+    private function orden(int $id,int $sid,bool $lock=false): object {
+        $q=DB::table('ordenes_compra')->where('id',$id)->where('sucursal_id',$sid);if($lock)$q->lockForUpdate();
         $o=$q->first();abort_unless($o,404,'Orden no encontrada.');return $o;
     }
-    private function recibos(int $oc): array {
+    private function recibos(int $oc,int $sid): array {
+        // Fallar de forma segura: no omitir recepciones previas sin atribuir.
+        $bad=DB::table('recepciones as r')->leftJoin('compras as c','c.id','=','r.compra_id')
+          ->leftJoin('inventario_bodegas_sucursales as bs','bs.bodega_id','=','r.bodega_id')
+          ->where('r.orden_compra_id',$oc)->where(fn($q)=>$q->whereNull('r.sucursal_id')->orWhere('r.sucursal_id','<>',$sid)
+            ->orWhereNull('c.sucursal_id')->orWhere('c.sucursal_id','<>',$sid)->orWhereNull('bs.sucursal_id')->orWhere('bs.sucursal_id','<>',$sid)
+            ->orWhereNull('c.orden_compra_id')->orWhereColumn('c.orden_compra_id','<>','r.orden_compra_id'));
+        abort_if($bad->exists(),409,'Orden con recepciones o compras sin atribución válida.');
         return DB::table('recepciones as r')->join('estados as e','e.id','=','r.estado_id')->join('compras as c','c.id','=','r.compra_id')
-          ->join('bodegas as b','b.id','=','r.bodega_id')->where('r.orden_compra_id',$oc)->where('e.codigo','<>','NULA')
+          ->join('bodegas as b','b.id','=','r.bodega_id')->where('r.orden_compra_id',$oc)->where('r.sucursal_id',$sid)->where('e.codigo','<>','NULA')
           ->orderBy('r.id')->get(['r.*','e.codigo as estado','c.folio','b.nombre as bodega'])->map(fn($r)=>(array)$r)->all();
     }
     private function eligible(array $r,?int $id=null): bool {
         return in_array($r['estado'],self::FINAL,true)&&(int)$r['stock_aplicado']===1
           &&!empty($r['token_confirmacion'])&&($r['recepcion_consolidada_id']===null||(int)$r['recepcion_consolidada_id']===$id);
     }
-    public function candidatas(int $oc)
+    public function candidatas(Request $request,int $oc)
     {
-        $o=$this->orden($oc);abort_unless($this->codigo($o->estado_id)==='ACTIVA',409,'Orden no activa.');
-        $r=$this->recibos($oc);
+        $sid=$this->contexto($request);$o=$this->orden($oc,$sid);abort_unless($this->codigo($o->estado_id)==='ACTIVA',409,'Orden no activa.');
+        $r=$this->recibos($oc,$sid);
         return response()->json(['orden'=>$o,'recepciones'=>array_values(array_filter($r,fn($x)=>$this->eligible($x))),
           'otras_recepciones'=>array_values(array_filter($r,fn($x)=>!$this->eligible($x)))]);
     }
@@ -85,9 +100,11 @@ final class ConsolidacionesControlador
         $hash=hash('sha256',json_encode([$o->id,$o->estado_id,$c?->id,$c?->observaciones,$all,$selected,$lines,$diff,$remaining],JSON_THROW_ON_ERROR));
         return ['orden'=>$o,'consolidacion'=>$c,'recepciones'=>$selected,'otras_recepciones'=>$others,'productos'=>$agg,'diferencias'=>$diff,'saldos_oc'=>$remaining,'bloqueos'=>$block,'cierre_habilitado'=>!$block,'requiere_aceptacion'=>$diff->isNotEmpty()||!empty($remaining),'huella'=>$hash];
     }
-    private function current(int $id): array {
-        $c=DB::table('recepciones_consolidadas')->where('id',$id)->first();abort_unless($c&&$this->codigo($c->estado_id)!=='NULA',404,'Consolidación no encontrada.');
-        $o=$this->orden((int)$c->orden_compra_id);$all=$this->recibos((int)$o->id);
+    private function current(int $id,int $sid): array {
+        $c=DB::table('recepciones_consolidadas')->where('id',$id)->where('sucursal_id',$sid)->first();abort_unless($c&&$this->codigo($c->estado_id)!=='NULA',404,'Consolidación no encontrada.');
+        $this->bodega((int)$c->bodega_id,$sid);
+        $o=$this->orden((int)$c->orden_compra_id,$sid);$all=$this->recibos((int)$o->id,$sid);
+        abort_if(DB::table('recepciones')->where('recepcion_consolidada_id',$id)->where(fn($q)=>$q->whereNull('sucursal_id')->orWhere('sucursal_id','<>',$sid)->orWhere('orden_compra_id','<>',$o->id)->orWhereNull('orden_compra_id'))->exists(),409,'Consolidación con referencias sin atribución.');
         $selected=array_values(array_filter($all,fn($r)=>(int)$r['recepcion_consolidada_id']===$id));
         $res=$this->estadoRevision($o,$all,$selected,$this->lineas(array_column($selected,'id')),$c);
         $res['estado']=$this->codigo($c->estado_id);
@@ -96,33 +113,44 @@ final class ConsolidacionesControlador
         $res['candidatas']=array_values(array_filter($all,fn($r)=>$this->eligible($r,$id)));
         return $res;
     }
-    public function solicitudPdf(int $id){$pdf=(new RegularizacionRecepcion())->pdf($id);return response($pdf,200,['Content-Type'=>'application/pdf','Content-Disposition'=>'inline; filename="solicitud-'.$id.'.pdf"','Cache-Control'=>'private, no-store']);}
-    public function reenviarSolicitud(Request $r,int $id){$this->usuario($r);$r->validate(['verificar_envio'=>'accepted']);$estado=(new RegularizacionRecepcion())->enviar($id,true);return response()->json(['estado'=>$estado,'mensaje'=>'Estado de envío: '.$estado]);}
-    public function ver(int $id){return response()->json($this->current($id));}
+    private function solicitudContexto(int $id,int $sid): object {
+        $s=DB::table('solicitudes_regularizacion as s')->join('recepciones_consolidadas as c','c.id','=','s.recepcion_consolidada_id')
+          ->join('recepciones as r','r.id','=','s.recepcion_id')->join('compras as p','p.id','=','s.compra_id')
+          ->where('s.id',$id)->where('s.estado','<>','NULA')->where('c.sucursal_id',$sid)->where('r.sucursal_id',$sid)->where('p.sucursal_id',$sid)
+          ->whereColumn('r.recepcion_consolidada_id','c.id')->whereColumn('r.compra_id','p.id')->whereColumn('s.proveedor_id','c.proveedor_id')
+          ->whereColumn('s.proveedor_id','p.proveedor_id')->whereColumn('s.proveedor_id','r.proveedor_id')->first(['s.*']);
+        abort_unless($s,404,'Solicitud no encontrada.');return $s;
+    }
+    public function solicitudPdf(Request $r,int $id){$pdf=DB::transaction(function()use($r,$id){$this->solicitudContexto($id,$this->contexto($r,true));return (new RegularizacionRecepcion())->pdf($id);},3);return response($pdf,200,['Content-Type'=>'application/pdf','Content-Disposition'=>'inline; filename="solicitud-'.$id.'.pdf"','Cache-Control'=>'private, no-store']);}
+    public function reenviarSolicitud(Request $r,int $id){$this->usuario($r);$r->validate(['verificar_envio'=>'accepted']);$sid=$this->contexto($r);
+        $n=DB::table('cola_notificaciones_correo')->where('id',$id)->where('origen_tipo','SOLICITUD_REGULARIZACION')->first();
+        abort_unless($n,404,'Notificación no encontrada.');$s=$this->solicitudContexto((int)$n->solicitud_id,$sid);
+        abort_unless((int)$n->proveedor_id===(int)$s->proveedor_id&&(int)$n->origen_id===(int)$s->id,409,'Notificación inconsistente.');$estado=(new RegularizacionRecepcion())->enviar($id,true,$r);return response()->json(['estado'=>$estado,'mensaje'=>'Estado de envío: '.$estado]);}
+    public function ver(Request $r,int $id){return response()->json($this->current($id,$this->contexto($r)));}
     public function crear(Request $r){return $this->guardar($r,null);}
     public function actualizar(Request $r,int $id){return $this->guardar($r,$id);}
     private function guardar(Request $r,?int $id){
         $v=$r->validate(['orden_compra_id'=>'required|integer|min:1','recepciones'=>'required|array|min:1|max:200','recepciones.*'=>'required|integer|min:1|distinct','observaciones'=>'nullable|string|max:5000','huella'=>'nullable|string|size:64']);
         $u=$this->usuario($r);$ids=array_map('intval',$v['recepciones']);sort($ids);
-        return response()->json(DB::transaction(function()use($v,$u,$ids,$id){
-            $o=$this->orden((int)$v['orden_compra_id'],true);abort_unless($this->codigo($o->estado_id)==='ACTIVA',409,'Orden no activa.');
+        return response()->json(DB::transaction(function()use($v,$u,$ids,$id,$r){
+            $sid=$this->contexto($r,true);$o=$this->orden((int)$v['orden_compra_id'],$sid,true);abort_unless($this->codigo($o->estado_id)==='ACTIVA',409,'Orden no activa.');
             $activa=$this->estado('CONSOLIDACION_RECEPCION','ACTIVA');$c=null;
             if($id!==null){
-                $c=DB::table('recepciones_consolidadas')->where('id',$id)->lockForUpdate()->first();
+                $c=DB::table('recepciones_consolidadas')->where('id',$id)->where('sucursal_id',$sid)->lockForUpdate()->first();
                 abort_unless($c&&(int)$c->orden_compra_id===(int)$o->id&&(int)$c->estado_id===$activa&&!$c->token_confirmacion,409,'Consolidación no editable.');
-                abort_unless(isset($v['huella'])&&hash_equals($this->current($id)['huella'],$v['huella']),409,'La consolidación cambió. Vuelva a abrirla.');
+                abort_unless(isset($v['huella'])&&hash_equals($this->current($id,$sid)['huella'],$v['huella']),409,'La consolidación cambió. Vuelva a abrirla.');
             }
             $q=DB::table('recepciones_consolidadas')->where('orden_compra_id',$o->id)->where('estado_id',$activa);
             if($id!==null)$q->where('id','<>',$id);
             abort_if($q->exists(),409,'La orden ya tiene una consolidación activa. Modifique ese borrador.');
-            $all=$this->recibos((int)$o->id);$selected=array_values(array_filter($all,fn($r)=>in_array((int)$r['id'],$ids,true)&&$this->eligible($r,$id)));
+            $all=$this->recibos((int)$o->id,$sid);$selected=array_values(array_filter($all,fn($r)=>in_array((int)$r['id'],$ids,true)&&$this->eligible($r,$id)));
             abort_unless(count($selected)===count($ids),409,'Una recepción ya no está disponible.');
-            $b=(int)$selected[0]['bodega_id'];
+            $b=(int)$selected[0]['bodega_id'];$this->bodega($b,$sid,true);
             foreach($selected as $x)abort_unless((int)$x['bodega_id']===$b&&(int)$x['proveedor_id']===(int)$o->proveedor_id&&(int)$x['recepcion_tipo']===1,422,'Seleccione recepciones del mismo proveedor y bodega.');
             abort_unless(DB::table('bodegas')->where('id',$b)->where('activo',1)->exists(),409,'Bodega no activa.');
             $rows=$this->lineas($ids);abort_unless(count($rows)>0,422,'No hay líneas de recepción.');
             $agg=$this->aggregate($rows);
-            $header=['orden_compra_id'=>$o->id,'proveedor_id'=>$o->proveedor_id,'bodega_id'=>$b,'recepcion_tipo'=>1,'estado_id'=>$activa,'cantidad_recepciones'=>count($ids),'observaciones'=>$v['observaciones']??null];
+            $header=['sucursal_id'=>$sid,'orden_compra_id'=>$o->id,'proveedor_id'=>$o->proveedor_id,'bodega_id'=>$b,'recepcion_tipo'=>1,'estado_id'=>$activa,'cantidad_recepciones'=>count($ids),'observaciones'=>$v['observaciones']??null];
             foreach(['subtotal_neto','total_descuentos','total_exento','total_iva','otros_impuestos','total'] as $f){$sum=BigDecimal::zero();foreach($selected as $x)$sum=$sum->plus((string)$x[$f]);$header[$f]=$this->saldo($sum);}
             if($c){$cid=(int)$c->id;DB::table('recepciones_consolidadas')->where('id',$cid)->update($header);}
             else{$cid=DB::table('recepciones_consolidadas')->insertGetId($header+['numero_interno'=>'TMP-'.Str::uuid(),'creado_por'=>$u]);DB::table('recepciones_consolidadas')->where('id',$cid)->update(['numero_interno'=>'CON-'.str_pad((string)$cid,8,'0',STR_PAD_LEFT)]);}
@@ -137,12 +165,12 @@ final class ConsolidacionesControlador
     }
     public function anular(Request $r,int $id){
         $v=$r->validate(['huella'=>'required|string|size:64','motivo'=>'required|string|min:3|max:1000']);$u=$this->usuario($r);
-        $hint=DB::table('recepciones_consolidadas')->where('id',$id)->first();abort_unless($hint,404);
-        return response()->json(DB::transaction(function()use($hint,$id,$v,$u){
-            $this->orden((int)$hint->orden_compra_id,true);
-            $c=DB::table('recepciones_consolidadas')->where('id',$id)->lockForUpdate()->first();
+        $hint=DB::table('recepciones_consolidadas')->where('id',$id)->where('sucursal_id',$this->contexto($r))->first();abort_unless($hint,404);
+        return response()->json(DB::transaction(function()use($hint,$id,$v,$u,$r){
+            $sid=$this->contexto($r,true);$this->orden((int)$hint->orden_compra_id,$sid,true);
+            $c=DB::table('recepciones_consolidadas')->where('id',$id)->where('sucursal_id',$sid)->lockForUpdate()->first();
             abort_unless($c&&$this->codigo($c->estado_id)==='ACTIVA'&&!$c->token_confirmacion,409,'Solo se anulan consolidaciones activas.');
-            abort_unless(hash_equals($this->current($id)['huella'],$v['huella']),409,'Actualice la consolidación.');
+            abort_unless(hash_equals($this->current($id,$sid)['huella'],$v['huella']),409,'Actualice la consolidación.');
             abort_if(DB::table('kardex')->where('origen_tipo','CONSOLIDACION_RECEPCION')->whereIn('origen_detalle_id',DB::table('recepciones_consolidadas_detalle')->where('recepcion_consolidada_id',$id)->select('id'))->exists(),409,'Existen movimientos.');
             $ids=DB::table('recepciones')->where('recepcion_consolidada_id',$id)->pluck('id')->all();
             DB::table('recepciones')->where('recepcion_consolidada_id',$id)->update(['recepcion_consolidada_id'=>null]);
@@ -156,12 +184,13 @@ final class ConsolidacionesControlador
     }
     public function confirmar(Request $r,int $id){
         $v=$r->validate(['huella'=>'required|string|size:64','token_confirmacion'=>'required|uuid','aceptar_diferencias'=>'sometimes|boolean','motivo'=>'nullable|string|max:1000']);$u=$this->usuario($r);$token=strtolower($v['token_confirmacion']);
-        $hint=DB::table('recepciones_consolidadas')->where('id',$id)->first();abort_unless($hint,404);
-        $result=DB::transaction(function()use($hint,$v,$u,$token,$id){
-            $o=$this->orden((int)$hint->orden_compra_id,true);$c=DB::table('recepciones_consolidadas')->where('id',$id)->lockForUpdate()->first();abort_unless($c,404);
+        $hint=DB::table('recepciones_consolidadas')->where('id',$id)->where('sucursal_id',$this->contexto($r))->first();abort_unless($hint,404);
+        $result=DB::transaction(function()use($hint,$v,$u,$token,$id,$r){
+            $sid=$this->contexto($r,true);$o=$this->orden((int)$hint->orden_compra_id,$sid,true);$c=DB::table('recepciones_consolidadas')->where('id',$id)->where('sucursal_id',$sid)->lockForUpdate()->first();abort_unless($c,404);
+            $this->bodega((int)$c->bodega_id,$sid,true);
             if($c->token_confirmacion===$token&&$this->codigo($c->estado_id)==='CONSOLIDADA')return ['id'=>$id,'estado'=>'CONSOLIDADA','repetida'=>true,'mensaje'=>'Consolidación ya confirmada.'];
             abort_unless($this->codigo($c->estado_id)==='ACTIVA'&&!$c->token_confirmacion,409,'Consolidación no confirmable.');
-            $review=$this->current($id);
+            $review=$this->current($id,$sid);
             abort_unless(hash_equals($review['huella'],$v['huella']),409,'Cambió la consolidación. Revise nuevamente.');
             abort_unless($review['cierre_habilitado'],409,implode(' ',$review['bloqueos']));
             $motivo=trim((string)($v['motivo']??''));
@@ -181,7 +210,7 @@ final class ConsolidacionesControlador
                 $q=$this->decimal($d['cantidad_aceptada']);$cost=$this->decimal($d['costo_unitario_neto']);
                 abort_unless($d['presentacion_id']===null&&$this->decimal($d['unidades_por_presentacion_snapshot'])->isEqualTo('1')&&!$q->isNegative()&&!$cost->isNegative(),409,'Línea de inventario inconsistente.');
                 if($q->isZero())continue;
-                $k=DB::table('kardex')->where('origen_tipo','RECEPCION')->where('origen_detalle_id',$d['id'])->where('operacion_codigo','ENTRADA_TRANSITO')->first();
+                $k=DB::table('kardex')->where('origen_tipo','RECEPCION')->where('origen_detalle_id',$d['id'])->where('operacion_codigo','ENTRADA_TRANSITO')->where('sucursal_id',$sid)->first();
                 abort_unless($k&&(int)$k->producto_id===(int)$d['producto_id']&&(int)$k->bodega_id===(int)$c->bodega_id&&(int)$k->tipo_movimiento===3&&$this->decimal($k->cantidad_documento)->isEqualTo($q)&&$this->decimal($k->costo_unitario_neto)->isEqualTo($cost),409,'No se acredita la entrada a tránsito.');
                 $pid=(int)$d['producto_id'];$byProduct[$pid]['q']=($byProduct[$pid]['q']??BigDecimal::zero())->plus($q);
                 $byProduct[$pid]['v']=($byProduct[$pid]['v']??BigDecimal::zero())->plus($q->multipliedBy($cost));
@@ -196,8 +225,11 @@ final class ConsolidacionesControlador
                 foreach($bals as $s){$a=$this->decimal($s->disponible);$t=$this->decimal($s->transito);$m=$this->decimal($s->comprometido);$f=$this->decimal($s->cantidad_fisica);
                     abort_unless(!$a->isNegative()&&!$t->isNegative()&&!$m->isNegative()&&$f->isEqualTo($a->plus($t)->plus($m)),409,'Stock inconsistente.');
                     $oldQty=$oldQty->plus($a)->plus($m);if((int)$s->bodega_id===(int)$c->bodega_id)$stock=$s;}
+                $baseInventario=(new \App\Services\LectorBaseValorizadaInventario())->leer((int)$pid,$bals);
+                $oldQty=BigDecimal::of($baseInventario['stock_valorizado']);
                 $q=$byProduct[$pid]['q'];$value=$byProduct[$pid]['v']->toScale(16);
-                abort_unless($stock&&$this->decimal($stock->transito)->isGreaterThanOrEqualTo($q),409,'Tránsito insuficiente.');
+                abort_unless($stock,409,'No existe saldo de tránsito.');
+                (new \App\Services\BaseValorizadaInventario())->verificarLiberacionCompra($baseInventario,(int)$c->bodega_id,$this->saldo($q));
                 $oldCpp=$this->decimal($p->costo_promedio_ponderado);$base=$oldCpp;$source='CPP_VIGENTE';
                 if($oldQty->isZero()){$base=BigDecimal::zero();$source='SIN_STOCK_VALORIZADO';}
                 elseif($oldCpp->isZero()){
@@ -213,7 +245,7 @@ final class ConsolidacionesControlador
                 $first=true;foreach($details->where('producto_id',$pid) as $l){
                     $n=$this->decimal($l->cantidad_aceptada);if($n->isZero())continue;
                     $na=$a->plus($n);$nt=$t->minus($n);
-                    DB::table('kardex')->insert(['producto_id'=>$pid,'bodega_id'=>$c->bodega_id,'tipo_documento_id'=>$doc->id,'folio_documento'=>$c->numero_interno,'tipo_movimiento'=>1,
+                    DB::table('kardex')->insert(['sucursal_id'=>$sid,'producto_id'=>$pid,'bodega_id'=>$c->bodega_id,'tipo_documento_id'=>$doc->id,'folio_documento'=>$c->numero_interno,'tipo_movimiento'=>1,
                       'cantidad_anterior'=>$this->saldo($a),'cantidad_documento'=>$this->saldo($n),'cantidad_actual'=>$this->saldo($na),
                       'transito_anterior'=>$this->saldo($t),'transito_actual'=>$this->saldo($nt),'comprometido_anterior'=>$this->saldo($m),'comprometido_actual'=>$this->saldo($m),'fisico_anterior'=>$this->saldo($f),'fisico_actual'=>$this->saldo($f),
                       'costo_unitario_neto'=>$l->costo_unitario_neto_ponderado,'ultimo_costo_anterior'=>$first?$p->costo_neto:$newCost,'ultimo_costo_actual'=>$newCost,'cpp_anterior'=>$first?$p->costo_promedio_ponderado:$newCpp,'cpp_actual'=>$newCpp,
@@ -235,7 +267,7 @@ final class ConsolidacionesControlador
         },3);
         $result['correos']=[];
         // Un primer intento fuera de la transacción. La cola persiste aunque falle SMTP.
-        foreach(array_slice($result['notificaciones']??[],0,3) as $nid){try{$result['correos'][]=['id'=>$nid,'estado'=>(new RegularizacionRecepcion())->enviar($nid)];}catch(\Throwable $e){$result['correos'][]=['id'=>$nid,'estado'=>'PENDIENTE_VERIFICACION'];}}
+        foreach(array_slice($result['notificaciones']??[],0,3) as $nid){try{$result['correos'][]=['id'=>$nid,'estado'=>(new RegularizacionRecepcion())->enviar($nid,false,$r)];}catch(\Throwable $e){$result['correos'][]=['id'=>$nid,'estado'=>'PENDIENTE_VERIFICACION'];}}
         $result['correos_pendientes']=max(0,count($result['notificaciones']??[])-count($result['correos']));
         if(!empty($result['notificaciones']))$result['mensaje'].=' Revise las solicitudes y el estado de sus correos.';
         return response()->json($result);

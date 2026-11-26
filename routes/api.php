@@ -94,6 +94,10 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     // V104: inventario unificado; habilitar únicamente tras confirmar DDL39-42.
     Route::get('/inventario/catalogos',[\App\Http\Controllers\InventarioOperacionesControlador::class,'catalogos'])->middleware('permiso.rutahd:inventario.catalogos.ver');
     Route::put('/inventario/motivos/{id}',[\App\Http\Controllers\InventarioOperacionesControlador::class,'actualizarMotivo'])->middleware('permiso.rutahd:inventario.catalogos.gestionar')->whereNumber('id');
+    // V109C6A: consultas; escrituras de traspasos pendientes de habilitación integral.
+    Route::get('/inventario/traspasos',[\App\Http\Controllers\TraspasosConsultasControlador::class,'listar'])->middleware('permiso.rutahd:inventario.operaciones.ver');
+    Route::get('/inventario/traspasos/bodegas',[\App\Http\Controllers\TraspasosConsultasControlador::class,'bodegas'])->middleware('permiso.rutahd:inventario.operaciones.ver');
+    Route::get('/inventario/traspasos/{id}',[\App\Http\Controllers\TraspasosConsultasControlador::class,'ver'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id');
     Route::get('/inventario/ajustes',[\App\Http\Controllers\AjustesGeneralesControlador::class,'listar'])->middleware('permiso.rutahd:inventario.operaciones.ver');
     Route::get('/inventario/ajustes/{id}',[\App\Http\Controllers\AjustesGeneralesControlador::class,'ver'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id');
     Route::get('/inventario/ajustes/{id}/respaldos/{adjunto}',[\App\Http\Controllers\AjustesGeneralesControlador::class,'respaldo'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber(['id','adjunto']);

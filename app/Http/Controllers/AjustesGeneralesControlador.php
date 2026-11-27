@@ -19,6 +19,9 @@ class AjustesGeneralesControlador extends Controller
         return (new PlanAjusteGeneral())->calcular($m,$cantidad,$stock,$cpp);
     }
     protected function tipoKardex(object $o): int {return (int)$o->motivo_codigo_snapshot===102?2:1;}
+    protected function evaluacionAviso(array $plan): string {return 'NO_APLICA';}
+    protected function verificarTributario(object $o,array $plan): void {}
+
 
     private function reglas(): array {
         return [
@@ -99,7 +102,7 @@ class AjustesGeneralesControlador extends Controller
             }
             [$m,$b,$p,$plan]=$this->evaluar($v,$sid);
             $state=$this->estado('INV_PEND_APROBACION');
-            $id=DB::table('inventario_operaciones')->insertGetId(['sucursal_id'=>$sid,'clase'=>'AJUSTE','motivo_id'=>$m->id,'estado_id'=>$state,'motivo_codigo_snapshot'=>$m->codigo,'motivo_nombre_snapshot'=>$m->nombre,'regla_snapshot'=>$m->regla,'politica_cpp_snapshot'=>$m->politica_cpp,'justificacion'=>$just,'revision_tributaria'=>'PENDIENTE','evaluacion_aviso_sii'=>'NO_APLICA','token_creacion'=>$token,'creado_por'=>$uid]);
+            $id=DB::table('inventario_operaciones')->insertGetId(['sucursal_id'=>$sid,'clase'=>'AJUSTE','motivo_id'=>$m->id,'estado_id'=>$state,'motivo_codigo_snapshot'=>$m->codigo,'motivo_nombre_snapshot'=>$m->nombre,'regla_snapshot'=>$m->regla,'politica_cpp_snapshot'=>$m->politica_cpp,'justificacion'=>$just,'revision_tributaria'=>'PENDIENTE','evaluacion_aviso_sii'=>$this->evaluacionAviso($plan),'token_creacion'=>$token,'creado_por'=>$uid]);
             $num=$this->prefijo().str_pad((string)$id,8,'0',STR_PAD_LEFT);
             DB::table('inventario_operaciones')->where('id',$id)->update(['numero_interno'=>$num]);
             DB::table('inventario_operaciones_detalle')->insert(['operacion_id'=>$id,'numero_linea'=>1,'producto_id'=>$p->id,'bodega_id'=>$b->id,'cantidad'=>$plan['cantidad'],'delta_disponible'=>$plan['delta_disponible'],'delta_fisico'=>$plan['delta_fisico'],'delta_transito'=>$plan['delta_transito'],'delta_comprometido'=>$plan['delta_comprometido'],'costo_unitario_snapshot'=>$plan['costo_unitario_snapshot']]);
@@ -145,6 +148,7 @@ class AjustesGeneralesControlador extends Controller
         abort_unless($lines->count()===1&&(int)$l->numero_linea===1&&$l->kardex_id===null&&$l->kardex_referencia_id===null&&$o->referencia_kardex_id===null,409,'Detalle de ajuste inválido.');
         [$m,$b,$p,$plan,$stock]=$this->evaluar(['motivo_codigo'=>$o->motivo_codigo_snapshot,'producto_id'=>$l->producto_id,'bodega_id'=>$l->bodega_id,'cantidad'=>(string)$l->cantidad],$sid);
         abort_unless((int)$m->id===(int)$o->motivo_id&&$m->regla===$o->regla_snapshot&&$m->politica_cpp===$o->politica_cpp_snapshot,409,'Regla del motivo modificada.');
+        $this->verificarTributario($o,$plan);
         foreach(['cantidad','delta_disponible','delta_fisico','delta_transito','delta_comprometido','costo_unitario_snapshot'] as $field){
             abort_unless($l->$field!==null&&BigDecimal::of($l->$field)->isEqualTo($plan[$field]),409,'Detalle o CPP modificado. Anule y genere un nuevo ajuste.');
         }

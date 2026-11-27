@@ -1,0 +1,83 @@
+name: V109D6A - Validar anulación de conteos
+on:
+  push:
+    branches: [feature/v109a-inventario-contexto-20261126]
+    paths:
+      - .github/workflows/v109d6a-anulacion.yml
+      - tests/conteos_anulacion_v109d6a.php
+      - app/Http/Controllers/ConteosInventarioControlador.php
+      - config/conteos.php
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, fileinfo, pdo_sqlite, iconv
+      - name: Validar sintaxis y motor aislado
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/ConteosInventarioControlador.php
+          php -l app/Services/PlanConteoInventario.php
+          php -l app/Http/Controllers/TraspasosConsultasControlador.php
+          php -l routes/api.php
+          php -l routes/api.php
+          php -l tests/conteos_anulacion_v109d6a.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/conteos_anulacion_v109d6a.php | tee /tmp/v109d6a.log
+          grep -Fx V109D6A_ANULACION_OK /tmp/v109d6a.log
+  validar-mariadb:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: temporal_ci_solamente
+          MARIADB_DATABASE: rutahyd_v109d6a_ci
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: rutahyd_v109d6a_ci
+      DB_USERNAME: root
+      DB_PASSWORD: temporal_ci_solamente
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, fileinfo, pdo_mysql, iconv
+      - name: Motor aislado MariaDB
+        run: |
+          set -euo pipefail
+          php -l tests/conteos_anulacion_v109d6a.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/conteos_anulacion_v109d6a.php | tee /tmp/v109d6a-mariadb.log
+          grep -Fx V109D6A_ANULACION_OK /tmp/v109d6a-mariadb.log

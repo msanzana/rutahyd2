@@ -43,7 +43,7 @@ final class ConciliadorComprometidoReservas
                 continue;
             }
             // Estados terminales y consumo se incorporarán al acreditar el ENUM completo.
-            abort_unless(in_array($line->estado_reserva,['ACTIVA','PARCIAL'],true),409,'Estado histórico de reserva aún no conciliable.');
+            abort_unless((in_array($line->estado_reserva,['ACTIVA','PARCIAL'],true)||($line->estado_reserva==='LIBERADA'&&config('reservas.estado_liberada')==='LIBERADA')),409,'Estado histórico de reserva aún no conciliable.');
             $r=(new LectorSaldoReservaInventario())->leer($id,$producto,$bodega,$sucursal);
             $sum=$sum->plus($r['pendiente']);$ids[]=$id;
         }

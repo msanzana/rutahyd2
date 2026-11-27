@@ -28,14 +28,14 @@ final class ConciliadorComprometidoReservas
             $released=BigDecimal::of((string)$line->cantidad_liberada)->toScale(8);
             $sent=BigDecimal::of((string)$line->cantidad_despachada)->toScale(8);
             abort_unless($q->isPositive()&&!$released->isNegative()&&$released->isLessThanOrEqualTo($q)&&$sent->isZero(),409,'Detalle de reserva no conciliable.');
-            if($line->estado_reserva==='PENDIENTE'){
+            if($line->estado_reserva==='PENDIENTE'||($line->estado_reserva==='ANULADA'&&config('reservas.estado_anulada')==='ANULADA')){
                 abort_unless($released->isZero(),409,'Solicitud pendiente con liberaciones.');
                 $links=DB::table('inventario_reservas_operaciones')->where('reserva_id',$id)->lockForUpdate()->get();
                 abort_unless($links->count()===1,409,'Solicitud pendiente sin vínculo único.');
                 $oid=(int)$links->first()->operacion_id;
                 abort_unless(DB::table('inventario_reservas_operaciones')->where('operacion_id',$oid)->lockForUpdate()->get()->count()===1,409,'Operación compartida.');
                 $o=DB::table('inventario_operaciones as o')->join('estados as e','e.id','=','o.estado_id')->where('o.id',$oid)->select('o.*','e.codigo as estado_codigo')->lockForUpdate()->first();
-                abort_unless($o&&$o->clase==='RESERVA'&&(int)$o->sucursal_id===$sucursal&&(int)$o->motivo_codigo_snapshot===710&&in_array($o->estado_codigo,['INV_PEND_APROBACION','INV_APROBADA'],true)&&$o->confirmado_por===null&&$o->token_confirmacion===null,409,'Solicitud pendiente con ejecución incompatible.');
+                abort_unless($o&&$o->clase==='RESERVA'&&(int)$o->sucursal_id===$sucursal&&(int)$o->motivo_codigo_snapshot===710&&($line->estado_reserva==='ANULADA'?($o->estado_codigo==='INV_ANULADA'&&(int)$o->anulado_por>0):in_array($o->estado_codigo,['INV_PEND_APROBACION','INV_APROBADA'],true))&&$o->confirmado_por===null&&$o->token_confirmacion===null,409,'Solicitud pendiente con ejecución incompatible.');
                 $details=DB::table('inventario_operaciones_detalle')->where('operacion_id',$oid)->lockForUpdate()->get();
                 $matching=$details->filter(fn($d)=>(int)$d->producto_id===$producto&&(int)$d->bodega_id===$bodega);
                 abort_unless($matching->count()===1&&BigDecimal::of((string)$matching->first()->cantidad)->isEqualTo($q),409,'Detalle pendiente incompatible.');

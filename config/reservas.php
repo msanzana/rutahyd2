@@ -1,3 +1,3 @@
 <?php
-// No habilitar hasta acreditar clase, referencia comercial y contrato de reservas.
-return ['solicitudes_verificadas'=>false,'clase_operacion'=>null];
+// Contratos pendientes; no habilitar producción sin evidencia.
+return ['solicitudes_verificadas'=>false,'clase_operacion'=>null,'confirmacion_verificada'=>false,'tipo_kardex_reservar'=>null];

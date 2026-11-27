@@ -299,6 +299,53 @@ final class ConteosInventarioControlador extends Controller
             return ['id'=>$id,'estado'=>$final,'operaciones'=>$links,'movimiento_aplicado'=>count($links)>0,'repetida'=>false];
         },3))->header('Cache-Control','no-store');
     }
+
+    /** V109D6A: anula sin revertir ni ejecutar stock, incluso con corte obsoleto. */
+    public function anular(Request $r,int $id){
+        $v=$r->validate(['motivo'=>'required|string|min:10|max:1000']);
+        $obs=trim($v['motivo']);abort_if(mb_strlen($obs)<10,422,'Justificación insuficiente.');
+        $final=config('conteos.estado_anulado');
+        abort_unless($final==='ANULADO',409,'Estado de anulación pendiente de verificación.');
+        return response()->json(DB::transaction(function()use($r,$id,$obs,$final){
+            $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$uid=(int)$r->user()->id;$c=$this->cabecera($id,$sid);
+            $events=DB::table('registros_auditoria')->where('tipo_entidad','inventario_conteos')->where('entidad_id',$id)->whereIn('accion',['CONTEO_ANULACION','CONTEO_CONFIRMACION','CONTEO_AJUSTES_PREPARADOS'])->orderBy('id')->lockForUpdate()->get(['accion','usuario_id','valores_nuevos']);
+            $previous=$events->where('accion','CONTEO_ANULACION');
+            if($previous->isNotEmpty()){
+                $p=json_decode($previous->first()->valores_nuevos,true,512,JSON_THROW_ON_ERROR);
+                abort_unless($previous->count()===1&&$c->estado===$final&&(int)$previous->first()->usuario_id===$uid&&($p['motivo']??null)===$obs,409,'Anulación previa incompatible.');
+                return ['id'=>$id,'estado'=>$final,'operaciones'=>$p['operaciones'],'repetida'=>true,'movimiento_aplicado'=>false];
+            }
+            abort_unless(in_array($c->estado,['BORRADOR','EN_CONTEO','EN_REVISION'],true)&&$c->operacion_ajuste_id===null&&$events->where('accion','CONTEO_CONFIRMACION')->isEmpty(),409,'Solo conteos sin ejecución pueden anularse.');
+            $links=DB::table('inventario_conteos_operaciones')->where('conteo_id',$id)->orderBy('operacion_id')->lockForUpdate()->pluck('operacion_id')->map(fn($x)=>(int)$x)->all();
+            $prep=$events->where('accion','CONTEO_AJUSTES_PREPARADOS');
+            abort_unless($prep->count()<=1&&($links===[]||$prep->count()===1),409,'Vínculos sin preparación verificable.');
+            if($prep->count()===1){
+                $p=json_decode($prep->first()->valores_nuevos,true,512,JSON_THROW_ON_ERROR);
+                abort_unless(($p['operaciones']??null)===$links,409,'Vínculos de ajuste inconsistentes.');
+            }
+            if($links){
+                abort_unless($c->estado==='EN_REVISION',409,'Conteo con ajustes fuera de revisión.');
+                $approved=$this->estadoOperacion('INV_APROBADA');$cancelled=$this->estadoOperacion('INV_ANULADA');
+                foreach($links as $oid){
+                    $o=DB::table('inventario_operaciones')->where('id',$oid)->lockForUpdate()->first();
+                    abort_unless($o&&$o->clase==='CONTEO'&&(int)$o->sucursal_id===$sid&&(int)$o->estado_id===$approved&&(int)$o->version===2&&(int)$o->creado_por===(int)$c->creado_por&&(int)$o->aprobado_por===(int)$prep->first()->usuario_id&&$o->confirmado_por===null&&$o->confirmado_en===null&&$o->token_confirmacion===null&&$o->anulado_por===null,409,'Ajuste vinculado no anulable.');
+                    $details=DB::table('inventario_operaciones_detalle')->where('operacion_id',$oid)->orderBy('id')->lockForUpdate()->get(['id','bodega_id','kardex_id','kardex_referencia_id']);
+                    abort_unless($details->isNotEmpty(),409,'Ajuste sin detalle.');
+                    foreach($details as $l)abort_unless((int)$l->bodega_id===(int)$c->bodega_id&&$l->kardex_id===null&&$l->kardex_referencia_id===null,409,'Ajuste con movimiento o referencia.');
+                    abort_if(DB::table('kardex')->where('origen_tipo','AJUSTE_INVENTARIO')->whereIn('origen_detalle_id',$details->pluck('id')->all())->exists(),409,'Existe Kardex asociado.');
+                }
+                foreach($links as $oid){
+                    DB::table('inventario_operaciones')->where('id',$oid)->update(['estado_id'=>$cancelled,'version'=>3,'anulado_por'=>$uid,'anulado_en'=>now(),'motivo_anulacion'=>$obs]);
+                    DB::table('inventario_operaciones_historial')->insert(['operacion_id'=>$oid,'estado_anterior_id'=>$approved,'estado_nuevo_id'=>$cancelled,'usuario_id'=>$uid,'accion'=>'ANULAR','observaciones'=>$obs]);
+                }
+            }
+            DB::table('inventario_conteos')->where('id',$id)->update(['estado'=>$final]);
+            abort_unless(DB::table('inventario_conteos')->where('id',$id)->value('estado')===$final,409,'Estado de anulación no admitido.');
+            $this->auditoria($id,$uid,'CONTEO_ANULACION',['estado'=>$c->estado],['estado'=>$final,'motivo'=>$obs,'operaciones'=>$links]);
+            return ['id'=>$id,'estado'=>$final,'operaciones'=>$links,'repetida'=>false,'movimiento_aplicado'=>false];
+        },3))->header('Cache-Control','no-store');
+    }
+
     public function listar(Request $r){
         $v=$r->validate(['buscar'=>'nullable|string|max:120','page'=>'nullable|integer|min:1','bodega_id'=>'nullable|integer|min:1','estado'=>'nullable|in:BORRADOR,EN_CONTEO,EN_REVISION,CONFIRMADO']);
         $sid=(int)app(ContextoCompras::class)->resolver($r)->id;
@@ -316,6 +363,7 @@ final class ConteosInventarioControlador extends Controller
     private function datos(Request $r,int $id): array {
         return DB::transaction(function()use($r,$id){
             $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$uid=(int)$r->user()->id;$c=$this->cabecera($id,$sid);
+            abort_if($c->estado==='ANULADO',404,'Conteo no disponible.');
             $lines=DB::table('inventario_conteos_detalle as l')->join('productos as p','p.id','=','l.producto_id')->where('l.conteo_id',$id)->orderBy('l.id')->select('l.*','p.sku','p.nombre as producto')->get();
             if((bool)$c->conteo_ciego&&$c->estado==='EN_CONTEO')foreach($lines as $l){
                 $l->contado=$l->cantidad_contada!==null;$l->recontado=$l->cantidad_recontada!==null;

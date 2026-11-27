@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 require __DIR__.'/../vendor/autoload.php';
+$app=require __DIR__.'/../bootstrap/app.php';
+$app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+if(config('app.env')!=='testing')throw new RuntimeException('Solo CI aislado');
 
 use App\Services\PlanDevolucionInventario;
 use App\Services\SaldoDevolucionReferencia;

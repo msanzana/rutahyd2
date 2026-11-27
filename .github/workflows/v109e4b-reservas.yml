@@ -1,0 +1,89 @@
+name: V109E4B - Validar anulación y vencimiento de reservas
+on:
+  push:
+    branches: [feature/v109a-inventario-contexto-20261126]
+    paths:
+      - .github/workflows/v109e4b-reservas.yml
+      - app/Http/Controllers/ReservasInventarioControlador.php
+      - app/Http/Controllers/LiberacionesReservaControlador.php
+      - app/Http/Controllers/AnulacionesReservaControlador.php
+      - app/Http/Controllers/VencimientosReservaControlador.php
+      - config/reservas.php
+      - app/Services/ConciliadorComprometidoReservas.php
+      - app/Services/LectorSaldoReservaInventario.php
+      - tests/reserva_anulacion_vencimiento_v109e4b.php
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, fileinfo, pdo_sqlite, iconv
+      - name: Validar sintaxis y motor aislado
+        run: |
+          set -euo pipefail
+          php -l app/Http/Controllers/ReservasInventarioControlador.php
+          php -l app/Http/Controllers/LiberacionesReservaControlador.php
+          php -l app/Http/Controllers/AnulacionesReservaControlador.php
+          php -l app/Http/Controllers/VencimientosReservaControlador.php
+          php -l config/reservas.php
+          php -l app/Services/ConciliadorComprometidoReservas.php
+          php -l tests/reserva_anulacion_vencimiento_v109e4b.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/reserva_anulacion_vencimiento_v109e4b.php | tee /tmp/v109e4b.log
+          grep -Fx V109E4B_ANULACION_VENCIMIENTO_OK /tmp/v109e4b.log
+  validar-mariadb:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: temporal_ci_solamente
+          MARIADB_DATABASE: rutahyd_v109e4b_ci
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: rutahyd_v109e4b_ci
+      DB_USERNAME: root
+      DB_PASSWORD: temporal_ci_solamente
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, fileinfo, pdo_mysql, iconv
+      - name: Motor aislado MariaDB
+        run: |
+          set -euo pipefail
+          php -l tests/reserva_anulacion_vencimiento_v109e4b.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/reserva_anulacion_vencimiento_v109e4b.php | tee /tmp/v109e4b-mariadb.log
+          grep -Fx V109E4B_ANULACION_VENCIMIENTO_OK /tmp/v109e4b-mariadb.log

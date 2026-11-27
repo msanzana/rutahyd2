@@ -21,9 +21,19 @@ class AjustesGeneralesControlador extends Controller
     protected function tipoKardex(object $o): int {return (int)$o->motivo_codigo_snapshot===102?2:1;}
     protected function evaluacionAviso(array $plan): string {return 'NO_APLICA';}
     protected function verificarTributario(object $o,array $plan): void {}
+    protected function cabeceraReferencia(array $plan): array {return [];}
+    protected function detalleReferencia(array $plan): array {return [];}
+    protected function validarReintentoReferencia(object $o,object $l,array $v): void {}
+    protected function solicitudGuardada(object $o,object $l): array {
+        abort_unless($l->kardex_referencia_id===null&&$o->referencia_kardex_id===null,409,'Referencia inesperada.');
+        return ['motivo_codigo'=>$o->motivo_codigo_snapshot,'producto_id'=>$l->producto_id,'bodega_id'=>$l->bodega_id,'cantidad'=>(string)$l->cantidad];
+    }
+    protected function verificarConfirmador(object $o,int $uid): void {}
+    protected function aplicarCpp(object $p,array $plan): void {}
+    protected function mensajeConfirmacion(): string {return 'Ajuste físico confirmado. CPP vigente conservado; revisión tributaria pendiente.';}
 
 
-    private function reglas(): array {
+    protected function reglas(): array {
         return [
             'motivo_codigo'=>'required|integer|in:'.implode(',',$this->codigos()),
             'producto_id'=>'required|integer|min:1',
@@ -31,7 +41,7 @@ class AjustesGeneralesControlador extends Controller
             'cantidad'=>['required','string','regex:/^(?:0|[1-9][0-9]{0,19})(?:\.[0-9]{1,8})?$/D'],
         ];
     }
-    private function evaluar(array $v,int $sid): array {
+    protected function evaluar(array $v,int $sid,?int $propia=null): array {
             abort_unless(DB::transactionLevel()>0,500,'Evaluación sin transacción.');
             $m=DB::table('inventario_motivos as m')
               ->join('inventario_grupos_motivos as g','g.id','=','m.grupo_id')
@@ -98,14 +108,15 @@ class AjustesGeneralesControlador extends Controller
                 $stored=DB::table('inventario_operaciones_adjuntos')->where('operacion_id',$old->id)->orderBy('id')->get(['nombre','mime','sha256'])->map(fn($x)=>(array)$x)->all();
                 $requested=array_map(fn($x)=>['nombre'=>$x['nombre'],'mime'=>$x['mime'],'sha256'=>$x['sha256']],$files);
                 abort_unless($lines->count()===1&&(int)$l->producto_id===(int)$v['producto_id']&&(int)$l->bodega_id===(int)$v['bodega_id']&&BigDecimal::of($l->cantidad)->isEqualTo($v['cantidad'])&&$stored===$requested,409,'Token usado en otra solicitud.');
+                $this->validarReintentoReferencia($old,$l,$v);
                 return ['id'=>(int)$old->id,'numero_interno'=>$old->numero_interno,'repetida'=>true];
             }
             [$m,$b,$p,$plan]=$this->evaluar($v,$sid);
             $state=$this->estado('INV_PEND_APROBACION');
-            $id=DB::table('inventario_operaciones')->insertGetId(['sucursal_id'=>$sid,'clase'=>'AJUSTE','motivo_id'=>$m->id,'estado_id'=>$state,'motivo_codigo_snapshot'=>$m->codigo,'motivo_nombre_snapshot'=>$m->nombre,'regla_snapshot'=>$m->regla,'politica_cpp_snapshot'=>$m->politica_cpp,'justificacion'=>$just,'revision_tributaria'=>'PENDIENTE','evaluacion_aviso_sii'=>$this->evaluacionAviso($plan),'token_creacion'=>$token,'creado_por'=>$uid]);
+            $id=DB::table('inventario_operaciones')->insertGetId(['sucursal_id'=>$sid,'clase'=>'AJUSTE','motivo_id'=>$m->id,'estado_id'=>$state,'motivo_codigo_snapshot'=>$m->codigo,'motivo_nombre_snapshot'=>$m->nombre,'regla_snapshot'=>$m->regla,'politica_cpp_snapshot'=>$m->politica_cpp,'justificacion'=>$just,'revision_tributaria'=>'PENDIENTE','evaluacion_aviso_sii'=>$this->evaluacionAviso($plan),'token_creacion'=>$token,'creado_por'=>$uid]+$this->cabeceraReferencia($plan));
             $num=$this->prefijo().str_pad((string)$id,8,'0',STR_PAD_LEFT);
             DB::table('inventario_operaciones')->where('id',$id)->update(['numero_interno'=>$num]);
-            DB::table('inventario_operaciones_detalle')->insert(['operacion_id'=>$id,'numero_linea'=>1,'producto_id'=>$p->id,'bodega_id'=>$b->id,'cantidad'=>$plan['cantidad'],'delta_disponible'=>$plan['delta_disponible'],'delta_fisico'=>$plan['delta_fisico'],'delta_transito'=>$plan['delta_transito'],'delta_comprometido'=>$plan['delta_comprometido'],'costo_unitario_snapshot'=>$plan['costo_unitario_snapshot']]);
+            DB::table('inventario_operaciones_detalle')->insert(['operacion_id'=>$id,'numero_linea'=>1,'producto_id'=>$p->id,'bodega_id'=>$b->id,'cantidad'=>$plan['cantidad'],'delta_disponible'=>$plan['delta_disponible'],'delta_fisico'=>$plan['delta_fisico'],'delta_transito'=>$plan['delta_transito'],'delta_comprometido'=>$plan['delta_comprometido'],'costo_unitario_snapshot'=>$plan['costo_unitario_snapshot']]+$this->detalleReferencia($plan));
             foreach($files as $f)DB::table('inventario_operaciones_adjuntos')->insert($f+['operacion_id'=>$id,'creado_por'=>$uid]);
             DB::table('inventario_operaciones_historial')->insert(['operacion_id'=>$id,'estado_anterior_id'=>null,'estado_nuevo_id'=>$state,'usuario_id'=>$uid,'accion'=>'CREAR','observaciones'=>'Ajuste con respaldo pendiente de aprobación.']);
             DB::table('registros_auditoria')->insert(['usuario_id'=>$uid,'accion'=>'INVENTARIO_CREAR','tipo_entidad'=>'inventario_operaciones','entidad_id'=>$id,'valores_anteriores'=>json_encode(null,JSON_THROW_ON_ERROR),'valores_nuevos'=>json_encode(['estado_id'=>$state,'sucursal_id'=>$sid,'respaldos'=>array_column($files,'sha256')],JSON_THROW_ON_ERROR)]);
@@ -145,8 +156,8 @@ class AjustesGeneralesControlador extends Controller
     private function revisarGuardado(object $o,int $sid): array {
         $lines=DB::table('inventario_operaciones_detalle')->where('operacion_id',$o->id)->lockForUpdate()->get();
         $l=$lines->first();
-        abort_unless($lines->count()===1&&(int)$l->numero_linea===1&&$l->kardex_id===null&&$l->kardex_referencia_id===null&&$o->referencia_kardex_id===null,409,'Detalle de ajuste inválido.');
-        [$m,$b,$p,$plan,$stock]=$this->evaluar(['motivo_codigo'=>$o->motivo_codigo_snapshot,'producto_id'=>$l->producto_id,'bodega_id'=>$l->bodega_id,'cantidad'=>(string)$l->cantidad],$sid);
+        abort_unless($lines->count()===1&&(int)$l->numero_linea===1&&$l->kardex_id===null ,409,'Detalle de ajuste inválido.');
+        [$m,$b,$p,$plan,$stock]=$this->evaluar($this->solicitudGuardada($o,$l),$sid,(int)$o->id);
         abort_unless((int)$m->id===(int)$o->motivo_id&&$m->regla===$o->regla_snapshot&&$m->politica_cpp===$o->politica_cpp_snapshot,409,'Regla del motivo modificada.');
         $this->verificarTributario($o,$plan);
         foreach(['cantidad','delta_disponible','delta_fisico','delta_transito','delta_comprometido','costo_unitario_snapshot'] as $field){
@@ -193,6 +204,7 @@ class AjustesGeneralesControlador extends Controller
             if((int)$o->estado_id===$done&&$o->token_confirmacion===$token&&(int)$o->confirmado_por===$uid)return ['id'=>$id,'estado'=>'INV_CONFIRMADA','version'=>(int)$o->version];
             abort_unless((int)$o->estado_id===$approved&&(int)$o->version===(int)$v['version']&&$o->aprobado_por&&(int)$o->aprobado_por!==(int)$o->creado_por,409,'Se requiere aprobación y versión vigente.');
             abort_if(DB::table('inventario_operaciones')->where('token_confirmacion',$token)->exists(),409,'Token de confirmación utilizado.');
+            $this->verificarConfirmador($o,$uid);
             [$l,$p,$plan,$s]=$this->revisarGuardado($o,$sid);
             $stockId=$s->id??null;
             if(!$stockId)$stockId=DB::table('stock')->insertGetId(['producto_id'=>$l->producto_id,'bodega_id'=>$l->bodega_id,'disponible'=>0,'transito'=>0,'comprometido'=>0,'cantidad_fisica'=>0]);
@@ -208,7 +220,8 @@ class AjustesGeneralesControlador extends Controller
             ]);
             DB::table('stock')->where('id',$stockId)->update(['disponible'=>$plan['disponible_actual'],'cantidad_fisica'=>$plan['fisico_actual']]);
             DB::table('inventario_operaciones_detalle')->where('id',$l->id)->update(['kardex_id'=>$movement]);
-            $this->registrarEstado($o,$done,$uid,'CONFIRMAR','Ajuste físico confirmado. CPP vigente conservado; revisión tributaria pendiente.',['confirmado_por'=>$uid,'confirmado_en'=>now(),'token_confirmacion'=>$token]);
+            $this->aplicarCpp($p,$plan);
+            $this->registrarEstado($o,$done,$uid,'CONFIRMAR',$this->mensajeConfirmacion(),['confirmado_por'=>$uid,'confirmado_en'=>now(),'token_confirmacion'=>$token]);
             return ['id'=>$id,'estado'=>'INV_CONFIRMADA','version'=>(int)$o->version+1];
         },3))->header('Cache-Control','no-store');
     }

@@ -42,10 +42,13 @@ final class ReferenciaPerdidaInventario
             &&(int)$o->creado_por>0&&(int)$o->aprobado_por>0&&(int)$o->aprobado_por!==(int)$o->creado_por&&(int)$o->confirmado_por>0&&$o->token_confirmacion!==null&&$o->anulado_por===null,409,'Operación de origen no acreditada.');
         $n=$this->decimal($k->cantidad_documento);
         abort_unless($n->isPositive()&&$this->decimal($d->cantidad)->isEqualTo($n)
+            &&$this->decimal($d->delta_disponible)->isEqualTo($n)&&$this->decimal($d->delta_fisico)->isEqualTo($n)
+            &&$this->decimal($d->delta_transito)->isZero()&&$this->decimal($d->delta_comprometido)->isZero()
             &&$this->decimal($k->cantidad_actual)->minus($this->decimal($k->cantidad_anterior))->isEqualTo($n)
             &&$this->decimal($k->fisico_actual)->minus($this->decimal($k->fisico_anterior))->isEqualTo($n)
             &&$this->decimal($k->transito_actual)->isEqualTo($this->decimal($k->transito_anterior))
             &&$this->decimal($k->comprometido_actual)->isEqualTo($this->decimal($k->comprometido_anterior)),409,'Movimiento de origen inconsistente.');
+        abort_if(DB::table('kardex')->where('movimiento_reversado_id',$kid)->lockForUpdate()->get(['id'])->isNotEmpty(),409,'Movimiento de origen revertido.');
         // Exclusividad conservadora: no usar una referencia con otra operación activa,
         // incluso si es de otro módulo. Las anuladas se conservan como histórico.
         $links=DB::table('inventario_operaciones as x')->leftJoin('estados as e','e.id','=','x.estado_id')->where('x.referencia_kardex_id',$kid)

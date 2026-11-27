@@ -21,7 +21,7 @@ final class ReferenciaDevolucionDespacho
         abort_unless((is_string($v)||is_int($v))&&preg_match('/^(?:0|[1-9][0-9]{0,19})(?:\.[0-9]{1,8})?$/D',(string)$v),409,'Valor histórico no exacto.');
         return BigDecimal::of($v)->toScale(8);
     }
-    public function verificar(int $kid,int $sid,int $motivo): array {
+    public function verificar(int $kid,int $sid,int $motivo,?int $propia=null): array {
         abort_unless(self::habilitado()&&DB::transactionLevel()>0&&$kid>0&&$sid>0,409,'Referencia comercial no habilitada.');
         $contract=config('devoluciones.origenes_verificados',[])[$motivo]??null;
         abort_unless(in_array($motivo,[601,606],true)&&is_array($contract)&&($contract['origen']??null)==='DESPACHO_RESERVA_712',409,'Origen no acreditado para este motivo.');
@@ -52,18 +52,24 @@ final class ReferenciaDevolucionDespacho
             &&$cost->isEqualTo($this->qty($d->costo_unitario_snapshot))&&$cost->isEqualTo($this->qty($k->cpp_anterior))&&$cost->isEqualTo($this->qty($k->cpp_actual))
             &&(int)$k->tipo_documento_id===$ref['tipo_documento_id']&&$k->folio_documento===$ref['folio'],409,'Costo o cantidad de despacho no acreditado.');
         abort_if(DB::table('kardex')->where('movimiento_reversado_id',$kid)->lockForUpdate()->get(['id'])->isNotEmpty(),409,'Despacho revertido.');
-        // No admitir historial comercial ambiguo: todos los usos del origen deben
-        // conciliarse, incluso los realizados por un módulo distinto.
-        $usos=DB::table('inventario_operaciones as x')->leftJoin('estados as e','e.id','=','x.estado_id')->where('x.referencia_kardex_id',$kid)
-            ->select('x.*','e.codigo as estado_codigo')->lockForUpdate()->get();
-        foreach($usos as $u){
-            abort_unless($u->estado_codigo==='INV_ANULADA'&&$u->token_confirmacion===null&&$u->confirmado_por===null
-                &&!DB::table('inventario_operaciones_detalle')->where('operacion_id',$u->id)->whereNotNull('kardex_id')->exists(),409,'Origen utilizado; requiere conciliación de devoluciones previas.');
+        $historial=[];
+        if(config('devoluciones.historial_verificado')===true){
+            $historial=(new LectorSaldoDevolucionReferencia())->leer($sid,$pid,$bid,$kid,(string)$q,(string)$cost,$ref['tipo_documento_id'],(string)$ref['folio'],'DESPACHO_RESERVA_712',$propia);
+        }else{
+            abort_unless($propia===null,409,'Revalidación de solicitud requiere historial acreditado.');
+            // No admitir historial comercial ambiguo: todos los usos del origen deben
+            // conciliarse, incluso los realizados por un módulo distinto.
+            $usos=DB::table('inventario_operaciones as x')->leftJoin('estados as e','e.id','=','x.estado_id')->where('x.referencia_kardex_id',$kid)
+                ->select('x.*','e.codigo as estado_codigo')->lockForUpdate()->get();
+            foreach($usos as $u){
+                abort_unless($u->estado_codigo==='INV_ANULADA'&&$u->token_confirmacion===null&&$u->confirmado_por===null
+                    &&!DB::table('inventario_operaciones_detalle')->where('operacion_id',$u->id)->whereNotNull('kardex_id')->exists(),409,'Origen utilizado; requiere conciliación de devoluciones previas.');
+            }
         }
         return ['referencia_kardex_id'=>$kid,'operacion_origen_id'=>(int)$o->id,'reserva_id'=>(int)$h->id,'nota_venta_id'=>(int)$h->nota_venta_id,
             'guia_id'=>$ref['guia_id'],'referencia_tipo_documento_id'=>$ref['tipo_documento_id'],'referencia_folio'=>$ref['folio'],
             'producto_id'=>$pid,'bodega_id'=>$bid,'sucursal_id'=>$sid,'cantidad_original'=>(string)$q,'costo_historico'=>(string)$cost,
-            'saldo_solicitable'=>(string)$q,'origen_fisico_acreditado'=>true,'recepcion_devolucion_acreditada'=>false,
-            'documento_tributario_acreditado'=>false,'solo_lectura'=>true];
+            'origen_fisico_acreditado'=>true,'recepcion_devolucion_acreditada'=>false,
+            'documento_tributario_acreditado'=>false,'solo_lectura'=>true,'historial'=>$historial]+($historial?['saldo_solicitable'=>$historial['disponible_para_solicitar']]:['saldo_solicitable'=>(string)$q]);
     }
 }

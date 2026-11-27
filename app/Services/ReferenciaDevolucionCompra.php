@@ -61,7 +61,7 @@ final class ReferenciaDevolucionCompra
             &&$this->qty($t->fisico_actual)->minus($this->qty($t->fisico_anterior))->isEqualTo($q),409,'Tránsito de compra no acreditado.');
         abort_if(DB::table('kardex')->where('movimiento_reversado_id',$t->id)->exists(),409,'Tránsito de compra revertido.');
     }
-    public function verificar(int $kid,int $sid,int $motivo): array {
+    public function verificar(int $kid,int $sid,int $motivo,?int $propia=null): array {
         $cfg=config('devoluciones.origenes_verificados',[])[$motivo]??null;
         abort_unless(DB::transactionLevel()>0&&$kid>0&&$sid>0&&config('devoluciones.referencias_verificadas')===true
             &&config('devoluciones.integracion_comercial_verificada')===true&&config('devoluciones.aislamiento_verificado')===true
@@ -110,14 +110,20 @@ final class ReferenciaDevolucionCompra
         if($libera)$this->comprobarTransito($d,$c,$k,$q,$cost);
         else abort_if(DB::table('kardex')->where('origen_tipo','RECEPCION')->where('origen_detalle_id',$d->id)->where('operacion_codigo','ENTRADA_TRANSITO')->exists(),409,'Entrada directa con tránsito previo.');
         abort_if(DB::table('kardex')->where('movimiento_reversado_id',$kid)->exists(),409,'Entrada original revertida.');
-        // No se ignoran operaciones que ya referencian la entrada.
-        $used=DB::table('inventario_operaciones as x')->leftJoin('estados as e','e.id','=','x.estado_id')->where('x.referencia_kardex_id',$kid)->select('x.*','e.codigo as estado_codigo')->lockForUpdate()->get();
-        foreach($used as $u)abort_unless($u->estado_codigo==='INV_ANULADA'&&$u->confirmado_por===null&&$u->token_confirmacion===null
-            &&!DB::table('inventario_operaciones_detalle')->where('operacion_id',$u->id)->whereNotNull('kardex_id')->exists(),409,'Origen utilizado: conciliar historial antes de devolver.');
+        $historial=[];
+        if(config('devoluciones.historial_verificado')===true){
+            $historial=(new LectorSaldoDevolucionReferencia())->leer($sid,$pid,$bid,$kid,(string)$q,(string)$cost,(int)$c->documento_id,(string)$c->folio,'COMPRA_DISPONIBLE',$propia);
+        }else{
+            abort_unless($propia===null,409,'Revalidación de solicitud requiere historial acreditado.');
+            // No se ignoran operaciones que ya referencian la entrada.
+            $used=DB::table('inventario_operaciones as x')->leftJoin('estados as e','e.id','=','x.estado_id')->where('x.referencia_kardex_id',$kid)->select('x.*','e.codigo as estado_codigo')->lockForUpdate()->get();
+            foreach($used as $u)abort_unless($u->estado_codigo==='INV_ANULADA'&&$u->confirmado_por===null&&$u->token_confirmacion===null
+                &&!DB::table('inventario_operaciones_detalle')->where('operacion_id',$u->id)->whereNotNull('kardex_id')->exists(),409,'Origen utilizado: conciliar historial antes de devolver.');
+        }
         return ['referencia_kardex_id'=>$kid,'compra_id'=>(int)$c->id,'recepcion_id'=>(int)$r->id,'recepcion_detalle_id'=>(int)$d->id,
             'consolidacion_id'=>$con?(int)$con->id:null,'orden_compra_id'=>(int)$o->id,'proveedor_id'=>(int)$c->proveedor_id,
             'tipo_documento_id'=>(int)$c->documento_id,'folio'=>(string)$c->folio,'producto_id'=>$pid,'bodega_id'=>$bid,'sucursal_id'=>$sid,
             'cantidad_original'=>(string)$q,'costo_especifico'=>(string)$cost,'origen_fisico_acreditado'=>true,
-            'nota_credito_acreditada'=>false,'solo_lectura'=>true];
+            'nota_credito_acreditada'=>false,'solo_lectura'=>true,'historial'=>$historial]+($historial?['saldo_solicitable'=>$historial['disponible_para_solicitar']]:['saldo_solicitable'=>(string)$q]);
     }
 }

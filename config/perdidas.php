@@ -1,3 +1,3 @@
 <?php
 // V109F2. Mantener cerrado hasta verificar contrato y aislamiento.
-return ['mermas_verificadas'=>false,'clase_operacion'=>null,'tipo_kardex_salida'=>null,'aislamiento_verificado'=>false];
+return ['especiales_verificadas'=>false,'contratos_especiales'=>[],'estado_aviso_pendiente'=>null,'mermas_verificadas'=>false,'clase_operacion'=>null,'tipo_kardex_salida'=>null,'aislamiento_verificado'=>false];

@@ -16,6 +16,7 @@ final class ConciliadorComprometidoReservas
         $stocks=DB::table('stock')->where('producto_id',$producto)->where('bodega_id',$bodega)->lockForUpdate()->get();
         abort_unless($stocks->count()===1,409,'Stock ausente o duplicado.');
         $stock=$stocks->first();$committed=BigDecimal::of((string)$stock->comprometido)->toScale(8);
+        $consumo=ReferenciaDespachoReserva::habilitado();
         $sum=BigDecimal::zero()->toScale(8);$ids=[];$seen=[];
         $lines=DB::table('inventario_reservas_detalle as d')->leftJoin('inventario_reservas as r','r.id','=','d.reserva_id')
             ->where('d.producto_id',$producto)->where('d.bodega_id',$bodega)->orderBy('d.reserva_id')->orderBy('d.id')
@@ -27,9 +28,9 @@ final class ConciliadorComprometidoReservas
             $q=BigDecimal::of((string)$line->cantidad_reservada)->toScale(8);
             $released=BigDecimal::of((string)$line->cantidad_liberada)->toScale(8);
             $sent=BigDecimal::of((string)$line->cantidad_despachada)->toScale(8);
-            abort_unless($q->isPositive()&&!$released->isNegative()&&$released->isLessThanOrEqualTo($q)&&$sent->isZero(),409,'Detalle de reserva no conciliable.');
+            abort_unless($q->isPositive()&&!$released->isNegative()&&!$sent->isNegative()&&$released->plus($sent)->isLessThanOrEqualTo($q)&&($consumo||$sent->isZero()),409,'Detalle de reserva no conciliable.');
             if($line->estado_reserva==='PENDIENTE'||($line->estado_reserva==='ANULADA'&&config('reservas.estado_anulada')==='ANULADA')){
-                abort_unless($released->isZero(),409,'Solicitud pendiente con liberaciones.');
+                abort_unless($released->isZero()&&$sent->isZero(),409,'Solicitud pendiente con liberaciones.');
                 $links=DB::table('inventario_reservas_operaciones')->where('reserva_id',$id)->lockForUpdate()->get();
                 abort_unless($links->count()===1,409,'Solicitud pendiente sin vínculo único.');
                 $oid=(int)$links->first()->operacion_id;
@@ -43,7 +44,7 @@ final class ConciliadorComprometidoReservas
                 continue;
             }
             // Estados terminales y consumo se incorporarán al acreditar el ENUM completo.
-            abort_unless((in_array($line->estado_reserva,['ACTIVA','PARCIAL'],true)||($line->estado_reserva==='LIBERADA'&&config('reservas.estado_liberada')==='LIBERADA')),409,'Estado histórico de reserva aún no conciliable.');
+            abort_unless((($consumo&&$line->estado_reserva==='CONSUMIDA')||in_array($line->estado_reserva,['ACTIVA','PARCIAL'],true)||($line->estado_reserva==='LIBERADA'&&config('reservas.estado_liberada')==='LIBERADA')),409,'Estado histórico de reserva aún no conciliable.');
             $r=(new LectorSaldoReservaInventario())->leer($id,$producto,$bodega,$sucursal);
             $sum=$sum->plus($r['pendiente']);$ids[]=$id;
         }

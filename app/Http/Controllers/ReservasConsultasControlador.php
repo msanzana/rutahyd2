@@ -15,6 +15,9 @@ final class ReservasConsultasControlador extends Controller
         return DB::table('inventario_reservas as r')
             ->where('r.sucursal_id',$sid)
             ->whereIn('r.estado',['PENDIENTE','ACTIVA','PARCIAL','CONSUMIDA','LIBERADA'])
+            ->whereExists(fn($q)=>$q->selectRaw('1')->from('notas_venta as nv')->whereColumn('nv.id','r.nota_venta_id')->where('nv.sucursal_id',$sid))
+            ->whereExists(fn($q)=>$q->selectRaw('1')->from('inventario_reservas_operaciones as x')->whereColumn('x.reserva_id','r.id'))
+            ->whereNotExists(fn($q)=>$q->selectRaw('1')->from('inventario_reservas_operaciones as x')->join('inventario_reservas_operaciones as y','y.operacion_id','=','x.operacion_id')->whereColumn('x.reserva_id','r.id')->whereColumn('x.reserva_id','<>','y.reserva_id'))
             ->whereExists(fn($q)=>$q->selectRaw('1')->from('inventario_reservas_detalle as d')->whereColumn('d.reserva_id','r.id'))
             // No exponer una cabecera si alguna línea pertenece a una bodega sin atribución.
             ->whereNotExists(fn($q)=>$q->selectRaw('1')->from('inventario_reservas_detalle as d')->whereColumn('d.reserva_id','r.id')

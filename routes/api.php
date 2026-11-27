@@ -146,6 +146,17 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::post('/inventario/traspasos/{id}/recepciones/{op}/aprobar',[\App\Http\Controllers\TraspasosInventarioControlador::class,'aprobarRecepcion'])->middleware(['permiso.rutahd:inventario.operaciones.aprobar',\App\Http\Middleware\AutorizarTraspasoInterno::class,'throttle:20,1'])->whereNumber(['id','op']);
     Route::post('/inventario/traspasos/{id}/recepciones/{op}/anular',[\App\Http\Controllers\TraspasosInventarioControlador::class,'anularRecepcion'])->middleware(['permiso.rutahd:inventario.operaciones.anular',\App\Http\Middleware\AutorizarTraspasoInterno::class,'throttle:20,1'])->whereNumber(['id','op']);
     Route::post('/inventario/traspasos/{id}/recepciones/{op}/confirmar',[\App\Http\Controllers\TraspasosInventarioControlador::class,'confirmarRecepcion'])->middleware(['permiso.rutahd:inventario.operaciones.confirmar',\App\Http\Middleware\AutorizarTraspasoInterno::class,'throttle:20,1'])->whereNumber(['id','op']);
+    // V109F2: mermas simples; ninguna ruta se registra hasta verificar el contrato.
+    if (\App\Http\Controllers\MermasInventarioControlador::habilitado()) {
+        Route::get('/inventario/mermas',[\App\Http\Controllers\MermasInventarioControlador::class,'listar'])->middleware('permiso.rutahd:inventario.operaciones.ver');
+        Route::get('/inventario/mermas/{id}',[\App\Http\Controllers\MermasInventarioControlador::class,'ver'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id');
+        Route::get('/inventario/mermas/{id}/respaldos/{adjunto}',[\App\Http\Controllers\MermasInventarioControlador::class,'respaldo'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber(['id','adjunto']);
+        Route::post('/inventario/mermas/revision',[\App\Http\Controllers\MermasInventarioControlador::class,'revisar'])->middleware(['permiso.rutahd:inventario.operaciones.gestionar','throttle:60,1']);
+        Route::post('/inventario/mermas',[\App\Http\Controllers\MermasInventarioControlador::class,'crear'])->middleware(['permiso.rutahd:inventario.operaciones.gestionar','throttle:20,1']);
+        Route::post('/inventario/mermas/{id}/aprobar',[\App\Http\Controllers\MermasInventarioControlador::class,'aprobar'])->middleware('permiso.rutahd:inventario.operaciones.aprobar')->whereNumber('id');
+        Route::post('/inventario/mermas/{id}/anular',[\App\Http\Controllers\MermasInventarioControlador::class,'anular'])->middleware('permiso.rutahd:inventario.operaciones.anular')->whereNumber('id');
+        Route::post('/inventario/mermas/{id}/confirmar',[\App\Http\Controllers\MermasInventarioControlador::class,'confirmar'])->middleware('permiso.rutahd:inventario.operaciones.confirmar')->whereNumber('id');
+    }
     Route::get('/inventario/ajustes',[\App\Http\Controllers\AjustesGeneralesControlador::class,'listar'])->middleware('permiso.rutahd:inventario.operaciones.ver');
     Route::get('/inventario/ajustes/{id}',[\App\Http\Controllers\AjustesGeneralesControlador::class,'ver'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id');
     Route::get('/inventario/ajustes/{id}/respaldos/{adjunto}',[\App\Http\Controllers\AjustesGeneralesControlador::class,'respaldo'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber(['id','adjunto']);

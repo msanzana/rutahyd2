@@ -357,7 +357,7 @@ final class ConteosInventarioControlador extends Controller
         if($term!=='')$q->where(fn($x)=>$x->where('c.numero_interno','like','%'.$term.'%')->orWhere('b.nombre','like','%'.$term.'%')->orWhereExists(fn($y)=>$y->selectRaw('1')->from('inventario_conteos_detalle as l')->join('productos as p','p.id','=','l.producto_id')->whereColumn('l.conteo_id','c.id')->where(fn($z)=>$z->where('p.sku','like','%'.$term.'%')->orWhere('p.nombre','like','%'.$term.'%'))));
         foreach(['estado','bodega_id'] as $k)if(isset($v[$k]))$q->where('c.'.$k,$v[$k]);
         $page=$q->orderByDesc('c.id')->paginate(25,['*'],'page',(int)($v['page']??1))->toArray();
-        $page['escrituras_habilitadas']=false;
+        $page['escrituras_habilitadas']=\App\Http\Middleware\AutorizarConteos::habilitado();
         return response()->json($page)->header('Cache-Control','no-store');
     }
     private function datos(Request $r,int $id): array {
@@ -386,7 +386,7 @@ final class ConteosInventarioControlador extends Controller
                     $o->respaldos=DB::table('inventario_operaciones_adjuntos')->where('operacion_id',$o->id)->orderBy('id')->get(['id','nombre','mime','sha256']);
                 }
             }
-            return ['conteo'=>$c,'detalles'=>$lines,'usuario_actual_id'=>$uid,'revision'=>$review,'autorizado'=>$authorized,'ajustes_preparados'=>$prepared,'operaciones'=>$ops,'escrituras_habilitadas'=>false,'cierre_habilitado'=>false,'anulacion_habilitada'=>false];
+            return ['conteo'=>$c,'detalles'=>$lines,'usuario_actual_id'=>$uid,'revision'=>$review,'autorizado'=>$authorized,'ajustes_preparados'=>$prepared,'operaciones'=>$ops,'escrituras_habilitadas'=>\App\Http\Middleware\AutorizarConteos::habilitado(),'cierre_habilitado'=>\App\Http\Middleware\AutorizarConteos::habilitado(),'anulacion_habilitada'=>\App\Http\Middleware\AutorizarConteos::habilitado()];
         },3);
     }
     public function ver(Request $r,int $id){return response()->json($this->datos($r,$id))->header('Cache-Control','no-store');}

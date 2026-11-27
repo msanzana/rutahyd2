@@ -20,7 +20,7 @@ final class LectorSaldoReservaInventario
         abort_unless(DB::table('productos')->where('id',$producto)->lockForUpdate()->first(),404,'Producto inexistente.');
         $h=DB::table('inventario_reservas')->where('id',$reserva)->where('sucursal_id',$sucursal)->lockForUpdate()->first();
         abort_unless($h,404,'Reserva no disponible.');
-        abort_unless(in_array($h->estado,['ACTIVA','PARCIAL'],true)&&(int)$h->nota_venta_id>0,409,'Reserva no vigente o sin referencia.');
+        abort_unless((in_array($h->estado,['ACTIVA','PARCIAL'],true)||($h->estado==='LIBERADA'&&config('reservas.estado_liberada')==='LIBERADA'))&&(int)$h->nota_venta_id>0,409,'Reserva no vigente o sin referencia.');
         abort_unless(DB::table('inventario_bodegas_sucursales')->where('sucursal_id',$sucursal)->where('bodega_id',$bodega)->lockForUpdate()->first(),404,'Bodega no autorizada.');
         $lines=DB::table('inventario_reservas_detalle')->where('reserva_id',$reserva)->where('producto_id',$producto)->where('bodega_id',$bodega)->lockForUpdate()->get();
         abort_unless($lines->count()===1,409,'Detalle de reserva ausente o duplicado.');$l=$lines->first();
@@ -63,6 +63,7 @@ final class LectorSaldoReservaInventario
         usort($rows,fn($a,$b)=>$a['kardex_id']<=>$b['kardex_id']);
         $result=(new SaldoReservaInventario())->conciliar($reserva,$producto,$bodega,$sucursal,$rows,(string)$c);
         abort_unless($reserved->isEqualTo($result['reservada'])&&$released->isEqualTo($result['liberada']),409,'Cantidades registradas sin respaldo de movimientos.');
+        abort_if($h->estado==='LIBERADA'&&!BigDecimal::of($result['pendiente'])->isZero(),409,'Reserva liberada con saldo pendiente.');
         return $result+['nota_venta_id'=>(int)$h->nota_venta_id,'referencia_comercial_verificada'=>false];
     }
 }

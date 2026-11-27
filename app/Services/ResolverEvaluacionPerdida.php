@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
 final class ResolverEvaluacionPerdida
 {
     public function resolver(int $sid,int $id,int $uid,int $version,string $motivo,string $decision): array {
-        abort_unless(config('perdidas.revision_tributaria_verificada')===true&&DB::transactionLevel()>0,409,'Revisión tributaria no habilitada.');
+        abort_unless(config('perdidas.revision_tributaria_verificada')===true&&DB::transactionLevel()>0&&$sid>0&&$uid>0&&$version>0&&$version<4294967295,409,'Revisión tributaria no habilitada.');
         abort_unless(in_array($decision,['NO_APLICA','NO_REQUIERE_AVISO','REQUIERE_AVISO'],true)&&mb_strlen(trim($motivo))>=10&&mb_strlen($motivo)<=1000,422,'Fundamente la evaluación.');
         $o=DB::table('inventario_operaciones as o')->join('estados as e','e.id','=','o.estado_id')
             ->where('o.id',$id)->where('o.sucursal_id',$sid)->select('o.*','e.codigo as estado_codigo')->lockForUpdate()->first();
@@ -40,7 +40,7 @@ final class ResolverEvaluacionPerdida
             abort_unless($audit->count()===1&&(int)$audit->first()->usuario_id===$uid&&(int)$o->version===$version+1,409,'Revisión anterior incompatible.');
             $saved=json_decode($audit->first()->valores_nuevos,true,512,JSON_THROW_ON_ERROR);
             abort_unless(($saved['decision']??null)===$decision&&($saved['motivo']??null)===trim($motivo)&&($saved['respaldos']??null)===$hashes&&($saved['evaluacion_aviso_sii']??null)===$o->evaluacion_aviso_sii,409,'Revisión anterior diferente.');
-            return ['id'=>$id,'version'=>(int)$o->version,'decision'=>$decision,'repetida'=>true,'aviso_emitido'=>false,'movimiento_aplicado'=>false];
+            return ['id'=>$id,'version'=>(int)$o->version,'decision'=>$decision,'repetida'=>true,'aviso_emitido'=>false,'gestion_externa_pendiente'=>$decision==='REQUIERE_AVISO','movimiento_aplicado'=>false];
         }
         abort_unless($audit->isEmpty()&&$o->revision_tributaria==='PENDIENTE'&&(int)$o->version===$version&&in_array($o->evaluacion_aviso_sii,['PENDIENTE','NO_APLICA'],true),409,'Estado tributario o versión incompatible.');
         abort_unless(($o->evaluacion_aviso_sii==='NO_APLICA'&&$decision==='NO_APLICA')||($o->evaluacion_aviso_sii==='PENDIENTE'&&$decision!=='NO_APLICA'),409,'Decisión incompatible con la evaluación requerida.');

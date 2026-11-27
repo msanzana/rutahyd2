@@ -1,0 +1,42 @@
+name: V109D6B - Rutas protegidas de conteos
+on:
+  push:
+    branches: [feature/v109a-inventario-contexto-20261126]
+    paths:
+      - .github/workflows/v109d6b-rutas.yml
+      - tests/conteos_rutas_v109d6b.php
+      - routes/api.php
+      - config/conteos.php
+      - app/Http/Middleware/AutorizarConteos.php
+      - app/Http/Controllers/ConteosInventarioControlador.php
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, fileinfo, pdo_sqlite, iconv
+      - name: Verificar contrato de rutas y bloqueo por defecto
+        run: |
+          set -euo pipefail
+          php -l app/Http/Middleware/AutorizarConteos.php
+          php -l app/Http/Controllers/ConteosInventarioControlador.php
+          php -l config/conteos.php
+          php -l routes/api.php
+          php -l tests/conteos_rutas_v109d6b.php
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/conteos_rutas_v109d6b.php | tee /tmp/v109d6b.log
+          grep -Fx V109D6B_RUTAS_OK /tmp/v109d6b.log

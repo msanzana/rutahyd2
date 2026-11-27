@@ -11,11 +11,18 @@ use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
 
 /** V109B3: ajustes generales con respaldo, aprobación y confirmación transaccional. */
-final class AjustesGeneralesControlador extends Controller
+class AjustesGeneralesControlador extends Controller
 {
+    protected function codigos(): array {return [101,102,107];}
+    protected function prefijo(): string {return 'AJG-';}
+    protected function plan(object $m,string $cantidad,object $stock,string $cpp): array {
+        return (new PlanAjusteGeneral())->calcular($m,$cantidad,$stock,$cpp);
+    }
+    protected function tipoKardex(object $o): int {return (int)$o->motivo_codigo_snapshot===102?2:1;}
+
     private function reglas(): array {
         return [
-            'motivo_codigo'=>'required|integer|in:101,102,107',
+            'motivo_codigo'=>'required|integer|in:'.implode(',',$this->codigos()),
             'producto_id'=>'required|integer|min:1',
             'bodega_id'=>'required|integer|min:1',
             'cantidad'=>['required','string','regex:/^(?:0|[1-9][0-9]{0,19})(?:\.[0-9]{1,8})?$/D'],
@@ -40,7 +47,7 @@ final class AjustesGeneralesControlador extends Controller
             abort_if(DB::table('inventario_traspasos_detalle')->where('producto_id',$p->id)->whereRaw('cantidad_despachada>cantidad_recibida+cantidad_regularizada')->exists(),409,'Producto con traspasos en camino.');
             $s=DB::table('stock')->where('producto_id',$p->id)->where('bodega_id',$b->id)->lockForUpdate()->first()
               ??(object)['disponible'=>'0','transito'=>'0','comprometido'=>'0','cantidad_fisica'=>'0'];
-            $plan=(new PlanAjusteGeneral())->calcular($m,$v['cantidad'],$s,(string)$p->costo_promedio_ponderado);
+            $plan=$this->plan($m,$v['cantidad'],$s,(string)$p->costo_promedio_ponderado);
             return [$m,$b,$p,$plan,$s];
     }
     public function revisar(Request $r)
@@ -93,7 +100,7 @@ final class AjustesGeneralesControlador extends Controller
             [$m,$b,$p,$plan]=$this->evaluar($v,$sid);
             $state=$this->estado('INV_PEND_APROBACION');
             $id=DB::table('inventario_operaciones')->insertGetId(['sucursal_id'=>$sid,'clase'=>'AJUSTE','motivo_id'=>$m->id,'estado_id'=>$state,'motivo_codigo_snapshot'=>$m->codigo,'motivo_nombre_snapshot'=>$m->nombre,'regla_snapshot'=>$m->regla,'politica_cpp_snapshot'=>$m->politica_cpp,'justificacion'=>$just,'revision_tributaria'=>'PENDIENTE','evaluacion_aviso_sii'=>'NO_APLICA','token_creacion'=>$token,'creado_por'=>$uid]);
-            $num='AJG-'.str_pad((string)$id,8,'0',STR_PAD_LEFT);
+            $num=$this->prefijo().str_pad((string)$id,8,'0',STR_PAD_LEFT);
             DB::table('inventario_operaciones')->where('id',$id)->update(['numero_interno'=>$num]);
             DB::table('inventario_operaciones_detalle')->insert(['operacion_id'=>$id,'numero_linea'=>1,'producto_id'=>$p->id,'bodega_id'=>$b->id,'cantidad'=>$plan['cantidad'],'delta_disponible'=>$plan['delta_disponible'],'delta_fisico'=>$plan['delta_fisico'],'delta_transito'=>$plan['delta_transito'],'delta_comprometido'=>$plan['delta_comprometido'],'costo_unitario_snapshot'=>$plan['costo_unitario_snapshot']]);
             foreach($files as $f)DB::table('inventario_operaciones_adjuntos')->insert($f+['operacion_id'=>$id,'creado_por'=>$uid]);
@@ -104,7 +111,7 @@ final class AjustesGeneralesControlador extends Controller
         return response()->json($result,$result['repetida']?200:201)->header('Cache-Control','no-store');
     }
     private function base(int $sid){
-        return DB::table('inventario_operaciones as o')->join('estados as e','e.id','=','o.estado_id')->where('o.clase','AJUSTE')->where('o.sucursal_id',$sid)->where('e.codigo','<>','INV_ANULADA')->select('o.*','e.codigo as estado_codigo','e.nombre as estado_nombre');
+        return DB::table('inventario_operaciones as o')->join('estados as e','e.id','=','o.estado_id')->where('o.clase','AJUSTE')->whereIn('o.motivo_codigo_snapshot',$this->codigos())->where('o.sucursal_id',$sid)->where('e.codigo','<>','INV_ANULADA')->select('o.*','e.codigo as estado_codigo','e.nombre as estado_nombre');
     }
     public function listar(Request $r){
         $v=$r->validate(['buscar'=>'nullable|string|max:120','page'=>'nullable|integer|min:1']);
@@ -129,7 +136,7 @@ final class AjustesGeneralesControlador extends Controller
     }
 
     private function operacionBloqueada(int $id,int $sid): object {
-        $o=DB::table('inventario_operaciones')->where('id',$id)->where('sucursal_id',$sid)->where('clase','AJUSTE')->lockForUpdate()->first();
+        $o=DB::table('inventario_operaciones')->where('id',$id)->where('sucursal_id',$sid)->where('clase','AJUSTE')->whereIn('motivo_codigo_snapshot',$this->codigos())->lockForUpdate()->first();
         abort_unless($o,404,'Ajuste no encontrado.');return $o;
     }
     private function revisarGuardado(object $o,int $sid): array {
@@ -187,7 +194,7 @@ final class AjustesGeneralesControlador extends Controller
             if(!$stockId)$stockId=DB::table('stock')->insertGetId(['producto_id'=>$l->producto_id,'bodega_id'=>$l->bodega_id,'disponible'=>0,'transito'=>0,'comprometido'=>0,'cantidad_fisica'=>0]);
             $movement=DB::table('kardex')->insertGetId([
                 'sucursal_id'=>$sid,'producto_id'=>$l->producto_id,'bodega_id'=>$l->bodega_id,
-                'tipo_documento_id'=>null,'folio_documento'=>$o->numero_interno,'tipo_movimiento'=>(int)$o->motivo_codigo_snapshot===102?2:1,
+                'tipo_documento_id'=>null,'folio_documento'=>$o->numero_interno,'tipo_movimiento'=>$this->tipoKardex($o),
                 'cantidad_anterior'=>$plan['disponible_anterior'],'cantidad_documento'=>$plan['cantidad'],'cantidad_actual'=>$plan['disponible_actual'],
                 'transito_anterior'=>$plan['transito'],'transito_actual'=>$plan['transito'],'comprometido_anterior'=>$plan['comprometido'],'comprometido_actual'=>$plan['comprometido'],
                 'fisico_anterior'=>$plan['fisico_anterior'],'fisico_actual'=>$plan['fisico_actual'],'costo_unitario_neto'=>$plan['costo_unitario_snapshot'],

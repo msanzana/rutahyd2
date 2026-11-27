@@ -170,6 +170,11 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
         Route::post('/inventario/perdidas-especiales/{id}/anular',[\App\Http\Controllers\PerdidasEspecialesControlador::class,'anular'])->middleware('permiso.rutahd:inventario.operaciones.anular')->whereNumber('id');
         Route::post('/inventario/perdidas-especiales/{id}/confirmar',[\App\Http\Controllers\PerdidasEspecialesControlador::class,'confirmar'])->middleware('permiso.rutahd:inventario.operaciones.confirmar')->whereNumber('id');
     }
+    // V109F6A: revisión tributaria separada de aprobación física.
+    if (\App\Http\Controllers\RevisionTributariaPerdidasControlador::habilitado()) {
+        Route::get('/inventario/perdidas/{id}/revision-tributaria',[\App\Http\Controllers\RevisionTributariaPerdidasControlador::class,'ver'])->middleware(['permiso.rutahd:inventario.operaciones.ver','permiso.rutahd:inventario.operaciones.revisar_tributaria','throttle:60,1'])->whereNumber('id');
+        Route::post('/inventario/perdidas/{id}/revision-tributaria',[\App\Http\Controllers\RevisionTributariaPerdidasControlador::class,'resolver'])->middleware(['permiso.rutahd:inventario.operaciones.ver','permiso.rutahd:inventario.operaciones.revisar_tributaria','throttle:20,1'])->whereNumber('id');
+    }
     // V109F5C: recuperación histórica bajo contrato cerrado.
     Route::get('/inventario/recuperaciones-perdidas/capacidades',[\App\Http\Controllers\RecuperacionesPerdidaControlador::class,'capacidades'])->middleware('permiso.rutahd:inventario.operaciones.ver');
     if (\App\Http\Controllers\RecuperacionesPerdidaControlador::habilitado()) {

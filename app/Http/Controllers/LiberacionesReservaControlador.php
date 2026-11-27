@@ -105,12 +105,17 @@ final class LiberacionesReservaControlador extends Controller
             DB::table('inventario_reservas_operaciones')->insert(['reserva_id'=>$id,'operacion_id'=>$oid]);
             foreach($items as $n=>$i){$p=$plans[$n];DB::table('inventario_operaciones_detalle')->insert(['operacion_id'=>$oid,'numero_linea'=>$n+1,'producto_id'=>$i['producto_id'],'bodega_id'=>$i['bodega_id'],'cantidad'=>$p['cantidad'],'delta_disponible'=>$p['delta_disponible'],'delta_comprometido'=>$p['delta_comprometido'],'delta_transito'=>$p['delta_transito'],'delta_fisico'=>$p['delta_fisico'],'costo_unitario_snapshot'=>$p['cpp_actual']]);}
             $this->historial((int)$oid,null,$state,$uid,'CREAR',$obs);
+            DB::table('registros_auditoria')->insert(['usuario_id'=>$uid,'accion'=>'LIBERACION_SOLICITUD','tipo_entidad'=>'inventario_operaciones','entidad_id'=>$oid,'valores_anteriores'=>json_encode([],JSON_THROW_ON_ERROR),'valores_nuevos'=>json_encode(['reserva_id'=>$id,'items'=>$items,'motivo'=>$obs],JSON_THROW_ON_ERROR)]);
             return ['id'=>$id,'operacion_id'=>(int)$oid,'repetida'=>false,'movimiento_aplicado'=>false];
         },3);
         return response()->json($out,$out['repetida']?200:201)->header('Cache-Control','no-store');
     }
     private function validarGuardado(object $h,object $o,int $sid): array {
         [$rows,$items]=$this->detalle((int)$o->id);
+        $audit=DB::table('registros_auditoria')->where('tipo_entidad','inventario_operaciones')->where('entidad_id',$o->id)->where('accion','LIBERACION_SOLICITUD')->lockForUpdate()->get();
+        abort_unless($audit->count()===1&&(int)$audit->first()->usuario_id===(int)$o->creado_por,409,'Solicitud sin auditoría única.');
+        $original=json_decode($audit->first()->valores_nuevos,true,512,JSON_THROW_ON_ERROR);
+        abort_unless(($original['reserva_id']??null)===(int)$h->id&&($original['items']??null)===$items&&($original['motivo']??null)===$o->justificacion,409,'Solicitud modificada.');
         [$m,$plans,$note,$all]=$this->revisar($h,$sid,$items,(int)$o->id);
         abort_unless((int)$o->motivo_id===(int)$m->id&&$o->regla_snapshot===$m->regla&&$o->politica_cpp_snapshot===$m->politica_cpp&&$o->referencia_folio===$note->numero,409,'Motivo o referencia modificados.');
         foreach($rows as $n=>$d){

@@ -109,6 +109,17 @@ final class ReservasInventarioControlador extends Controller
                 return ['id'=>$id,'operacion_id'=>$oid,'estado'=>'PENDIENTE','estado_operacion'=>'INV_APROBADA','version'=>(int)$o->version,'repetida'=>true,'movimiento_aplicado'=>false];
             }
             abort_unless((int)$o->version===(int)$v['version']&&$o->aprobado_por===null,409,'Versión o aprobación previa incompatible.');
+            [$items,$plans,$ops,$state]=$this->revisarSolicitud($h,$o,$sid,(int)$o->estado_id);
+            abort_unless((int)$o->estado_id===(int)$state,409,'Operación no pendiente.');
+            DB::table('inventario_operaciones')->where('id',$oid)->update(['estado_id'=>$approved,'version'=>(int)$o->version+1,'aprobado_por'=>$uid,'aprobado_en'=>now()]);
+            DB::table('inventario_operaciones_historial')->insert(['operacion_id'=>$oid,'estado_anterior_id'=>$state,'estado_nuevo_id'=>$approved,'usuario_id'=>$uid,'accion'=>'APROBAR','observaciones'=>$obs]);
+            DB::table('registros_auditoria')->insert(['usuario_id'=>$uid,'accion'=>'RESERVA_APROBACION','tipo_entidad'=>'inventario_reservas','entidad_id'=>$id,'valores_anteriores'=>json_encode(['estado_operacion'=>'INV_PEND_APROBACION'],JSON_THROW_ON_ERROR),'valores_nuevos'=>json_encode(['estado_operacion'=>'INV_APROBADA','operacion_id'=>$oid,'motivo'=>$obs],JSON_THROW_ON_ERROR)]);
+            return ['id'=>$id,'operacion_id'=>$oid,'estado'=>'PENDIENTE','estado_operacion'=>'INV_APROBADA','version'=>(int)$o->version+1,'repetida'=>false,'movimiento_aplicado'=>false];
+        },3))->header('Cache-Control','no-store');
+    }
+
+    private function revisarSolicitud(object $h,object $o,int $sid,int $expectedState): array {
+        $id=(int)$h->id;$oid=(int)$o->id;
             $noteId=(int)$h->nota_venta_id;
             $note=DB::table('notas_venta')->where('id',$noteId)->where('sucursal_id',$sid)->lockForUpdate()->first();
             abort_unless($note&&in_array($note->estado,['recibida','por_preparar'],true)&&$note->numero===$o->referencia_folio,409,'Referencia comercial modificada.');
@@ -151,7 +162,7 @@ final class ReservasInventarioControlador extends Controller
                 $plans[]=(new PlanReservaInventario())->calcular($m,$i['cantidad'],$stocks->first(),(string)$p->costo_promedio_ponderado,'0');
             }
 
-            abort_unless((int)$o->estado_id===(int)$state&&(int)$o->motivo_id===(int)$m->id&&$o->regla_snapshot===$m->regla&&$o->politica_cpp_snapshot===$m->politica_cpp,409,'Estado o motivo modificado.');
+            abort_unless((int)$o->estado_id===$expectedState&&(int)$o->motivo_id===(int)$m->id&&$o->regla_snapshot===$m->regla&&$o->politica_cpp_snapshot===$m->politica_cpp,409,'Estado o motivo modificado.');
             $ops=DB::table('inventario_operaciones_detalle')->where('operacion_id',$oid)->lockForUpdate()->get();
             abort_unless($ops->count()===count($items),409,'Detalle de operación inconsistente.');
             foreach($items as $n=>$i){
@@ -159,10 +170,58 @@ final class ReservasInventarioControlador extends Controller
                 abort_unless($matches->count()===1&&$d->kardex_id===null&&$d->kardex_referencia_id===null&&!DB::table('kardex')->where('origen_tipo','AJUSTE_INVENTARIO')->where('origen_detalle_id',$d->id)->exists(),409,'Detalle ya ejecutado o duplicado.');
                 foreach(['cantidad'=>'cantidad','delta_disponible'=>'delta_disponible','delta_comprometido'=>'delta_comprometido','delta_transito'=>'delta_transito','delta_fisico'=>'delta_fisico','costo_unitario_snapshot'=>'cpp_anterior'] as $field=>$key)abort_unless(BigDecimal::of((string)$d->$field)->isEqualTo($p[$key]),409,'Detalle o CPP modificado.');
             }
-            DB::table('inventario_operaciones')->where('id',$oid)->update(['estado_id'=>$approved,'version'=>(int)$o->version+1,'aprobado_por'=>$uid,'aprobado_en'=>now()]);
-            DB::table('inventario_operaciones_historial')->insert(['operacion_id'=>$oid,'estado_anterior_id'=>$state,'estado_nuevo_id'=>$approved,'usuario_id'=>$uid,'accion'=>'APROBAR','observaciones'=>$obs]);
-            DB::table('registros_auditoria')->insert(['usuario_id'=>$uid,'accion'=>'RESERVA_APROBACION','tipo_entidad'=>'inventario_reservas','entidad_id'=>$id,'valores_anteriores'=>json_encode(['estado_operacion'=>'INV_PEND_APROBACION'],JSON_THROW_ON_ERROR),'valores_nuevos'=>json_encode(['estado_operacion'=>'INV_APROBADA','operacion_id'=>$oid,'motivo'=>$obs],JSON_THROW_ON_ERROR)]);
-            return ['id'=>$id,'operacion_id'=>$oid,'estado'=>'PENDIENTE','estado_operacion'=>'INV_APROBADA','version'=>(int)$o->version+1,'repetida'=>false,'movimiento_aplicado'=>false];
+
+        return [$items,$plans,$ops,$state];
+    }
+
+    /** V109E3B2: confirmar reserva aprobada con reclasificación atómica. */
+    public function confirmar(Request $r,int $id){
+        $tipo=config('reservas.tipo_kardex_reservar');
+        abort_unless(config('reservas.solicitudes_verificadas')===true&&config('reservas.clase_operacion')==='RESERVA'&&config('reservas.confirmacion_verificada')===true&&is_int($tipo)&&$tipo>0,409,'Confirmación de reservas no habilitada.');
+        $v=$r->validate(['version'=>'required|integer|min:1|max:4294967294','token_confirmacion'=>'required|uuid']);
+        $token=strtolower($v['token_confirmacion']);
+        return response()->json(DB::transaction(function()use($r,$id,$v,$token,$tipo){
+            $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;$uid=(int)$r->user()->id;
+            $h=DB::table('inventario_reservas')->where('id',$id)->where('sucursal_id',$sid)->lockForUpdate()->first();abort_unless($h,404);
+            $links=DB::table('inventario_reservas_operaciones')->where('reserva_id',$id)->lockForUpdate()->get();
+            abort_unless($links->count()===1,409,'Vínculo de solicitud inválido.');
+            $oid=(int)$links->first()->operacion_id;
+            abort_unless(DB::table('inventario_reservas_operaciones')->where('operacion_id',$oid)->lockForUpdate()->get()->count()===1,409,'Operación compartida.');
+            $o=DB::table('inventario_operaciones')->where('id',$oid)->where('sucursal_id',$sid)->lockForUpdate()->first();
+            abort_unless($o&&$o->clase==='RESERVA'&&(int)$o->motivo_codigo_snapshot===710&&(int)$o->creado_por===(int)$h->creado_por&&(int)$o->aprobado_por>0&&(int)$o->aprobado_por!==(int)$o->creado_por&&(int)$o->aprobado_por===$uid&&$o->anulado_por===null,409,'Operación o confirmador inválido.');
+            $state=function(string $code): int {
+                $x=DB::table('modulos_estados as me')->join('modulos as m','m.id','=','me.modulo_id')->join('estados as e','e.id','=','me.estado_id')->where('m.codigo','INVENTARIO_OPERACION')->where('m.activo',1)->where('me.activo',1)->where('e.activo',1)->where('e.codigo',$code)->value('e.id');
+                abort_unless($x,409,'Estado no configurado.');return (int)$x;
+            };
+            $approved=$state('INV_APROBADA');$done=$state('INV_CONFIRMADA');
+            if((int)$o->estado_id===$done){
+                abort_unless($h->estado==='ACTIVA'&&$o->token_confirmacion===$token&&(int)$o->confirmado_por===$uid&&(int)$o->version===(int)$v['version']+1,409,'Confirmación previa incompatible.');
+                return ['id'=>$id,'operacion_id'=>$oid,'estado'=>'ACTIVA','estado_operacion'=>'INV_CONFIRMADA','version'=>(int)$o->version,'repetida'=>true,'movimiento_aplicado'=>true];
+            }
+            abort_unless($h->estado==='PENDIENTE'&&$h->vence_en===null&&(int)$o->estado_id===$approved&&(int)$o->version===(int)$v['version']&&$o->confirmado_por===null&&$o->token_confirmacion===null,409,'Solicitud no confirmable.');
+            abort_if(DB::table('inventario_operaciones')->where('token_confirmacion',$token)->exists(),409,'Token ya utilizado.');
+            $prior=DB::table('inventario_operaciones_historial')->where('operacion_id',$oid)->where('accion','APROBAR')->lockForUpdate()->get();
+            abort_unless($prior->count()===1&&(int)$prior->first()->usuario_id===$uid&&(int)$prior->first()->estado_nuevo_id===$approved,409,'Aprobación no acreditada.');
+            [$items,$plans,$ops]=$this->revisarSolicitud($h,$o,$sid,$approved);
+            $conciliador=new \App\Services\ConciliadorComprometidoReservas();
+            foreach($items as $i)$conciliador->verificar($i['producto_id'],$i['bodega_id'],$sid);
+            foreach($items as $n=>$i){
+                $pid=$i['producto_id'];$bid=$i['bodega_id'];$p=$plans[$n];$s=$p['anterior'];$after=$p['posterior'];
+                $d=$ops->first(fn($d)=>(int)$d->producto_id===$pid&&(int)$d->bodega_id===$bid);
+                $product=DB::table('productos')->where('id',$pid)->lockForUpdate()->first();
+                $stock=DB::table('stock')->where('producto_id',$pid)->where('bodega_id',$bid)->lockForUpdate()->first();
+                abort_unless($stock&&$product,409,'Stock no disponible.');
+                foreach($s as $key=>$value)abort_unless(BigDecimal::of((string)$stock->$key)->isEqualTo($value),409,'Stock cambió durante confirmación.');
+                $kid=DB::table('kardex')->insertGetId(['sucursal_id'=>$sid,'producto_id'=>$pid,'bodega_id'=>$bid,'tipo_documento_id'=>null,'folio_documento'=>$h->numero_interno,'tipo_movimiento'=>$tipo,'cantidad_anterior'=>$s['disponible'],'cantidad_documento'=>$p['cantidad'],'cantidad_actual'=>$after['disponible'],'transito_anterior'=>$s['transito'],'transito_actual'=>$after['transito'],'comprometido_anterior'=>$s['comprometido'],'comprometido_actual'=>$after['comprometido'],'fisico_anterior'=>$s['cantidad_fisica'],'fisico_actual'=>$after['cantidad_fisica'],'costo_unitario_neto'=>$p['cpp_anterior'],'ultimo_costo_anterior'=>$product->costo_neto,'ultimo_costo_actual'=>$product->costo_neto,'cpp_anterior'=>$p['cpp_anterior'],'cpp_actual'=>$p['cpp_actual'],'origen_tipo'=>'AJUSTE_INVENTARIO','origen_detalle_id'=>$d->id,'operacion_codigo'=>'RESERVAR','token_idempotencia'=>(string)\Illuminate\Support\Str::uuid(),'registrado_por'=>$uid,'observaciones'=>$o->justificacion]);
+                DB::table('stock')->where('id',$stock->id)->update(['disponible'=>$after['disponible'],'comprometido'=>$after['comprometido']]);
+                DB::table('inventario_operaciones_detalle')->where('id',$d->id)->update(['kardex_id'=>$kid]);
+            }
+            DB::table('inventario_operaciones')->where('id',$oid)->update(['estado_id'=>$done,'version'=>(int)$o->version+1,'confirmado_por'=>$uid,'confirmado_en'=>now(),'token_confirmacion'=>$token]);
+            DB::table('inventario_reservas')->where('id',$id)->update(['estado'=>'ACTIVA']);
+            foreach($items as $i)$conciliador->verificar($i['producto_id'],$i['bodega_id'],$sid);
+            DB::table('inventario_operaciones_historial')->insert(['operacion_id'=>$oid,'estado_anterior_id'=>$approved,'estado_nuevo_id'=>$done,'usuario_id'=>$uid,'accion'=>'CONFIRMAR','observaciones'=>'Reserva confirmada; físico y CPP conservados.']);
+            DB::table('registros_auditoria')->insert(['usuario_id'=>$uid,'accion'=>'RESERVA_CONFIRMACION','tipo_entidad'=>'inventario_reservas','entidad_id'=>$id,'valores_anteriores'=>json_encode(['estado'=>'PENDIENTE'],JSON_THROW_ON_ERROR),'valores_nuevos'=>json_encode(['estado'=>'ACTIVA','operacion_id'=>$oid,'items'=>$items],JSON_THROW_ON_ERROR)]);
+            return ['id'=>$id,'operacion_id'=>$oid,'estado'=>'ACTIVA','estado_operacion'=>'INV_CONFIRMADA','version'=>(int)$o->version+1,'repetida'=>false,'movimiento_aplicado'=>true];
         },3))->header('Cache-Control','no-store');
     }
 }

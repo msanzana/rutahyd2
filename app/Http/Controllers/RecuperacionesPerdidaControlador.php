@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Services\LectorRecuperacionPerdida;
 use App\Services\PlanRecuperacionPerdida;
+use App\Services\ContextoCompras;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Brick\Math\BigDecimal;
 
@@ -16,6 +18,46 @@ final class RecuperacionesPerdidaControlador extends AjustesGeneralesControlador
             &&config('perdidas.clase_operacion')==='AJUSTE'
             &&config('perdidas.tipo_kardex_entrada')===1
             &&config('perdidas.aislamiento_verificado')===true;
+    }
+    public function capacidades(Request $r){
+        $enabled=self::habilitado();
+        if($enabled)DB::transaction(fn()=>app(ContextoCompras::class)->resolver($r,true),3);
+        return response()->json(['habilitado'=>$enabled,'recuperaciones_sucesivas'=>false])->header('Cache-Control','private, no-store');
+    }
+    public function origenes(Request $r){
+        $this->codigos();
+        $v=$r->validate(['buscar'=>'nullable|string|max:120','page'=>'nullable|integer|min:1']);
+        return response()->json(DB::transaction(function()use($r,$v){
+            $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;
+            $q=DB::table('kardex as k')
+                ->join('inventario_operaciones_detalle as d',fn($j)=>$j->on('d.id','=','k.origen_detalle_id')->on('d.kardex_id','=','k.id')->on('d.producto_id','=','k.producto_id')->on('d.bodega_id','=','k.bodega_id'))
+                ->join('inventario_operaciones as o','o.id','=','d.operacion_id')->join('estados as e','e.id','=','o.estado_id')
+                ->join('productos as p','p.id','=','k.producto_id')->join('bodegas as b','b.id','=','k.bodega_id')
+                ->join('inventario_bodegas_sucursales as bs','bs.bodega_id','=','b.id')
+                ->where('k.sucursal_id',$sid)->where('o.sucursal_id',$sid)->where('bs.sucursal_id',$sid)
+                ->where('k.origen_tipo','AJUSTE_INVENTARIO')->where('k.tipo_movimiento',2)->where('o.clase','AJUSTE')
+                ->where('e.codigo','INV_CONFIRMADA')->where('p.activo',1)->where('b.activo',1)->where('o.politica_cpp_snapshot','VIGENTE')
+                ->whereIn('o.motivo_codigo_snapshot',array_merge(range(301,311),range(401,409)))
+                ->whereColumn('k.operacion_codigo','o.regla_snapshot')->whereNotNull('o.token_confirmacion')->whereNull('o.anulado_por')
+                ->whereNotExists(fn($x)=>$x->selectRaw('1')->from('inventario_operaciones as z')->leftJoin('estados as ze','ze.id','=','z.estado_id')->whereColumn('z.referencia_kardex_id','k.id')->where(fn($y)=>$y->whereNull('ze.codigo')->orWhere('ze.codigo','<>','INV_ANULADA')))
+                ->whereNotExists(fn($x)=>$x->selectRaw('1')->from('kardex as rev')->whereColumn('rev.movimiento_reversado_id','k.id'))
+                ->select('k.id','k.producto_id','k.bodega_id','p.sku','p.nombre as producto','b.nombre as bodega','o.numero_interno as perdida','o.motivo_nombre_snapshot as motivo','k.cantidad_documento as cantidad','k.costo_unitario_neto as costo_historico','k.fecha_movimiento');
+            $term=trim($v['buscar']??'');
+            if($term!=='')$q->where(fn($x)=>$x->where('o.numero_interno','like','%'.$term.'%')->orWhere('p.sku','like','%'.$term.'%')->orWhere('p.nombre','like','%'.$term.'%')->orWhere('b.nombre','like','%'.$term.'%'));
+            return $q->orderByDesc('k.id')->paginate(25)->toArray()+['solo_candidatos'=>true];
+        },3))->header('Cache-Control','private, no-store');
+    }
+    public function origen(Request $r,int $kid){
+        $this->codigos();
+        return response()->json(DB::transaction(function()use($r,$kid){
+            $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;
+            $x=(new LectorRecuperacionPerdida())->leer($kid,$sid);
+            $p=DB::table('productos')->where('id',$x['producto_id'])->first(['sku','nombre']);
+            $b=DB::table('bodegas')->where('id',$x['bodega_id'])->value('nombre');
+            $folio=DB::table('inventario_operaciones')->where('id',$x['operacion_origen_id'])->value('numero_interno');
+            return ['id'=>$kid,'producto_id'=>$x['producto_id'],'bodega_id'=>$x['bodega_id'],'sku'=>$p->sku,'producto'=>$p->nombre,'bodega'=>$b,'perdida'=>$folio,
+                'cantidad_perdida'=>$x['cantidad_perdida'],'costo_historico'=>$x['costo_historico'],'solo_lectura'=>true];
+        },3))->header('Cache-Control','private, no-store');
     }
     protected function codigos(): array {
         abort_unless(self::habilitado(),409,'Recuperaciones todavía no habilitadas.');

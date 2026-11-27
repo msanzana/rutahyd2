@@ -170,6 +170,17 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
         Route::post('/inventario/perdidas-especiales/{id}/anular',[\App\Http\Controllers\PerdidasEspecialesControlador::class,'anular'])->middleware('permiso.rutahd:inventario.operaciones.anular')->whereNumber('id');
         Route::post('/inventario/perdidas-especiales/{id}/confirmar',[\App\Http\Controllers\PerdidasEspecialesControlador::class,'confirmar'])->middleware('permiso.rutahd:inventario.operaciones.confirmar')->whereNumber('id');
     }
+    // V109F5C: recuperación histórica bajo contrato cerrado.
+    if (\App\Http\Controllers\RecuperacionesPerdidaControlador::habilitado()) {
+        Route::get('/inventario/recuperaciones-perdidas',[\App\Http\Controllers\RecuperacionesPerdidaControlador::class,'listar'])->middleware('permiso.rutahd:inventario.operaciones.ver');
+        Route::get('/inventario/recuperaciones-perdidas/{id}',[\App\Http\Controllers\RecuperacionesPerdidaControlador::class,'ver'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id');
+        Route::get('/inventario/recuperaciones-perdidas/{id}/respaldos/{adjunto}',[\App\Http\Controllers\RecuperacionesPerdidaControlador::class,'respaldo'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber(['id','adjunto']);
+        Route::post('/inventario/recuperaciones-perdidas/revision',[\App\Http\Controllers\RecuperacionesPerdidaControlador::class,'revisar'])->middleware(['permiso.rutahd:inventario.operaciones.gestionar','throttle:60,1']);
+        Route::post('/inventario/recuperaciones-perdidas',[\App\Http\Controllers\RecuperacionesPerdidaControlador::class,'crear'])->middleware(['permiso.rutahd:inventario.operaciones.gestionar','throttle:20,1']);
+        Route::post('/inventario/recuperaciones-perdidas/{id}/aprobar',[\App\Http\Controllers\RecuperacionesPerdidaControlador::class,'aprobar'])->middleware('permiso.rutahd:inventario.operaciones.aprobar')->whereNumber('id');
+        Route::post('/inventario/recuperaciones-perdidas/{id}/anular',[\App\Http\Controllers\RecuperacionesPerdidaControlador::class,'anular'])->middleware('permiso.rutahd:inventario.operaciones.anular')->whereNumber('id');
+        Route::post('/inventario/recuperaciones-perdidas/{id}/confirmar',[\App\Http\Controllers\RecuperacionesPerdidaControlador::class,'confirmar'])->middleware('permiso.rutahd:inventario.operaciones.confirmar')->whereNumber('id');
+    }
     Route::get('/inventario/ajustes',[\App\Http\Controllers\AjustesGeneralesControlador::class,'listar'])->middleware('permiso.rutahd:inventario.operaciones.ver');
     Route::get('/inventario/ajustes/{id}',[\App\Http\Controllers\AjustesGeneralesControlador::class,'ver'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id');
     Route::get('/inventario/ajustes/{id}/respaldos/{adjunto}',[\App\Http\Controllers\AjustesGeneralesControlador::class,'respaldo'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber(['id','adjunto']);

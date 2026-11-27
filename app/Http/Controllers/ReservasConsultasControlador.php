@@ -21,7 +21,7 @@ final class ReservasConsultasControlador extends Controller
             ->whereNotExists(fn($q)=>$q->selectRaw('1')->from('inventario_reservas_operaciones as x')
                 ->leftJoin('inventario_operaciones as o','o.id','=','x.operacion_id')->whereColumn('x.reserva_id','r.id')
                 ->where(fn($a)=>$a->whereNull('o.id')->orWhereNull('o.sucursal_id')->orWhere('o.sucursal_id','<>',$sid)->orWhereNull('o.clase')->orWhere('o.clase','<>','RESERVA')))
-            ->select('r.id','r.numero_interno','r.nota_venta_id','r.estado','r.vence_en','r.creado_en','r.creado_por');
+            ->select('r.id','r.sucursal_id','r.numero_interno','r.nota_venta_id','r.estado','r.vence_en','r.creado_en','r.creado_por');
     }
     private function vencida(object $h): bool {
         return in_array($h->estado,['ACTIVA','PARCIAL'],true)&&$h->vence_en!==null&&(string)$h->vence_en<=now()->format('Y-m-d H:i:s');
@@ -40,8 +40,8 @@ final class ReservasConsultasControlador extends Controller
             return $p->toArray()+['escrituras_habilitadas'=>false,'solo_consulta'=>true];
         },3))->header('Cache-Control','private, no-store');
     }
-    public function ver(Request $r,int $id){
-        return response()->json(DB::transaction(function()use($r,$id){
+    private function datos(Request $r,int $id): array {
+        return DB::transaction(function()use($r,$id){
             $sid=(int)app(ContextoCompras::class)->resolver($r,true)->id;
             $h=$this->base($sid)->where('r.id',$id)->first();abort_unless($h,404,'Reserva no disponible.');
             $h->vencimiento_alcanzado=$this->vencida($h);
@@ -65,6 +65,15 @@ final class ReservasConsultasControlador extends Controller
                 ->where('x.reserva_id',$id)->where('o.sucursal_id',$sid)->where('o.clase','RESERVA')->whereIn('o.motivo_codigo_snapshot',[710,711,712])->where('e.codigo','<>','INV_ANULADA')
                 ->select('o.id','o.numero_interno','o.motivo_codigo_snapshot','o.motivo_nombre_snapshot','e.codigo as estado','o.version','o.creado_en','o.aprobado_en','o.confirmado_en')->orderBy('o.id')->get();
             return ['reserva'=>$h,'detalles'=>$lines,'operaciones'=>$ops,'escrituras_habilitadas'=>false,'solo_consulta'=>true,'saldo_acreditado'=>false];
-        },3))->header('Cache-Control','private, no-store');
+        },3);
+    }
+    public function ver(Request $r,int $id){
+        return response()->json($this->datos($r,$id))->header('Cache-Control','private, no-store');
+    }
+    public function pdf(Request $r,int $id){
+        $data=$this->datos($r,$id);
+        $data['generado_en']=now()->format('Y-m-d H:i:s').' '.config('app.timezone');
+        $pdf=(new \App\Services\ComprobanteReservaPdf())->generar($data);
+        return response($pdf,200,['Content-Type'=>'application/pdf','Content-Disposition'=>'inline; filename="reserva-'.$id.'.pdf"','Cache-Control'=>'private, no-store','X-Content-Type-Options'=>'nosniff']);
     }
 }

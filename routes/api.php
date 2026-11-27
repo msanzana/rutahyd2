@@ -95,6 +95,26 @@ Route::prefix('v1')->middleware('token.rutahd')->group(function(): void {
     Route::get('/inventario/catalogos',[\App\Http\Controllers\InventarioOperacionesControlador::class,'catalogos'])->middleware('permiso.rutahd:inventario.catalogos.ver');
     Route::put('/inventario/motivos/{id}',[\App\Http\Controllers\InventarioOperacionesControlador::class,'actualizarMotivo'])->middleware('permiso.rutahd:inventario.catalogos.gestionar')->whereNumber('id');
     // V109C6A: consultas; escrituras de traspasos pendientes de habilitación integral.
+    // V109E6A: reservas. JWT global + permiso + barrera de integración.
+    Route::get('/inventario/reservas/capacidades',[\App\Http\Controllers\ReservasConsultasControlador::class,'capacidades'])->middleware('permiso.rutahd:inventario.operaciones.ver');
+    if (\App\Http\Middleware\AutorizarReservas::consultas()) {
+        Route::get('/inventario/reservas',[\App\Http\Controllers\ReservasConsultasControlador::class,'listar'])->middleware(['permiso.rutahd:inventario.operaciones.ver',\App\Http\Middleware\AutorizarReservas::class.':consulta']);
+        Route::get('/inventario/reservas/{id}',[\App\Http\Controllers\ReservasConsultasControlador::class,'ver'])->middleware(['permiso.rutahd:inventario.operaciones.ver',\App\Http\Middleware\AutorizarReservas::class.':consulta'])->whereNumber('id');
+    }
+    if (\App\Http\Middleware\AutorizarReservas::pdf()) {
+        Route::get('/inventario/reservas/{id}/pdf',[\App\Http\Controllers\ReservasConsultasControlador::class,'pdf'])->middleware(['permiso.rutahd:inventario.operaciones.ver',\App\Http\Middleware\AutorizarReservas::class.':pdf','throttle:30,1'])->whereNumber('id');
+    }
+    if (\App\Http\Middleware\AutorizarReservas::escrituras()) {
+        Route::post('/inventario/reservas',[\App\Http\Controllers\ReservasInventarioControlador::class,'crear'])->middleware(['permiso.rutahd:inventario.operaciones.gestionar',\App\Http\Middleware\AutorizarReservas::class.':escritura','throttle:20,1']);
+        Route::post('/inventario/reservas/{id}/aprobar',[\App\Http\Controllers\ReservasInventarioControlador::class,'aprobar'])->middleware(['permiso.rutahd:inventario.operaciones.aprobar',\App\Http\Middleware\AutorizarReservas::class.':escritura','throttle:20,1'])->whereNumber('id');
+        Route::post('/inventario/reservas/{id}/confirmar',[\App\Http\Controllers\ReservasInventarioControlador::class,'confirmar'])->middleware(['permiso.rutahd:inventario.operaciones.confirmar',\App\Http\Middleware\AutorizarReservas::class.':escritura','throttle:20,1'])->whereNumber('id');
+        Route::post('/inventario/reservas/{id}/liberaciones',[\App\Http\Controllers\LiberacionesReservaControlador::class,'crear'])->middleware(['permiso.rutahd:inventario.operaciones.gestionar',\App\Http\Middleware\AutorizarReservas::class.':escritura','throttle:20,1'])->whereNumber('id');
+        Route::post('/inventario/reservas/{id}/liberaciones/{oid}/aprobar',[\App\Http\Controllers\LiberacionesReservaControlador::class,'aprobar'])->middleware(['permiso.rutahd:inventario.operaciones.aprobar',\App\Http\Middleware\AutorizarReservas::class.':escritura','throttle:20,1'])->whereNumber(['id','oid']);
+        Route::post('/inventario/reservas/{id}/liberaciones/{oid}/confirmar',[\App\Http\Controllers\LiberacionesReservaControlador::class,'confirmar'])->middleware(['permiso.rutahd:inventario.operaciones.confirmar',\App\Http\Middleware\AutorizarReservas::class.':escritura','throttle:20,1'])->whereNumber(['id','oid']);
+        Route::post('/inventario/reservas/{id}/operaciones/{oid}/anular',[\App\Http\Controllers\AnulacionesReservaControlador::class,'anular'])->middleware(['permiso.rutahd:inventario.operaciones.anular',\App\Http\Middleware\AutorizarReservas::class.':escritura','throttle:20,1'])->whereNumber(['id','oid']);
+        Route::post('/inventario/reservas/{id}/vencimiento/programar',[\App\Http\Controllers\VencimientosReservaControlador::class,'programar'])->middleware(['permiso.rutahd:inventario.operaciones.gestionar',\App\Http\Middleware\AutorizarReservas::class.':escritura','throttle:20,1'])->whereNumber('id');
+        Route::post('/inventario/reservas/{id}/vencimiento/solicitar',[\App\Http\Controllers\VencimientosReservaControlador::class,'solicitar'])->middleware(['permiso.rutahd:inventario.operaciones.gestionar',\App\Http\Middleware\AutorizarReservas::class.':escritura','throttle:20,1'])->whereNumber('id');
+    }
     // V109D4A: consultas de conteos; sin rutas de escritura hasta integrar permisos y cierre.
     Route::get('/inventario/conteos',[\App\Http\Controllers\ConteosInventarioControlador::class,'listar'])->middleware('permiso.rutahd:inventario.operaciones.ver');
     Route::get('/inventario/conteos/{id}/pdf',[\App\Http\Controllers\ConteosInventarioControlador::class,'pdf'])->middleware('permiso.rutahd:inventario.operaciones.ver')->whereNumber('id')->middleware('throttle:30,1');

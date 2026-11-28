@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   validacion:
-    name: PUB06A - Ensayar transferencia y rollback FTPS aislado sin publicar
+    name: PUB06B-R1 - Renovar clave y generar respaldo cifrado sin publicar
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     if: github.ref == 'refs/heads/main'
@@ -193,9 +193,9 @@ jobs:
       - name: Obtener clave publica de respaldo fijada
         uses: actions/checkout@v4
         with:
-          ref: a072375019a07f03e65bddac3c32b101da0707cf
+          ref: 31e6c63b18dba39599853bc315e89879c06d0bb5
           path: fuente-clave
-          sparse-checkout: deployment/keys/respaldo-sql-20261121-public.pem
+          sparse-checkout: deployment/keys/rutahd-respaldo-public-20261128.pem
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Recuperar respaldo historico V108A
@@ -652,8 +652,11 @@ jobs:
           if __name__ == '__main__':
               password = os.environ.get('FTP_PASSWORD', '')
               need(bool(password), 'Secreto FTPS no configurado')
-              pub = serialization.load_pem_public_key(Path('fuente-clave/deployment/keys/respaldo-sql-20261121-public.pem').read_bytes())
-              need(isinstance(pub, rsa.RSAPublicKey) and pub.key_size >= 2048, 'Clave de respaldo invalida')
+              pub = serialization.load_pem_public_key(Path('fuente-clave/deployment/keys/rutahd-respaldo-public-20261128.pem').read_bytes())
+              need(isinstance(pub, rsa.RSAPublicKey) and pub.key_size == 4096, 'Clave de respaldo RSA4096 invalida')
+              key_fingerprint = sha(pub.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo))
+              need(key_fingerprint == '42a6f13d14c18b848a1648bfca08cf1d708abaea26037fd20624c0a9c8090a6b', 'Huella de clave publica no coincide')
+              print('PUB06B_R1_CLAVE_PUBLICA_OK SHA256=' + key_fingerprint)
               try:
                   with ftplib.FTP_TLS(context=ssl.create_default_context(), timeout=45) as ftp:
                       ftp.connect('ftpupload.net', 21)
@@ -670,6 +673,7 @@ jobs:
               diagnostics = []
               if os.environ['VERSION'] == 'V109D6C' and os.environ['ARTIFACT_ID'] == '15166647801':
                   diagnostics = diagnose_v108(blobs, Path('paquete'), Path('historico-v108a'), Path('historico-v108d'))
+              metadata['public_key_sha256'] = key_fingerprint
               metadata['diagnostics'] = diagnostics
               reconciliations = []
               previews = {}
@@ -712,7 +716,7 @@ jobs:
       - name: Conservar respaldo cifrado y resultado de preflight
         uses: actions/upload-artifact@v4
         with:
-          name: rutahd-pub06a-${{ inputs.version }}-${{ github.run_id }}
+          name: rutahd-pub06b-r1-${{ inputs.version }}-${{ github.run_id }}
           path: respaldo-pub04/
           retention-days: 30
           if-no-files-found: error
@@ -725,8 +729,8 @@ jobs:
           from pathlib import Path
           r=json.loads(Path('respaldo-pub04/resultado.json').read_text())
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
-              f.write('\n## PUB06A — Ensayo FTPS aislado y rollback\n')
-              for name in ('candidates','existing','absent','encrypted_sha256'):
+              f.write('\n## PUB06B-R1 — Renovacion de clave y respaldo cifrado\n')
+              for name in ('candidates','existing','absent','encrypted_sha256','public_key_sha256'):
                   f.write(f'- {name}: {r[name]}\n')
               f.write(f'- Divergencias: {len(r["blockers"])}\n')
               for item in r['blockers']:

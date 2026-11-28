@@ -1,33 +1,192 @@
-
 name: Ruta H&D - Publicaciones
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version del paquete (ej. V109D6C)'
+        required: true
+        type: string
+        default: 'V109D6C'
+      run_id:
+        description: 'ID de la ejecucion que genero el paquete'
+        required: true
+        type: string
+        default: '45927132714'
+      artifact_id:
+        description: 'ID del artefacto que contiene el paquete ZIP'
+        required: true
+        type: string
+        default: '15166647801'
+      sha256:
+        description: 'SHA256 del ZIP, 64 caracteres hexadecimales'
+        required: true
+        type: string
+        default: 'bb3180722da670a07ab3501e43b53aeca9efac8a0741f206eb98a8a8679f8f26'
 
 permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: rutahd-publicacion-general
+  cancel-in-progress: false
+
 jobs:
   validacion:
-    name: Validar paquete V109D6C
+    name: PUB03 - Validar paquete parametrizado
     runs-on: ubuntu-24.04
-
+    timeout-minutes: 10
+    if: github.ref == 'refs/heads/main'
+    env:
+      VERSION: ${{ inputs.version }}
+      SOURCE_RUN: ${{ inputs.run_id }}
+      ARTIFACT_ID: ${{ inputs.artifact_id }}
+      EXPECTED_SHA: ${{ inputs.sha256 }}
     steps:
-      - name: Descargar paquete de revision
-        uses: actions/download-artifact@v4
-        with:
-          name: rutahd-v109d6c-paquete-revision
-          run-id: 45927132714
-          github-token: ${{ github.token }}
-          path: paquete
-
-      - name: Comprobar integridad
-        working-directory: paquete
+      - name: Comprobar parametros y origen del artefacto
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
-          sha256sum -c SHA256SUMS
-          test "$(find candidato/backend -type f | wc -l)" -eq 24
-          test "$(find candidato/frontend -type f | wc -l)" -eq 5
-          echo "V109D6C - INTEGRIDAD CORRECTA"
-          cat ESTADO.txt
+          [[ "$VERSION" =~ ^V[0-9][A-Z0-9]{0,30}$ ]]
+          [[ "$SOURCE_RUN" =~ ^[1-9][0-9]{0,19}$ ]]
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]{0,19}$ ]]
+          [[ "$EXPECTED_SHA" =~ ^[a-fA-F0-9]{64}$ ]]
+          test "$GITHUB_REPOSITORY" = 'msanzana/rutahyd2'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" > run.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/artifacts?per_page=100" > artifacts.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          run = json.loads(Path('run.json').read_text())
+          pages = json.loads(Path('artifacts.json').read_text())
+          assert str(run['id']) == os.environ['SOURCE_RUN']
+          assert run['status'] == 'completed' and run['conclusion'] == 'success', 'Ejecucion de origen no exitosa'
+          expected_name = 'rutahd-' + os.environ['VERSION'].lower() + '-paquete-revision'
+          matches = [a for p in pages for a in p['artifacts'] if str(a['id']) == os.environ['ARTIFACT_ID']]
+          assert len(matches) == 1, 'Artefacto no pertenece a la ejecucion indicada'
+          a = matches[0]
+          assert a['name'] == expected_name, 'Nombre de artefacto no corresponde a la version'
+          assert a['expired'] is False, 'Artefacto vencido'
+          assert a['digest'] == 'sha256:' + os.environ['EXPECTED_SHA'].lower(), 'SHA256 de metadatos no coincide'
+          assert 0 < a['size_in_bytes'] <= 50 * 1024 * 1024, 'Tamano de paquete fuera de limite'
+          print('ORIGEN Y METADATOS CORRECTOS')
+          PY
+      - name: Descargar ZIP y comprobar SHA256 externo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --max-time 120 --max-filesize 52428800 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" \
+            --output paquete.zip
+          printf '%s  paquete.zip\n' "${EXPECTED_SHA,,}" | sha256sum --check --strict
+      - name: Validar estructura, rutas y manifiesto completo
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, os, re, stat, zipfile
+          from pathlib import Path
+          def check(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+          def allowed(name):
+              if name in {'ESTADO.txt', 'SHA256SUMS'}:
+                  return True
+              parts = name.split('/')
+              if len(parts) < 3 or parts[0] not in {'candidato', 'referencia'}:
+                  return False
+              if not all(re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9_.-]*', p) for p in parts):
+                  return False
+              if any(p.lower() in {'vendor', 'node_modules', 'storage', 'secrets', 'credentials', 'database', 'tests', 'backups'} for p in parts):
+                  return False
+              if any(re.search(r'(?i)(?:^|[_.-])(secret|credential|password|private[_-]?key|env)(?:[_.-]|$)', p) for p in parts):
+                  return False
+              relative = '/'.join(parts[2:])
+              if parts[1] == 'backend':
+                  return relative == 'routes/api.php' or (relative.startswith(('app/', 'config/')) and relative.endswith('.php'))
+              if parts[1] == 'frontend':
+                  return relative == 'index.html' or (relative.startswith('assets/') and Path(relative).suffix.lower() in {'.js', '.css', '.png', '.jpg', '.jpeg', '.webp', '.svg', '.woff2', '.ico'})
+              return False
+          with zipfile.ZipFile('paquete.zip') as z:
+              entries = z.infolist()
+              check(0 < len(entries) <= 2000, 'Cantidad de entradas fuera de limite')
+              check(sum(e.file_size for e in entries) <= 100 * 1024 * 1024, 'ZIP expandido demasiado grande')
+              files = {}
+              seen = set()
+              for e in entries:
+                  name = e.filename.rstrip('/')
+                  check(name and all(re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9_.-]*', p) for p in name.split('/')), 'Ruta insegura')
+                  check(name.lower() not in seen, 'Ruta duplicada o colision de mayusculas')
+                  seen.add(name.lower())
+                  mode = stat.S_IFMT(e.external_attr >> 16)
+                  check(mode in {0, stat.S_IFREG, stat.S_IFDIR}, 'Enlace o archivo especial no permitido')
+                  check(not (e.flag_bits & 1), 'Archivo cifrado no permitido')
+                  if e.is_dir():
+                      check(name.split('/')[0] in {'candidato', 'referencia'} and len(name.split('/')) <= 20, 'Directorio no permitido')
+                      continue
+                  check(mode != stat.S_IFDIR and allowed(name), 'Archivo fuera del alcance permitido: ' + name)
+                  files[name] = z.read(e)
+          check({'ESTADO.txt','SHA256SUMS'} <= files.keys(), 'Metadatos de paquete incompletos')
+          estado = files['ESTADO.txt'].decode('utf-8')
+          check(estado.splitlines() and estado.splitlines()[0].startswith(os.environ['VERSION'] + ':'), 'Version del paquete no coincide')
+          manifest = {}
+          for line in files['SHA256SUMS'].decode('ascii').splitlines():
+              match = re.fullmatch(r'([0-9a-f]{64}) [ *](\S+)', line)
+              check(match is not None, 'Linea de manifiesto invalida')
+              digest, name = match.groups()
+              check(name not in manifest and name not in {'ESTADO.txt', 'SHA256SUMS'}, 'Entrada de manifiesto duplicada o invalida')
+              manifest[name] = digest
+          payload = set(files) - {'ESTADO.txt', 'SHA256SUMS'}
+          check(set(manifest) == payload, 'El manifiesto no cubre exactamente todos los archivos')
+          for name, digest in manifest.items():
+              check(hashlib.sha256(files[name]).hexdigest() == digest, 'Hash incorrecto: ' + name)
+          candidate = {p for p in payload if p.startswith('candidato/')}
+          reference = {p for p in payload if p.startswith('referencia/')}
+          check(candidate and reference, 'Faltan candidatos o referencias')
+          check(all('candidato/' + p.removeprefix('referencia/') in candidate for p in reference), 'Referencia sin candidato')
+          backend = sum(p.startswith('candidato/backend/') for p in candidate)
+          frontend = sum(p.startswith('candidato/frontend/') for p in candidate)
+          if os.environ['VERSION'] == 'V109D6C':
+              check((backend, frontend) == (24, 5), 'V109D6C requiere 24 archivos backend y 5 frontend')
+          out = Path('paquete')
+          out.mkdir(exist_ok=False)
+          for name, content in files.items():
+              target = out / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(content)
+          print(f'INTEGRIDAD CORRECTA: backend={backend}, frontend={frontend}, referencias={len(reference)}')
+          PY
+      - name: Comprobar sintaxis sin ejecutar codigo candidato
+        shell: bash
+        run: |
+          set -euo pipefail
+          php --version | head -n 1
+          node --version
+          if [[ -d paquete/candidato/backend ]]; then
+            find paquete/candidato/backend -type f -name '*.php' -print0 | xargs -0 -r -n 1 php -l
+          fi
+          if [[ -d paquete/candidato/frontend ]]; then
+            find paquete/candidato/frontend -type f -name '*.js' -print0 | xargs -0 -r -n 1 node --check
+          fi
+      - name: Registrar resultado PUB03
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo '## PUB03 — Validacion del paquete'
+            echo "- Version: $VERSION"
+            echo "- Ejecucion de origen: $SOURCE_RUN"
+            echo "- Artefacto: $ARTIFACT_ID"
+            echo "- SHA256 ZIP: ${EXPECTED_SHA,,}"
+            echo '- Resultado: origen, integridad, rutas, manifiesto y sintaxis conformes.'
+            echo '- Alcance: solo validacion. Sin FTPS, respaldo remoto, DDL ni publicacion.'
+          } >> "$GITHUB_STEP_SUMMARY"

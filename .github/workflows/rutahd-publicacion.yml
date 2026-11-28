@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   validacion:
-    name: PUB05 - Preparar y simular transferencia fullstack sin publicar
+    name: PUB06A - Ensayar transferencia y rollback FTPS aislado sin publicar
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     if: github.ref == 'refs/heads/main'
@@ -214,6 +214,12 @@ jobs:
           run-id: 45885877592
           github-token: ${{ github.token }}
           path: historico-v108d
+      - name: Preparar servidor FTPS local de ensayo
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv --system-site-packages "$RUNNER_TEMP/pub06-venv"
+          "$RUNNER_TEMP/pub06-venv/bin/python" -m pip install --disable-pip-version-check 'pyftpdlib==2.0.1' 'pyOpenSSL==25.1.0'
       - name: Preflight FTPS de solo lectura y respaldo cifrado
         env:
           FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
@@ -222,7 +228,7 @@ jobs:
           set -euo pipefail
           set +x
           umask 077
-          python3 - <<'PY'
+          "$RUNNER_TEMP/pub06-venv/bin/python" - <<'PY'
           import ftplib, ssl, os, io, hashlib, json, zipfile, posixpath, base64, secrets
           from pathlib import Path
           from cryptography.hazmat.primitives import hashes, serialization
@@ -533,6 +539,93 @@ jobs:
                   if current!=initial: raise ValueError('Local rollback failed')
                   return 'restored'
 
+          def exercise_isolated_ftps(rows, initial, targets):
+              # Actual TLS transport to a disposable server on this runner only.
+              # Never pass the InfinityFree connection or password to this function.
+              import logging, subprocess, tempfile, threading
+              from pyftpdlib.authorizers import DummyAuthorizer
+              from pyftpdlib.handlers import TLS_FTPHandler
+              from pyftpdlib.servers import FTPServer
+              logging.getLogger('pyftpdlib').setLevel(logging.CRITICAL)
+              mutable = [r for r in rows if r['action'] != 'sin_cambios']
+              if not mutable:
+                  raise ValueError('No hay cambios para ensayo FTPS')
+              with tempfile.TemporaryDirectory(prefix='rutahd-pub06-') as temp:
+                  root=Path(temp)/'sandbox'; root.mkdir()
+                  cert=Path(temp)/'cert.pem'; key=Path(temp)/'key.pem'
+                  subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-days','1','-subj','/CN=127.0.0.1','-addext','subjectAltName=IP:127.0.0.1','-keyout',str(key),'-out',str(cert)],check=True,capture_output=True,timeout=30)
+                  for row in rows:
+                      path=root/row['remote'].lstrip('/')
+                      path.parent.mkdir(parents=True,exist_ok=True)
+                      data=initial[row['path']]
+                      if data is not None: path.write_bytes(data)
+                  auth=DummyAuthorizer(); password=secrets.token_hex(24)
+                  auth.add_user('pub06-local',password,str(root),perm='elrwd')
+                  class IsolatedHandler(TLS_FTPHandler):
+                      pass
+                  IsolatedHandler.authorizer=auth
+                  IsolatedHandler.certfile=str(cert); IsolatedHandler.keyfile=str(key)
+                  IsolatedHandler.tls_control_required=True; IsolatedHandler.tls_data_required=True
+                  server=FTPServer(('127.0.0.1',0),IsolatedHandler)
+                  port=server.socket.getsockname()[1]
+                  thread=threading.Thread(target=server.serve_forever,kwargs={'timeout':0.1,'handle_exit':False},daemon=True)
+                  thread.start()
+                  try:
+                      context=ssl.create_default_context(cafile=str(cert))
+                      def connect():
+                          ftp=ftplib.FTP_TLS(context=context,timeout=10)
+                          ftp.connect('127.0.0.1',port);ftp.login('pub06-local',password);ftp.prot_p()
+                          return ftp
+                      def local_only(ftp):
+                          if ftp.sock is None or ftp.sock.getpeername()!=('127.0.0.1',port) or not isinstance(ftp.sock,ssl.SSLSocket) or not ftp._prot_p:
+                              raise RuntimeError('Escritura permitida solo en servidor TLS aislado')
+                      def read(ftp,row):
+                          local_only(ftp)
+                          return ReadOnlyFTP(ftp).read(row['remote'],allow_absent=True)
+                      def write(ftp,row,data):
+                          local_only(ftp)
+                          if data is None:
+                              if read(ftp,row) is not None: ftp.delete(row['remote'])
+                          else: ftp.storbinary('STOR '+row['remote'],io.BytesIO(data))
+                      def verify(ftp,expected):
+                          for row in rows:
+                              if read(ftp,row)!=expected[row['path']]:
+                                  raise RuntimeError('Cotejo FTPS local fallido: '+row['path'])
+                      def reverse(ftp,journal):
+                          for row in reversed(journal): write(ftp,row,initial[row['path']])
+                          verify(ftp,initial)
+                      def attempt(fail_at=None):
+                          journal=[]; injected=False
+                          with connect() as ftp:
+                              verify(ftp,initial)
+                              try:
+                                  for i,row in enumerate(mutable,1):
+                                      name=row['path']; data=targets[name]
+                                      if read(ftp,row)!=initial[name] or sha(data)!=row['after_sha256']:
+                                          raise RuntimeError('Estado previo o objetivo incorrecto')
+                                      journal.append(row)
+                                      if fail_at==i:
+                                          write(ftp,row,data[:max(1,len(data)//2)]); injected=True
+                                          raise RuntimeError('Fallo parcial inyectado')
+                                      write(ftp,row,data)
+                                      if read(ftp,row)!=data: raise RuntimeError('Cotejo de escritura fallido')
+                                  verify(ftp,targets)
+                              except Exception:
+                                  # Reconnect for rollback rather than assume a healthy transfer session.
+                                  with connect() as rollback:
+                                      reverse(rollback,journal)
+                                  if not injected: raise
+                                  return 'restored'
+                          if fail_at is not None: raise RuntimeError('No se inyecto el fallo esperado')
+                          with connect() as rollback: reverse(rollback,journal)
+                          return 'success'
+                      if attempt()!='success': raise RuntimeError('Ensayo completo FTPS fallido')
+                      for i in range(1,len(mutable)+1):
+                          if attempt(i)!='restored': raise RuntimeError('Ensayo de rollback FTPS fallido')
+                      return len(mutable)
+                  finally:
+                      server.close_all();thread.join(timeout=5)
+
           def encrypt_backup(items, blobs, blockers, public_key, metadata):
               report = dict(**metadata, entries=items, blockers=blockers)
               buffer = io.BytesIO()
@@ -591,6 +684,7 @@ jobs:
               if not dependencies: blockers.append('contrato_dependencias_no_definido_para_version')
               plan=[]
               tests=0
+              isolated_tests=0
               if not blockers:
                   plan, initial, targets=prepare_plan(items, blobs, Path('paquete'), previews)
                   need(simulate_transfer(plan, initial, targets)=='success','Simulacion de transferencia fallo')
@@ -598,8 +692,11 @@ jobs:
                   for i in range(1,tests+1):
                       need(simulate_transfer(plan, initial, targets, i)=='restored','Simulacion de restauracion fallo')
                   print('PUB05_SIMULACION_OK archivos='+str(len(plan))+' fallos_inyectados='+str(tests))
+                  isolated_tests=exercise_isolated_ftps(plan,initial,targets)
+                  print('PUB06A_FTPS_LOCAL_OK archivos='+str(len(plan))+' restauraciones='+str(isolated_tests))
               metadata['plan']=plan
               metadata['local_rollback_cases']=tests
+              metadata['isolated_ftps_rollback_cases']=isolated_tests
               metadata['publication_enabled']=False
               encrypted = encrypt_backup(items, blobs, blockers, pub, metadata)
               out = Path('respaldo-pub04')
@@ -615,7 +712,7 @@ jobs:
       - name: Conservar respaldo cifrado y resultado de preflight
         uses: actions/upload-artifact@v4
         with:
-          name: rutahd-pub05-${{ inputs.version }}-${{ github.run_id }}
+          name: rutahd-pub06a-${{ inputs.version }}-${{ github.run_id }}
           path: respaldo-pub04/
           retention-days: 30
           if-no-files-found: error
@@ -628,7 +725,7 @@ jobs:
           from pathlib import Path
           r=json.loads(Path('respaldo-pub04/resultado.json').read_text())
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
-              f.write('\n## PUB05 — Plan y simulacion de transferencia\n')
+              f.write('\n## PUB06A — Ensayo FTPS aislado y rollback\n')
               for name in ('candidates','existing','absent','encrypted_sha256'):
                   f.write(f'- {name}: {r[name]}\n')
               f.write(f'- Divergencias: {len(r["blockers"])}\n')
@@ -641,7 +738,8 @@ jobs:
                   f.write(f'- Reconciliacion {item["path"]}: {item["reconciled"]}; hash vista previa={item.get("preview_sha256", "no disponible")}\n')
               f.write(f'- Archivos planificados: {len(r.get("plan", []))}\n')
               f.write(f'- Restauraciones simuladas en memoria: {r.get("local_rollback_cases", 0)}\n')
-              f.write('- Solo lectura FTPS. Sin DDL ni subida a InfinityFree.\n')
+              f.write(f'- Restauraciones por FTPS local: {r.get("isolated_ftps_rollback_cases", 0)}\n')
+              f.write('- InfinityFree: solo lectura. STOR y DELE exclusivamente en loopback TLS del runner. Sin DDL ni subida productiva.\n')
               f.write('- Pendientes: DDL/atribucion, dependencias instaladas y runtime, llave privada, restauracion real y autorizacion de escritura.\n')
           if r['blockers']:
               raise SystemExit('Preflight detenido por divergencias. Respaldo cifrado conservado.')

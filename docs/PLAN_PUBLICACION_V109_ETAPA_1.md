@@ -46,3 +46,5 @@ El canal manual autorizado por el titular ya está operativo; la restricción an
 - PUB05 preparado como simulación de transferencia y dependencias; a esta revisión no existe ejecución acreditada. PUB06 (verificación y rollback real) y PUB07 (primera publicación) pendientes.
 - Antes de publicar: verificar dependencias productivas y autoload, DDL49/atribución sin repetir DDL, recuperación con clave privada, guardas de escritura, cotejo inmediato de producción, HTTP/JWT y aceptación autenticada. No habilitar segunda sucursal ni V109E/F/G.
 - Evidencia, accesos permanentes y conceptos: [FUENTE_CONOCIMIENTO_PUBLICADOR_SEMIAUTOMATICO.md](FUENTE_CONOCIMIENTO_PUBLICADOR_SEMIAUTOMATICO.md).
+
+- Actualización PUB05: run 46119415230 SUCCESS, commit d5d1c41d6e2fb7846f3457d62a81dcbf89216f50; siete dependencias productivas cotejadas, autoload presente (no runtime), 29 archivos y 29 restauraciones simuladas en memoria, cero bloqueos; respaldo 15252996403. No publicado. PUB06/PUB07 pendientes.

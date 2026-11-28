@@ -48,3 +48,5 @@ El canal manual autorizado por el titular ya está operativo; la restricción an
 - Evidencia, accesos permanentes y conceptos: [FUENTE_CONOCIMIENTO_PUBLICADOR_SEMIAUTOMATICO.md](FUENTE_CONOCIMIENTO_PUBLICADOR_SEMIAUTOMATICO.md).
 
 - Actualización PUB05: run 46119415230 SUCCESS, commit d5d1c41d6e2fb7846f3457d62a81dcbf89216f50; siete dependencias productivas cotejadas, autoload presente (no runtime), 29 archivos y 29 restauraciones simuladas en memoria, cero bloqueos; respaldo 15252996403. No publicado. PUB06/PUB07 pendientes.
+
+- PUB06A run 46119870191 SUCCESS (commit 61d7915c20e74f80d9761c58df3536c4e1ac3efc): 29 transferencias FTPS y 29 restauraciones exitosas en servidor aislado, cero bloqueos; respaldo 15253720642. Sin escritura real. PUB06B verificador local preparado y probado con datos sintéticos; falta descifrar respaldo real con clave RSA original en custodia del titular. No compartir clave ni contenidos. DDL49/atribución, runtime y verificación/rollback productivos siguen pendientes; PUB07 no autorizado hasta resolver guardas.

@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   validacion:
-    name: PUB04A - Diagnosticar referencias productivas sin publicar
+    name: PUB04B - Reconciliar referencias sin publicar
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     if: github.ref == 'refs/heads/main'
@@ -364,6 +364,103 @@ jobs:
                   results.append(result)
               return results
 
+          def patch_html_v109(data):
+              from html.parser import HTMLParser
+              anchor = b'<button type="button" data-nav="bodega_ajuste_rapido" class="nav-sublink" role="menuitem" hidden><span>Ajuste r\xc3\xa1pido</span></button>'
+              additions = b''.join(b'<button type="button" data-nav="'+key+b'" class="nav-sublink" role="menuitem" hidden><span>'+title+b'</span></button>' for key,title in [(b'bodega_ajustes_generales',b'Ajustes generales'),(b'bodega_traspasos',b'Traspasos'),(b'bodega_conteos',b'Conteos de inventario')])
+              def require(ok, msg):
+                  if not ok: raise ValueError(msg)
+              class Links(HTMLParser):
+                  def __init__(self):
+                      super().__init__(); self.nav=[]; self.scripts=[]; self.styles=[]; self.ids=[]
+                  def handle_starttag(self, tag, attrs):
+                      a=dict(attrs)
+                      if 'id' in a: self.ids.append(a['id'])
+                      if tag=='button' and 'data-nav' in a: self.nav.append((a['data-nav'], 'hidden' in a))
+                      if tag=='script' and 'src' in a: self.scripts.append(a['src'])
+                      if tag=='link' and a.get('rel')=='stylesheet': self.styles.append(a.get('href',''))
+              def parse(raw):
+                  p=Links(); p.feed(raw.decode('utf-8')); p.close(); return p
+              before=parse(data)
+              require(data.count(anchor)==1 and before.ids.count('bodegaSubnav')==1,'Ancla de Bodega no unica')
+              for key in ('bodega_ajustes_generales','bodega_traspasos','bodega_conteos'):
+                  require(not any(n==key for n,h in before.nav),'Opcion Bodega ya existente')
+              out=data.replace(anchor,anchor+additions,1)
+              swaps=[('catalogos-api.js','v107','v109d5'),('compras-consultas-v66.js','v102','v108b4'),('inventario-v104.js','v105','v109d5'),('app-produccion.js','v106','v109d4a')]
+              expected_scripts=list(before.scripts)
+              for name,old,new in swaps:
+                  a='assets/js/'+name+'?v=20261126-'+old
+                  b='assets/js/'+name+'?v=20261126-'+new
+                  require(before.scripts.count(a)==1 and b not in before.scripts,'Referencia de cache inesperada: '+name)
+                  aa=('src="'+a+'"').encode(); bb=('src="'+b+'"').encode()
+                  require(out.count(aa)==1,'Ancla de cache no unica: '+name)
+                  out=out.replace(aa,bb,1)
+                  expected_scripts[expected_scripts.index(a)]=b
+              after=parse(out)
+              require(after.scripts==expected_scripts and after.styles==before.styles and after.ids==before.ids,'Cambios fuera de alcance HTML')
+              expected_nav=list(before.nav); pos=next(i for i,(k,h) in enumerate(expected_nav) if k=='bodega_ajuste_rapido')
+              expected_nav[pos+1:pos+1]=[(k,True) for k in ('bodega_ajustes_generales','bodega_traspasos','bodega_conteos')]
+              require(after.nav==expected_nav,'Menu HTML divergente')
+              return out
+
+          def route_preview_v109(live, base, candidate):
+              import subprocess, tempfile, re
+              from collections import Counter
+              def require(ok, msg):
+                  if not ok: raise ValueError(msg)
+              def routes(data):
+                  return Counter(line.strip() for line in data.decode('utf-8').splitlines() if re.search(r'Route::(?:get|post|put|patch|delete)\s*\(',line))
+              old,new,prod=routes(base),routes(candidate),routes(live)
+              added=new-old
+              require(sum(old.values())==133 and sum(new.values())==167 and not old-new and sum(added.values())==34,'Delta de rutas no corresponde a V109D6C')
+              require(not (added & prod),'Ruta nueva ya presente en produccion')
+              # Also reject a new verb/path overlapping a live declaration even with different handler.
+              def keys(counter):
+                  result=Counter()
+                  for line,n in counter.items():
+                      m=re.search(r"Route::(get|post|put|patch|delete)\s*\(\s*(['\"])(.*?)\2",line)
+                      if m: result[(m[1],m[3])]+=n
+                  return result
+              require(sum(keys(added).values())==34 and not (keys(added)&keys(prod)) and max(keys(added).values())==1,'Colision de metodo/ruta')
+              with tempfile.TemporaryDirectory() as temp:
+                  paths=[Path(temp)/n for n in ('live','base','candidate')]
+                  for p,data in zip(paths,(live,base,candidate)):p.write_bytes(data)
+                  merge=subprocess.run(['git','merge-file','-p',*map(str,paths)],capture_output=True,timeout=30)
+                  require(merge.returncode==0,'Conflicto de rutas')
+                  result=merge.stdout
+                  require(routes(result)==prod+added,'El resultado no conserva exactamente las rutas existentes y nuevas')
+                  target=Path(temp)/'merged.php';target.write_bytes(result)
+                  check=subprocess.run(['php','-l',str(target)],capture_output=True,timeout=30)
+                  require(check.returncode==0,'PHP fusionado no supera lint')
+                  return result
+
+          def reconcile_v109(blobs, package, diagnostics):
+              # Exact hashes independently observed in successful diagnostic steps of run 46118606576.
+              pins={
+                'backend/routes/api.php':('02e1a36575bab308d19501f183337a7e856f5a9455de41845b7a4d0e1aacba05','cf6ac825036a517a39c80eef0f257d97034d35b56b193043dc058eaf1a04f9d9','bfb672f7a4406bdf0a6c839e26ccd306d824c8bf24f327c3037b02a7347aabcb'),
+                'frontend/index.html':('847ca1adcc443505d6855e85f58b84b1ecd0f1fc8c1286b94c79c46906d7d508','a7a4f14629d488ccda7417756e51f1f83b222860527546bf85eb27d8a7aed1e2','9357db57f8071efcc4e4e4d95be37b4e83043c5a7a8736fe53800b32591c9e03')}
+              results=[]
+              for name,pin in pins.items():
+                  item={'path':name,'reconciled':False}
+                  try:
+                      d=next(x for x in diagnostics if x['path']==name)
+                      live=blobs['archivos/'+name];base=(package/'referencia'/name).read_bytes();candidate=(package/'candidato'/name).read_bytes()
+                      if tuple(map(sha,(live,base,candidate)))!=pin or not d['matches_historical']:
+                          raise ValueError('Hashes o referencia historica cambiaron')
+                      if name.startswith('backend/'):
+                          if not d['historical_routes_agree']: raise ValueError('Respaldos historicos de rutas no coinciden')
+                          result=route_preview_v109(live,base,candidate)
+                          if sha(result)!='5a9fe4d01d929ef67e8e3117e6582abf3322b81c9b5b19c1fcc32c6217201780': raise ValueError('Merge distinto del diagnostico previo')
+                      else:
+                          if patch_html_v109(base)!=candidate: raise ValueError('El delta HTML candidato no coincide con los cinco cambios aprobados para revision')
+                          result=patch_html_v109(live)
+                      item.update(reconciled=True, preview_sha256=sha(result), bytes=len(result))
+                  except (ValueError,KeyError,StopIteration,OSError,UnicodeError,RuntimeError) as exc:
+                      item['reason']=str(exc)
+                  print('RECONCILIACION '+json.dumps(item,sort_keys=True))
+                  results.append(item)
+              return results
+
           def encrypt_backup(items, blobs, blockers, public_key, metadata):
               report = dict(**metadata, entries=items, blockers=blockers)
               buffer = io.BytesIO()
@@ -407,6 +504,13 @@ jobs:
               if os.environ['VERSION'] == 'V109D6C' and os.environ['ARTIFACT_ID'] == '15166647801':
                   diagnostics = diagnose_v108(blobs, Path('paquete'), Path('historico-v108a'), Path('historico-v108d'))
               metadata['diagnostics'] = diagnostics
+              reconciliations = []
+              if diagnostics and os.environ['EXPECTED_SHA'].lower() == 'bb3180722da670a07ab3501e43b53aeca9efac8a0741f206eb98a8a8679f8f26':
+                  reconciliations = reconcile_v109(blobs, Path('paquete'), diagnostics)
+              metadata['reconciliations'] = reconciliations
+              metadata['raw_divergences'] = list(blockers)
+              resolved = {x['path'] for x in reconciliations if x['reconciled']}
+              blockers = [x for x in blockers if x not in resolved]
               encrypted = encrypt_backup(items, blobs, blockers, pub, metadata)
               out = Path('respaldo-pub04')
               out.mkdir(exist_ok=False)
@@ -421,7 +525,7 @@ jobs:
       - name: Conservar respaldo cifrado y resultado de preflight
         uses: actions/upload-artifact@v4
         with:
-          name: rutahd-pub04-${{ inputs.version }}-${{ github.run_id }}
+          name: rutahd-pub04b-${{ inputs.version }}-${{ github.run_id }}
           path: respaldo-pub04/
           retention-days: 30
           if-no-files-found: error
@@ -434,7 +538,7 @@ jobs:
           from pathlib import Path
           r=json.loads(Path('respaldo-pub04/resultado.json').read_text())
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
-              f.write('\n## PUB04A — Preflight FTPS y diagnostico de referencias\n')
+              f.write('\n## PUB04B — Preflight y reconciliacion de referencias\n')
               for name in ('candidates','existing','absent','encrypted_sha256'):
                   f.write(f'- {name}: {r[name]}\n')
               f.write(f'- Divergencias: {len(r["blockers"])}\n')
@@ -442,6 +546,9 @@ jobs:
                   f.write(f'  - {item}\n')
               for item in r.get('diagnostics', []):
                   f.write(f'- Diagnostico {item["path"]}: coincide historico={item["matches_historical"]}; merge preliminar={item.get("merge_preview", "no disponible")}\n')
+              f.write(f'- Divergencias originales: {len(r.get("raw_divergences", []))}\n')
+              for item in r.get('reconciliations', []):
+                  f.write(f'- Reconciliacion {item["path"]}: {item["reconciled"]}; hash vista previa={item.get("preview_sha256", "no disponible")}\n')
               f.write('- Solo lectura FTPS. Sin DDL ni subida a InfinityFree.\n')
               f.write('- Pendientes: DDL/atribucion, dependencias, llave privada y prueba de restauracion.\n')
           if r['blockers']:

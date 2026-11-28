@@ -29,14 +29,14 @@ permissions:
   actions: read
 
 concurrency:
-  group: rutahd-publicacion-general
+  group: rutahd2-ftps-staging
   cancel-in-progress: false
 
 jobs:
   validacion:
-    name: PUB03 - Validar paquete parametrizado
+    name: PUB04 - Validar y respaldar sin publicar
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     if: github.ref == 'refs/heads/main'
     env:
       VERSION: ${{ inputs.version }}
@@ -190,3 +190,188 @@ jobs:
             echo '- Resultado: origen, integridad, rutas, manifiesto y sintaxis conformes.'
             echo '- Alcance: solo validacion. Sin FTPS, respaldo remoto, DDL ni publicacion.'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Obtener clave publica de respaldo fijada
+        uses: actions/checkout@v4
+        with:
+          ref: a072375019a07f03e65bddac3c32b101da0707cf
+          path: fuente-clave
+          sparse-checkout: deployment/keys/respaldo-sql-20261121-public.pem
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Preflight FTPS de solo lectura y respaldo cifrado
+        env:
+          FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          python3 - <<'PY'
+          import ftplib, ssl, os, io, hashlib, json, zipfile, posixpath, base64, secrets
+          from pathlib import Path
+          from cryptography.hazmat.primitives import hashes, serialization
+          from cryptography.hazmat.primitives.asymmetric import rsa, padding
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+          def sha(data):
+              return hashlib.sha256(data).hexdigest()
+
+          def need(ok, message):
+              if not ok:
+                  raise SystemExit(message)
+
+          class ReadOnlyFTP:
+              def __init__(self, ftp):
+                  self.ftp = ftp
+                  self.listings = {}
+              def names(self, directory):
+                  if directory not in self.listings:
+                      self.ftp.cwd(directory)
+                      # Do not treat an error, timeout or ambiguous listing as absence.
+                      raw = self.ftp.nlst()
+                      names = set()
+                      for entry in raw:
+                          value = entry.rstrip('/')
+                          if value in {'.', '..', directory + '/.', directory + '/..'}:
+                              continue
+                          if '/' in value:
+                              need(posixpath.dirname(value) == directory, 'Listado FTPS ambiguo')
+                          name = posixpath.basename(value)
+                          need(name not in names and name != '', 'Listado FTPS duplicado o ambiguo')
+                          names.add(name)
+                      self.listings[directory] = names
+                  return self.listings[directory]
+              def read(self, path, allow_absent=False):
+                  parent, name = posixpath.split(path)
+                  # A missing parent is an error, not proof of an absent file.
+                  names = self.names(parent)
+                  need(name in names or not any(x.casefold() == name.casefold() for x in names), 'Colision de mayusculas en produccion')
+                  listed = name in names
+                  buffer = io.BytesIO()
+                  def collect(chunk):
+                      need(buffer.tell() + len(chunk) <= 50 * 1024 * 1024, 'Archivo remoto fuera de limite')
+                      buffer.write(chunk)
+                  try:
+                      self.ftp.retrbinary('RETR ' + path, collect)
+                  except ftplib.error_perm as exc:
+                      if allow_absent and not listed and buffer.tell() == 0 and str(exc).startswith('550'):
+                          return None
+                      raise SystemExit('No se pudo leer archivo remoto esperado: ' + path) from None
+                  need(listed, 'Archivo remoto no listado: ' + path)
+                  return buffer.getvalue()
+
+          def preflight(reader, package):
+              items, blobs, blockers = [], {}, []
+              total = 0
+              for candidate in sorted((package / 'candidato').rglob('*')):
+                  if not candidate.is_file():
+                      continue
+                  key = candidate.relative_to(package / 'candidato').as_posix()
+                  area, relative = key.split('/', 1)
+                  need(area in {'backend', 'frontend'}, 'Area de archivo inesperada')
+                  remote = ('/htdocs/api-v2/' if area == 'backend' else '/htdocs/') + relative
+                  ref = package / 'referencia' / key
+                  expected = sha(ref.read_bytes()) if ref.is_file() else None
+                  live = reader.read(remote, allow_absent=expected is None)
+                  digest = sha(live) if live is not None else None
+                  match = digest == expected
+                  item = dict(path=key, remote=remote, exists=live is not None, sha256=digest,
+                              reference_sha256=expected, candidate_sha256=sha(candidate.read_bytes()), match=match)
+                  items.append(item)
+                  if live is not None:
+                      blobs['archivos/' + key] = live
+                      total += len(live)
+                  if not match:
+                      blockers.append(key)
+                  print(('COINCIDE' if match else 'DIVERGE') + ' ' + key + (' [ausente]' if live is None else ''))
+                  need(total <= 100 * 1024 * 1024, 'Respaldo demasiado grande')
+              for label, path, marker in [('backend-guard', '/htdocs/api-v2/.htaccess', b'Require all denied'),
+                                           ('gateway', '/htdocs/api/index.php', b'rutahd2_api_ready')]:
+                  data = reader.read(path)
+                  need(data is not None, 'Proteccion remota ausente')
+                  blobs['protecciones/' + label] = data
+                  if marker not in data:
+                      blockers.append(label)
+                  items.append(dict(path=label, remote=path, exists=True, sha256=sha(data), protected=True, marker_present=marker in data))
+                  total += len(data)
+                  need(total <= 100 * 1024 * 1024, 'Respaldo demasiado grande')
+              need(items, 'No hay archivos para respaldar')
+              return items, blobs, blockers
+
+          def encrypt_backup(items, blobs, blockers, public_key, metadata):
+              report = dict(**metadata, entries=items, blockers=blockers)
+              buffer = io.BytesIO()
+              with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED) as z:
+                  z.writestr('INVENTARIO.json', json.dumps(report, ensure_ascii=False, indent=2))
+                  for path, data in sorted(blobs.items()):
+                      z.writestr(path, data)
+              plain = buffer.getvalue()
+              with zipfile.ZipFile(io.BytesIO(plain)) as z:
+                  need(z.testzip() is None, 'Respaldo ZIP corrupto')
+                  for name, data in blobs.items():
+                      need(sha(z.read(name)) == sha(data), 'Respaldo interno no coincide')
+              need(isinstance(public_key, rsa.RSAPublicKey) and public_key.key_size >= 2048, 'Clave publica RSA invalida')
+              key, nonce = secrets.token_bytes(32), secrets.token_bytes(12)
+              ciphertext = AESGCM(key).encrypt(nonce, plain, None)
+              need(AESGCM(key).decrypt(nonce, ciphertext, None) == plain, 'Autoverificacion cifrada fallida')
+              wrapped = public_key.encrypt(key, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+              enc = lambda value: base64.b64encode(value).decode('ascii')
+              result = dict(format='rutahd-backup-pub04-v1', algorithm='RSA-OAEP-SHA256+AES-256-GCM',
+                            encrypted_key_b64=enc(wrapped), nonce_b64=enc(nonce), ciphertext_b64=enc(ciphertext),
+                            zip_sha256=sha(plain), public_key_sha256=sha(public_key.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)))
+              return result
+
+          if __name__ == '__main__':
+              password = os.environ.get('FTP_PASSWORD', '')
+              need(bool(password), 'Secreto FTPS no configurado')
+              pub = serialization.load_pem_public_key(Path('fuente-clave/deployment/keys/respaldo-sql-20261121-public.pem').read_bytes())
+              need(isinstance(pub, rsa.RSAPublicKey) and pub.key_size >= 2048, 'Clave de respaldo invalida')
+              try:
+                  with ftplib.FTP_TLS(context=ssl.create_default_context(), timeout=45) as ftp:
+                      ftp.connect('ftpupload.net', 21)
+                      ftp.login('if0_43460400', password)
+                      ftp.prot_p()
+                      ftp.set_pasv(True)
+                      items, blobs, blockers = preflight(ReadOnlyFTP(ftp), Path('paquete'))
+              except (OSError, ftplib.Error) as exc:
+                  raise SystemExit('Error FTPS; no se obtuvo preflight completo: ' + type(exc).__name__) from None
+              metadata = dict(version=os.environ['VERSION'], source_run=os.environ['SOURCE_RUN'], artifact_id=os.environ['ARTIFACT_ID'],
+                              source_zip_sha256=os.environ['EXPECTED_SHA'].lower(), preflight_run=os.environ['GITHUB_RUN_ID'], workflow_sha=os.environ['GITHUB_SHA'])
+              encrypted = encrypt_backup(items, blobs, blockers, pub, metadata)
+              out = Path('respaldo-pub04')
+              out.mkdir(exist_ok=False)
+              (out / 'respaldo.cifrado.json').write_text(json.dumps(encrypted, separators=(',', ':')), encoding='utf-8')
+              status = dict(**metadata, candidates=sum(not i.get('protected',False) for i in items),
+                            existing=sum(i['exists'] for i in items if not i.get('protected',False)),
+                            absent=sum(not i['exists'] for i in items), blockers=blockers,
+                            encrypted_sha256=sha((out / 'respaldo.cifrado.json').read_bytes()))
+              (out / 'resultado.json').write_text(json.dumps(status, indent=2), encoding='utf-8')
+              print('Respaldo cifrado generado. Divergencias:', len(blockers))
+          PY
+      - name: Conservar respaldo cifrado y resultado de preflight
+        uses: actions/upload-artifact@v4
+        with:
+          name: rutahd-pub04-${{ inputs.version }}-${{ github.run_id }}
+          path: respaldo-pub04/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Evaluar preflight sin autorizar publicacion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          r=json.loads(Path('respaldo-pub04/resultado.json').read_text())
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
+              f.write('\n## PUB04 — Preflight FTPS de archivos\n')
+              for name in ('candidates','existing','absent','encrypted_sha256'):
+                  f.write(f'- {name}: {r[name]}\n')
+              f.write(f'- Divergencias: {len(r["blockers"])}\n')
+              for item in r['blockers']:
+                  f.write(f'  - {item}\n')
+              f.write('- Solo lectura FTPS. Sin DDL ni subida a InfinityFree.\n')
+              f.write('- Pendientes: DDL/atribucion, dependencias, llave privada y prueba de restauracion.\n')
+          if r['blockers']:
+              raise SystemExit('Preflight detenido por divergencias. Respaldo cifrado conservado.')
+          PY

@@ -42,3 +42,6 @@ Verificar dependencias reales de Laravel (incluido autoload instalado y middlewa
 
 ## Mantenimiento de conocimiento
 Por instrucción del titular del 28-11-2026: actualizar diario cronológico, reglas operativas y fuentes técnicas al cerrar cada avance, corrección o decisión relevante. Registrar evidencia, commit/run, alcance real, estado, restricciones, decisiones no validadas y pendientes. No duplicar pruebas cerradas. Incluir los accesos permanentes de edición y ejecución al entregar YAML nuevo.
+
+## Actualización PUB05 — 28-11-2026
+Run 46119415230 SUCCESS, commit d5d1c41d6e2fb7846f3457d62a81dcbf89216f50. 29 archivos planificados, 29 fallos inyectados restaurados en memoria, cero bloqueos. Siete dependencias de código coinciden byte a byte mediante Git blob; vendor/autoload.php comprobado solo presencia, no ejecución runtime. Respaldo cifrado https://github.com/msanzana/rutahyd2/actions/runs/46119415230/artifacts/15252996403. Sustituye el estado pendiente PUB05 anterior; no hubo escritura productiva. Mantener pendientes de PUB06/PUB07 y no afirmar restauración real a partir de simulación.

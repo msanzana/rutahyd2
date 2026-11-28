@@ -1,3 +1,4 @@
+
 name: Ruta H&D - Publicaciones
 
 on:
@@ -5,16 +6,28 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  comprobacion:
-    name: Comprobar entorno de publicacion
+  validacion:
+    name: Validar paquete V109D6C
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Verificar funcionamiento
+      - name: Descargar paquete de revision
+        uses: actions/download-artifact@v4
+        with:
+          name: rutahd-v109d6c-paquete-revision
+          run-id: 45927132714
+          github-token: ${{ github.token }}
+          path: paquete
+
+      - name: Comprobar integridad
+        working-directory: paquete
         run: |
-          echo "Ruta H&D"
-          echo "Workflow operativo"
-          echo "Entorno de comprobacion correcto"
-          echo "Sin modificaciones en produccion"
+          set -euo pipefail
+          sha256sum -c SHA256SUMS
+          test "$(find candidato/backend -type f | wc -l)" -eq 24
+          test "$(find candidato/frontend -type f | wc -l)" -eq 5
+          echo "V109D6C - INTEGRIDAD CORRECTA"
+          cat ESTADO.txt

@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   validacion:
-    name: PUB04B - Reconciliar referencias sin publicar
+    name: PUB05 - Preparar y simular transferencia fullstack sin publicar
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     if: github.ref == 'refs/heads/main'
@@ -434,7 +434,7 @@ jobs:
                   require(check.returncode==0,'PHP fusionado no supera lint')
                   return result
 
-          def reconcile_v109(blobs, package, diagnostics):
+          def reconcile_v109(blobs, package, diagnostics, previews):
               # Exact hashes independently observed in successful diagnostic steps of run 46118606576.
               pins={
                 'backend/routes/api.php':('02e1a36575bab308d19501f183337a7e856f5a9455de41845b7a4d0e1aacba05','cf6ac825036a517a39c80eef0f257d97034d35b56b193043dc058eaf1a04f9d9','bfb672f7a4406bdf0a6c839e26ccd306d824c8bf24f327c3037b02a7347aabcb'),
@@ -454,12 +454,84 @@ jobs:
                       else:
                           if patch_html_v109(base)!=candidate: raise ValueError('El delta HTML candidato no coincide con los cinco cambios aprobados para revision')
                           result=patch_html_v109(live)
+                      if name=='frontend/index.html' and sha(result)!='9d6dcf58387520070a93216d385b7b23470325625cfbcbb38d65f914fc71ebe5': raise ValueError('HTML distinto de PUB04B')
+                      previews[name]=result
                       item.update(reconciled=True, preview_sha256=sha(result), bytes=len(result))
                   except (ValueError,KeyError,StopIteration,OSError,UnicodeError,RuntimeError) as exc:
                       item['reason']=str(exc)
                   print('RECONCILIACION '+json.dumps(item,sort_keys=True))
                   results.append(item)
               return results
+
+          def audit_dependencies(reader):
+              # Exact Git blob references from the pinned candidate, checked against remote bytes.
+              pins = {
+                  'app/Http/Controllers/OrdenesCompraControlador.php':'663d9bcbc08e63732197ffce3cb8186c3783f1e9',
+                  'app/Http/Middleware/AutorizarPermiso.php':'f244bd55a9a1d517a4755113eb1b703c9ae27fdb',
+                  'app/Services/ContextoCompras.php':'f91a4051ae911692175539f45c94b1d5d1530d95',
+                  'app/Services/CostoPromedioPonderado.php':'887a07dfd79217df9103b0cba54fc697e5515971',
+                  'app/Services/LibroComprasInterno.php':'d78b3f1100b0aae1a18195dcc2625b740aee176d',
+                  'bootstrap/app.php':'5d7e1150a7b4a0cdb611af4e6575c37bc1a07f2a',
+                  'composer.json':'837e28d6259d74c79dbe33698c2129cd74b6eb6e',
+              }
+              checks=[]
+              for path, expected in pins.items():
+                  data=reader.read('/htdocs/api-v2/'+path)
+                  actual=hashlib.sha1(('blob '+str(len(data))+'\0').encode()+data).hexdigest()
+                  checks.append(dict(path=path, expected_blob=expected, actual_blob=actual, match=actual==expected))
+                  print('DEPENDENCIA '+path+' '+('OK' if actual==expected else 'DIVERGE'))
+              auto=reader.read('/htdocs/api-v2/vendor/autoload.php')
+              checks.append(dict(path='vendor/autoload.php', match=bool(auto and b'<?php' in auto), presence_only=True))
+              return checks
+
+          def prepare_plan(items, blobs, package, previews):
+              def rank(name):
+                  area, rel=name.split('/',1)
+                  if area=='backend': return (1 if rel=='routes/api.php' else 0, name)
+                  return (3 if rel=='index.html' else 2, name)
+              targets={}
+              initial={}
+              rows=[]
+              paths=sorted((x for x in items if not x.get('protected')),key=lambda x:rank(x['path']))
+              need(bool(paths), 'Plan vacio')
+              for item in paths:
+                  name=item['path']
+                  source=(package/'candidato'/name).read_bytes()
+                  need(sha(source)==item['candidate_sha256'],'Candidato modificado: '+name)
+                  target=previews.get(name,source)
+                  initial[name]=blobs.get('archivos/'+name)
+                  before=initial[name]
+                  need((sha(before) if before is not None else None)==item['sha256'],'Respaldo no coincide: '+name)
+                  targets[name]=target
+                  action='sin_cambios' if before==target else ('crear' if before is None else 'reemplazar')
+                  rows.append(dict(path=name, remote=item['remote'], action=action, before_sha256=item['sha256'], after_sha256=sha(target), reconciled=name in previews))
+              return rows, initial, targets
+
+          def simulate_transfer(rows, initial, targets, fail_after=None):
+              # Local in-memory transport model. No network calls, no remote writes.
+              current=dict(initial)
+              journal=[]
+              mutable=[r for r in rows if r['action']!='sin_cambios']
+              try:
+                  for i,r in enumerate(mutable,1):
+                      name=r['path']
+                      before=current[name]
+                      if (sha(before) if before is not None else None)!=r['before_sha256']:
+                          raise ValueError('Concurrent modification')
+                      journal.append(name)
+                      if fail_after==i:
+                          current[name]=b'partial write simulation'
+                          raise RuntimeError('Injected transfer failure')
+                      current[name]=targets[name]
+                      if sha(current[name])!=r['after_sha256']:
+                          raise ValueError('Verification failed')
+                  if current!=targets:
+                      raise ValueError('Final verification failed')
+                  return 'success'
+              except (ValueError,RuntimeError):
+                  for name in reversed(journal): current[name]=initial[name]
+                  if current!=initial: raise ValueError('Local rollback failed')
+                  return 'restored'
 
           def encrypt_backup(items, blobs, blockers, public_key, metadata):
               report = dict(**metadata, entries=items, blockers=blockers)
@@ -495,7 +567,9 @@ jobs:
                       ftp.login('if0_43460400', password)
                       ftp.prot_p()
                       ftp.set_pasv(True)
-                      items, blobs, blockers = preflight(ReadOnlyFTP(ftp), Path('paquete'))
+                      reader=ReadOnlyFTP(ftp)
+                      items, blobs, blockers = preflight(reader, Path('paquete'))
+                      dependencies = audit_dependencies(reader) if os.environ['VERSION']=='V109D6C' and os.environ['ARTIFACT_ID']=='15166647801' else []
               except (OSError, ftplib.Error) as exc:
                   raise SystemExit('Error FTPS; no se obtuvo preflight completo: ' + type(exc).__name__) from None
               metadata = dict(version=os.environ['VERSION'], source_run=os.environ['SOURCE_RUN'], artifact_id=os.environ['ARTIFACT_ID'],
@@ -505,12 +579,28 @@ jobs:
                   diagnostics = diagnose_v108(blobs, Path('paquete'), Path('historico-v108a'), Path('historico-v108d'))
               metadata['diagnostics'] = diagnostics
               reconciliations = []
+              previews = {}
               if diagnostics and os.environ['EXPECTED_SHA'].lower() == 'bb3180722da670a07ab3501e43b53aeca9efac8a0741f206eb98a8a8679f8f26':
-                  reconciliations = reconcile_v109(blobs, Path('paquete'), diagnostics)
+                  reconciliations = reconcile_v109(blobs, Path('paquete'), diagnostics, previews)
               metadata['reconciliations'] = reconciliations
               metadata['raw_divergences'] = list(blockers)
               resolved = {x['path'] for x in reconciliations if x['reconciled']}
               blockers = [x for x in blockers if x not in resolved]
+              metadata['dependencies']=dependencies
+              blockers += ['dependencia:'+d['path'] for d in dependencies if not d['match']]
+              if not dependencies: blockers.append('contrato_dependencias_no_definido_para_version')
+              plan=[]
+              tests=0
+              if not blockers:
+                  plan, initial, targets=prepare_plan(items, blobs, Path('paquete'), previews)
+                  need(simulate_transfer(plan, initial, targets)=='success','Simulacion de transferencia fallo')
+                  tests=sum(r['action']!='sin_cambios' for r in plan)
+                  for i in range(1,tests+1):
+                      need(simulate_transfer(plan, initial, targets, i)=='restored','Simulacion de restauracion fallo')
+                  print('PUB05_SIMULACION_OK archivos='+str(len(plan))+' fallos_inyectados='+str(tests))
+              metadata['plan']=plan
+              metadata['local_rollback_cases']=tests
+              metadata['publication_enabled']=False
               encrypted = encrypt_backup(items, blobs, blockers, pub, metadata)
               out = Path('respaldo-pub04')
               out.mkdir(exist_ok=False)
@@ -525,7 +615,7 @@ jobs:
       - name: Conservar respaldo cifrado y resultado de preflight
         uses: actions/upload-artifact@v4
         with:
-          name: rutahd-pub04b-${{ inputs.version }}-${{ github.run_id }}
+          name: rutahd-pub05-${{ inputs.version }}-${{ github.run_id }}
           path: respaldo-pub04/
           retention-days: 30
           if-no-files-found: error
@@ -538,7 +628,7 @@ jobs:
           from pathlib import Path
           r=json.loads(Path('respaldo-pub04/resultado.json').read_text())
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
-              f.write('\n## PUB04B — Preflight y reconciliacion de referencias\n')
+              f.write('\n## PUB05 — Plan y simulacion de transferencia\n')
               for name in ('candidates','existing','absent','encrypted_sha256'):
                   f.write(f'- {name}: {r[name]}\n')
               f.write(f'- Divergencias: {len(r["blockers"])}\n')
@@ -549,8 +639,10 @@ jobs:
               f.write(f'- Divergencias originales: {len(r.get("raw_divergences", []))}\n')
               for item in r.get('reconciliations', []):
                   f.write(f'- Reconciliacion {item["path"]}: {item["reconciled"]}; hash vista previa={item.get("preview_sha256", "no disponible")}\n')
+              f.write(f'- Archivos planificados: {len(r.get("plan", []))}\n')
+              f.write(f'- Restauraciones simuladas en memoria: {r.get("local_rollback_cases", 0)}\n')
               f.write('- Solo lectura FTPS. Sin DDL ni subida a InfinityFree.\n')
-              f.write('- Pendientes: DDL/atribucion, dependencias, llave privada y prueba de restauracion.\n')
+              f.write('- Pendientes: DDL/atribucion, dependencias instaladas y runtime, llave privada, restauracion real y autorizacion de escritura.\n')
           if r['blockers']:
               raise SystemExit('Preflight detenido por divergencias. Respaldo cifrado conservado.')
           PY

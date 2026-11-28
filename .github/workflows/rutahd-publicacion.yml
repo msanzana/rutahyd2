@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   validacion:
-    name: PUB04 - Validar y respaldar sin publicar
+    name: PUB04A - Diagnosticar referencias productivas sin publicar
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     if: github.ref == 'refs/heads/main'
@@ -198,6 +198,22 @@ jobs:
           sparse-checkout: deployment/keys/respaldo-sql-20261121-public.pem
           sparse-checkout-cone-mode: false
           persist-credentials: false
+      - name: Recuperar respaldo historico V108A
+        if: inputs.version == 'V109D6C' && inputs.artifact_id == '15166647801'
+        uses: actions/download-artifact@v4
+        with:
+          name: rutahd-v108a-respaldo-previo
+          run-id: 45840030652
+          github-token: ${{ github.token }}
+          path: historico-v108a
+      - name: Recuperar respaldo historico V108D
+        if: inputs.version == 'V109D6C' && inputs.artifact_id == '15166647801'
+        uses: actions/download-artifact@v4
+        with:
+          name: rutahd-v108d-respaldo-previo
+          run-id: 45885877592
+          github-token: ${{ github.token }}
+          path: historico-v108d
       - name: Preflight FTPS de solo lectura y respaldo cifrado
         env:
           FTP_PASSWORD: ${{ secrets.INFINITYFREE_FTP_PASSWORD }}
@@ -298,6 +314,56 @@ jobs:
               need(items, 'No hay archivos para respaldar')
               return items, blobs, blockers
 
+          def diagnose_v108(blobs, package, historical_a, historical_d):
+              import subprocess, tempfile, difflib
+              def historical_file(root, name):
+                  matches = [p for p in root.rglob(name) if p.is_file() and not p.is_symlink()]
+                  if len(matches) != 1:
+                      return None
+                  return matches[0].read_bytes()
+              route_a = historical_file(historical_a, 'routes.guard')
+              route_d = historical_file(historical_d, 'routes.guard')
+              old_index = historical_file(historical_d, 'index.html')
+              expected_index = None
+              if old_index is not None:
+                  old_js = b'src="assets/js/contexto-sucursal-v107.js?v=20261126-v108cr2"'
+                  new_js = b'src="assets/js/contexto-sucursal-v107.js?v=20261126-v108d"'
+                  old_css = b'assets/css/selector-sucursal-v108c.css?v=20261126-v108cr2'
+                  new_css = b'assets/css/selector-sucursal-v108c.css?v=20261126-v108d'
+                  if old_index.count(old_js) == 1 and old_index.count(old_css) == 1:
+                      expected_index = old_index.replace(old_js, new_js, 1).replace(old_css, new_css, 1)
+              results = []
+              for name, expected in [('backend/routes/api.php', route_d), ('frontend/index.html', expected_index)]:
+                  live = blobs.get('archivos/' + name)
+                  base = (package / 'referencia' / name).read_bytes()
+                  candidate = (package / 'candidato' / name).read_bytes()
+                  result = dict(path=name, live_sha256=sha(live) if live is not None else None,
+                                reference_sha256=sha(base), candidate_sha256=sha(candidate),
+                                historical_sha256=sha(expected) if expected is not None else None,
+                                matches_historical=live is not None and expected is not None and live == expected)
+                  if name == 'backend/routes/api.php':
+                      result['historical_routes_agree'] = route_a is not None and route_d is not None and route_a == route_d
+                      result['v108a_routes_sha256'] = sha(route_a) if route_a is not None else None
+                  if live is not None:
+                      try:
+                          live_lines, base_lines = live.decode('utf-8').splitlines(), base.decode('utf-8').splitlines()
+                          diff = difflib.SequenceMatcher(None, base_lines, live_lines, autojunk=False)
+                          result['live_vs_reference_added_lines'] = sum(j2-j1 for op,i1,i2,j1,j2 in diff.get_opcodes() if op in ('insert','replace'))
+                          result['live_vs_reference_removed_lines'] = sum(i2-i1 for op,i1,i2,j1,j2 in diff.get_opcodes() if op in ('delete','replace'))
+                          with tempfile.TemporaryDirectory() as temp:
+                              paths = [Path(temp)/n for n in ('live','base','candidate')]
+                              for p, data in zip(paths,(live,base,candidate)):
+                                  p.write_bytes(data)
+                              merge = subprocess.run(['git','merge-file','-p', *map(str,paths)], capture_output=True, timeout=30)
+                              result['merge_preview'] = 'clean' if merge.returncode == 0 else ('conflicts' if 1 <= merge.returncode <= 127 else 'error')
+                              if merge.returncode == 0:
+                                  result['merge_preview_sha256'] = sha(merge.stdout)
+                      except (UnicodeError, OSError, subprocess.TimeoutExpired):
+                          result['merge_preview'] = 'error'
+                  print('DIAGNOSTICO ' + json.dumps(result, sort_keys=True))
+                  results.append(result)
+              return results
+
           def encrypt_backup(items, blobs, blockers, public_key, metadata):
               report = dict(**metadata, entries=items, blockers=blockers)
               buffer = io.BytesIO()
@@ -337,6 +403,10 @@ jobs:
                   raise SystemExit('Error FTPS; no se obtuvo preflight completo: ' + type(exc).__name__) from None
               metadata = dict(version=os.environ['VERSION'], source_run=os.environ['SOURCE_RUN'], artifact_id=os.environ['ARTIFACT_ID'],
                               source_zip_sha256=os.environ['EXPECTED_SHA'].lower(), preflight_run=os.environ['GITHUB_RUN_ID'], workflow_sha=os.environ['GITHUB_SHA'])
+              diagnostics = []
+              if os.environ['VERSION'] == 'V109D6C' and os.environ['ARTIFACT_ID'] == '15166647801':
+                  diagnostics = diagnose_v108(blobs, Path('paquete'), Path('historico-v108a'), Path('historico-v108d'))
+              metadata['diagnostics'] = diagnostics
               encrypted = encrypt_backup(items, blobs, blockers, pub, metadata)
               out = Path('respaldo-pub04')
               out.mkdir(exist_ok=False)
@@ -364,12 +434,14 @@ jobs:
           from pathlib import Path
           r=json.loads(Path('respaldo-pub04/resultado.json').read_text())
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
-              f.write('\n## PUB04 — Preflight FTPS de archivos\n')
+              f.write('\n## PUB04A — Preflight FTPS y diagnostico de referencias\n')
               for name in ('candidates','existing','absent','encrypted_sha256'):
                   f.write(f'- {name}: {r[name]}\n')
               f.write(f'- Divergencias: {len(r["blockers"])}\n')
               for item in r['blockers']:
                   f.write(f'  - {item}\n')
+              for item in r.get('diagnostics', []):
+                  f.write(f'- Diagnostico {item["path"]}: coincide historico={item["matches_historical"]}; merge preliminar={item.get("merge_preview", "no disponible")}\n')
               f.write('- Solo lectura FTPS. Sin DDL ni subida a InfinityFree.\n')
               f.write('- Pendientes: DDL/atribucion, dependencias, llave privada y prueba de restauracion.\n')
           if r['blockers']:

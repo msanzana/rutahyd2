@@ -45,3 +45,6 @@ Por instrucción del titular del 28-11-2026: actualizar diario cronológico, reg
 
 ## Actualización PUB05 — 28-11-2026
 Run 46119415230 SUCCESS, commit d5d1c41d6e2fb7846f3457d62a81dcbf89216f50. 29 archivos planificados, 29 fallos inyectados restaurados en memoria, cero bloqueos. Siete dependencias de código coinciden byte a byte mediante Git blob; vendor/autoload.php comprobado solo presencia, no ejecución runtime. Respaldo cifrado https://github.com/msanzana/rutahyd2/actions/runs/46119415230/artifacts/15252996403. Sustituye el estado pendiente PUB05 anterior; no hubo escritura productiva. Mantener pendientes de PUB06/PUB07 y no afirmar restauración real a partir de simulación.
+
+## PUB06A preparado
+Ensayo de transporte TLS real pero aislado en 127.0.0.1 del runner mediante servidor efímero, credenciales independientes, certificado verificado y guardas de escritura por socket loopback. Verificación de bytes, rollback con nueva conexión tras fallos parciales, comprobación de restauración y borrado de nuevos. Producción sigue solo lectura. Validación estática local realizada; prueba FTPS integrada aún pendiente de ejecución GitHub. No sustituye prueba de recuperación con clave privada, DDL49/atribución, runtime y verificación productiva.

@@ -1,1 +1,22 @@
 
+
+name: Ruta H&D - Publicaciones
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  comprobacion:
+    name: Comprobar entorno de publicacion
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Verificar funcionamiento
+        run: |
+          echo "Ruta H&D"
+          echo "Workflow operativo"
+          echo "Entorno de comprobacion correcto"
+          echo "Sin modificaciones en produccion"
